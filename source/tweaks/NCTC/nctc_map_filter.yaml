@@ -1,48 +1,18 @@
-Mappins.NCTCStopVariant:
-  $type: gamedataMappinVariant_Record
-  # Reserved for NCTC. Fuel/Odometer uses CPO_PingGoHereVariant.
-  enumName: CPO_PingDoorVariant
-
 WorldMap.NCTCStopsFilter:
-  $type: gamedataWorldMapFilter_Record
-  enumName: CustomFilter
+  $type: WorldMapFilter_Record
+  # CustomFilter is global: all entries using it share one state. Courier is
+  # currently unused in this installation and gives NCTC an independent toggle.
+  enumName: Courier
 
 WorldMap.NCTCStopsFilterGroup:
-  $type: gamedataMappinUIFilterGroup_Record
+  $type: MappinUIFilterGroup_Record
   filterName: UI-MappinTypes-NCTCStops
   filterType: WorldMap.NCTCStopsFilter
-  mappins:
-    - Mappins.NCTCStopVariant
-  shouldCollectMappins: false
+  mappins: [ Mappins.PointOfInterest_ServicePointMeleeTrainerVariant ]
+  shouldCollectMappins: true
 
 WorldMap.WorldMapCustomFiltersList.list:
   - !append-once WorldMap.NCTCStopsFilterGroup
 
-# The quick-filter entry shows NCTC alone; the custom-filter entry makes it
-# independently checkable alongside other map categories.
 WorldMap.WorldMapQuickFiltersList.list:
-  - !append-once WorldMap.NCTCStopsFilterGroup
-
-Mappins.NCTCStopMappinDefinition:
-  $type: gamedataMappinDefinition_Record
-  showInWorld: false
-  showOnMap: true
-  showOnMinimap: false
-  visibilityRange: 0
-  possibleVariants:
-    - Mappins.NCTCStopVariant
-
-WorldMappinUIProfile.NCTCStop:
-  $base: WorldMappinUIProfile.Quest
-
-WorldMap.ZoomLevelImportant.mappinFilterGroups:
-  - !append-once WorldMap.NCTCStopsFilterGroup
-
-WorldMap.ZoomLevelAllMappins.mappinFilterGroups:
-  - !append-once WorldMap.NCTCStopsFilterGroup
-
-WorldMap.ZoomLevelExtraMappins.mappinFilterGroups:
-  - !append-once WorldMap.NCTCStopsFilterGroup
-
-WorldMap.ZoomLevelSubDistricts.mappinFilterGroups:
   - !append-once WorldMap.NCTCStopsFilterGroup
