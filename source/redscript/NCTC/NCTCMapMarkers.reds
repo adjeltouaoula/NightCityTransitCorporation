@@ -28,7 +28,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
 
   // Map-planning coordinates, intentionally independent from physical terminal,
   // kerb, and traffic approach coordinates which will be surveyed later.
-  private func GetStops() -> array<NCTCStopDefinition> {
+  public func GetStops() -> array<NCTCStopDefinition> {
     let stops: array<NCTCStopDefinition>;
 
     // 17 — Central Loop
@@ -193,4 +193,37 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
     inkTextRef.SetText(this.m_titleText, "NCTC " + stopData.line + " — " + stopData.stop);
     inkTextRef.SetText(this.m_descText, "Map-planning candidate. Physical terminal location to be surveyed.");
   };
+}
+
+// Experimental map-only route overlay. This uses the projected line widget
+// already owned by the world-map mappin container, so it follows the map's
+// camera rather than becoming a fixed screen-space drawing. It is deliberately
+// limited to line 22 until its projection and visual weight are validated.
+@addMethod(WorldMapMenuGameController)
+private final func NCTCShowLine22PlanningTrace() -> Void {
+  let lineWidget: wref<inkLinePattern>;
+  let system: ref<NCTCMapMarkerSystem>;
+  let stops: array<NCTCStopDefinition>;
+  let index: Int32 = 0;
+
+  lineWidget = this.autodrivePathWidget.widget as inkLinePattern;
+  if !IsDefined(lineWidget) { return; };
+  system = NCTCMapMarkerSystem.GetInstance(this.GetPlayerControlledObject().GetGame());
+  if !IsDefined(system) { return; };
+  stops = system.GetStops();
+  while index < ArraySize(stops) {
+    if Equals(stops[index].line, "22") {
+      lineWidget.AddVertex(new Vector2(stops[index].position.X, stops[index].position.Y));
+    };
+    index += 1;
+  };
+  lineWidget.SetTintColor(new HDRColor(0.37, 0.96, 1.00, 1.00));
+  lineWidget.SetVisible(true);
+}
+
+@wrapMethod(WorldMapMenuGameController)
+protected cb func OnInitialize() -> Bool {
+  let result: Bool = wrappedMethod();
+  this.NCTCShowLine22PlanningTrace();
+  return result;
 }
