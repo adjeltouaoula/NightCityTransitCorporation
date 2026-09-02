@@ -165,19 +165,6 @@ protected func UpdateIcon() -> Void {
   if IsDefined(data) { this.ApplyNCTCStopIcon(data.line); };
 }
 
-// The map UI can reset its standard tint after UpdateIcon. Reapply NCTC's
-// line colour at the end of its render update.
-@wrapMethod(BaseWorldMapMappinController)
-protected func Update() -> Void {
-  let data: ref<NCTCStopMappinData>;
-  let mappin: ref<IMappin>;
-  wrappedMethod();
-  mappin = this.GetMappin();
-  if !IsDefined(mappin) { return; };
-  data = mappin.GetScriptData() as NCTCStopMappinData;
-  if IsDefined(data) { this.ApplyNCTCStopIcon(data.line); };
-}
-
 @wrapMethod(WorldMapTooltipController)
 public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<WorldMapMenuGameController>) -> Void {
   let stopData: ref<NCTCStopMappinData>;
