@@ -14,6 +14,6 @@ public class NCTCLocalizationProvider extends ModLocalizationProvider {
 
 public class NCTCEnglish extends ModLocalizationPackage {
   protected func DefineTexts() -> Void {
-    this.Text("UI-MappinTypes-NCTCStops", "NCTC Stops");
+    this.Text("UI-MappinTypes-NCTCStops", "NCTC Lines");
   }
 }

@@ -1,13 +1,42 @@
+Mappins.NCTCStopVariant:
+  $type: gamedataMappinVariant_Record
+  enumName: CPO_PingGoHereVariant
+
 WorldMap.NCTCStopsFilter:
-  $type: WorldMapFilter_Record
-  enumName: Courier
+  $type: gamedataWorldMapFilter_Record
+  enumName: CustomFilter
 
 WorldMap.NCTCStopsFilterGroup:
-  $type: MappinUIFilterGroup_Record
+  $type: gamedataMappinUIFilterGroup_Record
   filterName: UI-MappinTypes-NCTCStops
   filterType: WorldMap.NCTCStopsFilter
-  mappins: [ Mappins.PointOfInterest_ServicePointMeleeTrainerVariant ]
-  shouldCollectMappins: true
+  mappins:
+    - Mappins.NCTCStopVariant
+  shouldCollectMappins: false
 
 WorldMap.WorldMapCustomFiltersList.list:
-  - !append WorldMap.NCTCStopsFilterGroup
+  - !append-once WorldMap.NCTCStopsFilterGroup
+
+Mappins.NCTCStopMappinDefinition:
+  $type: gamedataMappinDefinition_Record
+  showInWorld: false
+  showOnMap: true
+  showOnMinimap: false
+  visibilityRange: 0
+  possibleVariants:
+    - Mappins.NCTCStopVariant
+
+WorldMappinUIProfile.NCTCStop:
+  $base: WorldMappinUIProfile.Quest
+
+WorldMap.ZoomLevelImportant.mappinFilterGroups:
+  - !append-once WorldMap.NCTCStopsFilterGroup
+
+WorldMap.ZoomLevelAllMappins.mappinFilterGroups:
+  - !append-once WorldMap.NCTCStopsFilterGroup
+
+WorldMap.ZoomLevelExtraMappins.mappinFilterGroups:
+  - !append-once WorldMap.NCTCStopsFilterGroup
+
+WorldMap.ZoomLevelSubDistricts.mappinFilterGroups:
+  - !append-once WorldMap.NCTCStopsFilterGroup

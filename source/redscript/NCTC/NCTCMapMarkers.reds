@@ -111,10 +111,8 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
       markerData = new NCTCStopMappinData();
       markerData.line = stops[index].line;
       markerData.stop = stops[index].stop;
-      data.mappinType = t"Mappins.DefaultStaticMappin";
-      // A static service-point variant has a complete world-map UI profile.
-      // Racing mappins do not, so they were registered but never drawn.
-      data.variant = gamedataMappinVariant.ServicePointMeleeTrainerVariant;
+      data.mappinType = t"Mappins.NCTCStopMappinDefinition";
+      data.variant = gamedataMappinVariant.CPO_PingGoHereVariant;
       data.active = true;
       data.scriptData = markerData;
       ArrayPush(this.m_registeredMappins, system.RegisterMappin(data, stops[index].position));
@@ -147,17 +145,34 @@ protected cb func OnDetach() -> Bool {
 }
 
 @addMethod(BaseMappinBaseController)
-protected final func ApplyNCTCStopIcon() -> Void {
+protected final func ApplyNCTCStopIcon(line: String) -> Void {
   inkImageRef.SetAtlasResource(this.iconWidget, r"base\\gameplay\\gui\\common\\icons\\mappin_icons.inkatlas");
   inkImageRef.SetTexturePart(this.iconWidget, n"fast_travel");
-  inkWidgetRef.SetTintColor(this.iconWidget, new HDRColor(0.10, 0.88, 0.32, 1.00));
+  switch line {
+    case "17": inkWidgetRef.SetTintColor(this.iconWidget, new HDRColor(0.15, 0.65, 1.00, 1.00)); return;
+    case "22": inkWidgetRef.SetTintColor(this.iconWidget, new HDRColor(0.10, 0.90, 0.72, 1.00)); return;
+    case "23": inkWidgetRef.SetTintColor(this.iconWidget, new HDRColor(1.00, 0.82, 0.12, 1.00)); return;
+    case "51": inkWidgetRef.SetTintColor(this.iconWidget, new HDRColor(1.00, 0.43, 0.10, 1.00)); return;
+    case "68": inkWidgetRef.SetTintColor(this.iconWidget, new HDRColor(0.70, 0.38, 1.00, 1.00)); return;
+    case "72": inkWidgetRef.SetTintColor(this.iconWidget, new HDRColor(1.00, 0.20, 0.35, 1.00)); return;
+  };
 }
 
 @wrapMethod(BaseWorldMapMappinController)
 protected func UpdateIcon() -> Void {
   wrappedMethod();
   let data: ref<NCTCStopMappinData> = this.GetMappin().GetScriptData() as NCTCStopMappinData;
-  if IsDefined(data) { this.ApplyNCTCStopIcon(); };
+  if IsDefined(data) { this.ApplyNCTCStopIcon(data.line); };
+}
+
+// The map UI can reset its standard tint after UpdateIcon. Reapply NCTC's
+// line colour at the end of its render update.
+@wrapMethod(BaseWorldMapMappinController)
+protected func Update() -> Void {
+  let data: ref<NCTCStopMappinData>;
+  wrappedMethod();
+  data = this.GetMappin().GetScriptData() as NCTCStopMappinData;
+  if IsDefined(data) { this.ApplyNCTCStopIcon(data.line); };
 }
 
 @wrapMethod(WorldMapTooltipController)
