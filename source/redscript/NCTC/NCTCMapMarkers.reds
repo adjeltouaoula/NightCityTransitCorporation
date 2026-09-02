@@ -7,8 +7,24 @@ public struct NCTCStopDefinition {
 }
 
 public class NCTCStopMappinData extends MappinScriptData {
-  public let line: String;
-  public let stop: String;
+  public let lines: array<String>;
+  public let stops: array<String>;
+  public let isHub: Bool;
+}
+
+public class NCTCHubDefinition extends IScriptable {
+  public let position: Vector4;
+  public let lines: array<String>;
+  public let stops: array<String>;
+
+  public func AddService(line: String, stop: String) -> Void {
+    ArrayPush(this.lines, line);
+    ArrayPush(this.stops, stop);
+  }
+
+  public func IsHub() -> Bool {
+    return ArraySize(this.lines) > 1;
+  }
 }
 
 public class NCTCMapMarkerSystem extends ScriptableSystem {
@@ -96,26 +112,57 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     return stops;
   }
 
+  private func GetHubs() -> array<ref<NCTCHubDefinition>> {
+    let hubs: array<ref<NCTCHubDefinition>>;
+    let stops: array<NCTCStopDefinition> = this.GetStops();
+    let hub: ref<NCTCHubDefinition>;
+    let index: Int32 = 0;
+    let hubIndex: Int32 = 0;
+    let found: Bool;
+
+    while index < ArraySize(stops) {
+      found = false;
+      hubIndex = 0;
+      while hubIndex < ArraySize(hubs) {
+        if Vector4.Distance(hubs[hubIndex].position, stops[index].position) < 0.10 {
+          hubs[hubIndex].AddService(stops[index].line, stops[index].stop);
+          found = true;
+          break;
+        };
+        hubIndex += 1;
+      };
+      if !found {
+        hub = new NCTCHubDefinition();
+        hub.position = stops[index].position;
+        hub.AddService(stops[index].line, stops[index].stop);
+        ArrayPush(hubs, hub);
+      };
+      index += 1;
+    };
+    return hubs;
+  }
+
   public func RegisterAllMarkers() -> Void {
     let data: MappinData;
     let markerData: ref<NCTCStopMappinData>;
     let system: ref<MappinSystem>;
-    let stops: array<NCTCStopDefinition>;
+    let hubs: array<ref<NCTCHubDefinition>>;
     let index: Int32 = 0;
 
     this.UnregisterAllMarkers();
     system = GameInstance.GetMappinSystem(this.GetGameInstance());
     if !IsDefined(system) { return; };
-    stops = this.GetStops();
-    while index < ArraySize(stops) {
+    hubs = this.GetHubs();
+    while index < ArraySize(hubs) {
       markerData = new NCTCStopMappinData();
-      markerData.line = stops[index].line;
-      markerData.stop = stops[index].stop;
+      markerData.lines = hubs[index].lines;
+      markerData.stops = hubs[index].stops;
+      markerData.isHub = hubs[index].IsHub();
       data.mappinType = t"Mappins.NCTCStopMappinDefinition";
       data.variant = gamedataMappinVariant.CPO_PingDoorVariant;
       data.active = true;
       data.scriptData = markerData;
-      ArrayPush(this.m_registeredMappins, system.RegisterMappin(data, stops[index].position));
+      ArrayPush(this.m_registeredMappins, system.RegisterMappin(data, hubs[index].position));
       index += 1;
     };
   }
@@ -145,20 +192,24 @@ protected cb func OnDetach() -> Bool {
 }
 
 @addMethod(BaseMappinBaseController)
-protected final func ApplyNCTCStopIcon(line: String) -> Void {
+protected final func ApplyNCTCStopIcon(data: ref<NCTCStopMappinData>) -> Void {
   let icon: wref<inkImage>;
   let color: CName = n"MainColors.Green";
   let useCustomOrange: Bool = false;
 
   // Colours identify a route while all stops remain under the one NCTC map
   // filter.  No vanilla filter category is repurposed for individual lines.
-  switch line {
-    case "17": color = n"MainColors.Green"; break;
-    case "22": color = n"MainColors.Blue"; break;
-    case "23": color = n"MainColors.Yellow"; break;
-    case "51": color = n"MainColors.Red"; break;
-    case "68": color = n"MainColors.Purple"; break;
-    case "72": useCustomOrange = true; break;
+  if data.isHub {
+    color = n"MainColors.White";
+  } else {
+    switch data.lines[0] {
+      case "17": color = n"MainColors.Green"; break;
+      case "22": color = n"MainColors.Blue"; break;
+      case "23": color = n"MainColors.Yellow"; break;
+      case "51": color = n"MainColors.Red"; break;
+      case "68": color = n"MainColors.Purple"; break;
+      case "72": useCustomOrange = true; break;
+    };
   };
 
   inkImageRef.SetAtlasResource(this.iconWidget, r"base\\gameplay\\gui\\common\\icons\\mappin_icons.inkatlas");
@@ -180,7 +231,7 @@ protected final func ApplyNCTCStopIcon(line: String) -> Void {
 protected func UpdateIcon() -> Void {
   wrappedMethod();
   let data: ref<NCTCStopMappinData> = this.GetMappin().GetScriptData() as NCTCStopMappinData;
-  if IsDefined(data) { this.ApplyNCTCStopIcon(data.line); };
+  if IsDefined(data) { this.ApplyNCTCStopIcon(data); };
 }
 
 @wrapMethod(WorldMapTooltipController)
@@ -190,40 +241,22 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
   if !IsDefined(Deref(data).mappin) { return; };
   stopData = Deref(data).mappin.GetScriptData() as NCTCStopMappinData;
   if IsDefined(stopData) {
-    inkTextRef.SetText(this.m_titleText, "NCTC " + stopData.line + " — " + stopData.stop);
-    inkTextRef.SetText(this.m_descText, "Map-planning candidate. Physical terminal location to be surveyed.");
+    if stopData.isHub {
+      inkTextRef.SetText(this.m_titleText, "NCTC Hub");
+      inkTextRef.SetText(this.m_descText, NCTCFormatServices(stopData));
+    } else {
+      inkTextRef.SetText(this.m_titleText, "NCTC " + stopData.lines[0] + " — " + stopData.stops[0]);
+      inkTextRef.SetText(this.m_descText, "Map-planning candidate. Physical terminal location to be surveyed.");
+    };
   };
 }
 
-// Experimental map-only route overlay. This uses the projected line widget
-// already owned by the world-map mappin container, so it follows the map's
-// camera rather than becoming a fixed screen-space drawing. It is deliberately
-// limited to line 22 until its projection and visual weight are validated.
-@addMethod(WorldMapMenuGameController)
-private final func NCTCShowLine22PlanningTrace() -> Void {
-  let lineWidget: wref<inkLinePattern>;
-  let system: ref<NCTCMapMarkerSystem>;
-  let stops: array<NCTCStopDefinition>;
+public func NCTCFormatServices(data: ref<NCTCStopMappinData>) -> String {
+  let result: String = "Correspondance";
   let index: Int32 = 0;
-
-  lineWidget = this.autodrivePathWidget.widget as inkLinePattern;
-  if !IsDefined(lineWidget) { return; };
-  system = NCTCMapMarkerSystem.GetInstance(this.GetPlayerControlledObject().GetGame());
-  if !IsDefined(system) { return; };
-  stops = system.GetStops();
-  while index < ArraySize(stops) {
-    if Equals(stops[index].line, "22") {
-      lineWidget.AddVertex(new Vector2(stops[index].position.X, stops[index].position.Y));
-    };
+  while index < ArraySize(data.lines) {
+    result += "\nLigne " + data.lines[index] + " — " + data.stops[index];
     index += 1;
   };
-  lineWidget.SetTintColor(new HDRColor(0.37, 0.96, 1.00, 1.00));
-  lineWidget.SetVisible(true);
-}
-
-@wrapMethod(WorldMapMenuGameController)
-protected cb func OnInitialize() -> Bool {
-  let result: Bool = wrappedMethod();
-  this.NCTCShowLine22PlanningTrace();
   return result;
 }

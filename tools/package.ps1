@@ -1,4 +1,4 @@
-param([string]$Version = "0.2.8-line22-trace-experiment")
+param([string]$Version = "0.2.9-hub-markers")
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
