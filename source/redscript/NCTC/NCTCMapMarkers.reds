@@ -146,15 +146,15 @@ protected cb func OnDetach() -> Bool {
 
 @addMethod(BaseMappinBaseController)
 protected final func ApplyNCTCStopIcon(line: String) -> Void {
+  let icon: wref<inkImage>;
   inkImageRef.SetAtlasResource(this.iconWidget, r"base\\gameplay\\gui\\common\\icons\\mappin_icons.inkatlas");
   inkImageRef.SetTexturePart(this.iconWidget, n"fast_travel");
-  switch line {
-    case "17": inkWidgetRef.SetTintColor(this.iconWidget, new HDRColor(0.15, 0.65, 1.00, 1.00)); return;
-    case "22": inkWidgetRef.SetTintColor(this.iconWidget, new HDRColor(0.10, 0.90, 0.72, 1.00)); return;
-    case "23": inkWidgetRef.SetTintColor(this.iconWidget, new HDRColor(1.00, 0.82, 0.12, 1.00)); return;
-    case "51": inkWidgetRef.SetTintColor(this.iconWidget, new HDRColor(1.00, 0.43, 0.10, 1.00)); return;
-    case "68": inkWidgetRef.SetTintColor(this.iconWidget, new HDRColor(0.70, 0.38, 1.00, 1.00)); return;
-    case "72": inkWidgetRef.SetTintColor(this.iconWidget, new HDRColor(1.00, 0.20, 0.35, 1.00)); return;
+  // CPO_PingDoor binds yellow by default. NCTC owns the marker, so replace
+  // that vanilla binding with the operator's green map colour.
+  icon = inkImageRef.Get(this.iconWidget) as inkImage;
+  if IsDefined(icon) {
+    icon.UnbindProperty(n"tintColor");
+    icon.BindProperty(n"tintColor", n"MainColors.Green");
   };
 }
 
