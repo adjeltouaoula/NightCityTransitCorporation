@@ -1,6 +1,7 @@
 Mappins.NCTCStopVariant:
   $type: gamedataMappinVariant_Record
-  enumName: CPO_PingGoHereVariant
+  # Reserved for NCTC. Fuel/Odometer uses CPO_PingGoHereVariant.
+  enumName: CPO_PingDoorVariant
 
 WorldMap.NCTCStopsFilter:
   $type: gamedataWorldMapFilter_Record
@@ -15,6 +16,11 @@ WorldMap.NCTCStopsFilterGroup:
   shouldCollectMappins: false
 
 WorldMap.WorldMapCustomFiltersList.list:
+  - !append-once WorldMap.NCTCStopsFilterGroup
+
+# The quick-filter entry shows NCTC alone; the custom-filter entry makes it
+# independently checkable alongside other map categories.
+WorldMap.WorldMapQuickFiltersList.list:
   - !append-once WorldMap.NCTCStopsFilterGroup
 
 Mappins.NCTCStopMappinDefinition:

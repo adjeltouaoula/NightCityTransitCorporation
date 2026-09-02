@@ -112,7 +112,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
       markerData.line = stops[index].line;
       markerData.stop = stops[index].stop;
       data.mappinType = t"Mappins.NCTCStopMappinDefinition";
-      data.variant = gamedataMappinVariant.CPO_PingGoHereVariant;
+      data.variant = gamedataMappinVariant.CPO_PingDoorVariant;
       data.active = true;
       data.scriptData = markerData;
       ArrayPush(this.m_registeredMappins, system.RegisterMappin(data, stops[index].position));
