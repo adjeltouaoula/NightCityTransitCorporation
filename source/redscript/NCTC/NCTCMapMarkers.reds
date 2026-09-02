@@ -170,8 +170,11 @@ protected func UpdateIcon() -> Void {
 @wrapMethod(BaseWorldMapMappinController)
 protected func Update() -> Void {
   let data: ref<NCTCStopMappinData>;
+  let mappin: ref<IMappin>;
   wrappedMethod();
-  data = this.GetMappin().GetScriptData() as NCTCStopMappinData;
+  mappin = this.GetMappin();
+  if !IsDefined(mappin) { return; };
+  data = mappin.GetScriptData() as NCTCStopMappinData;
   if IsDefined(data) { this.ApplyNCTCStopIcon(data.line); };
 }
 
