@@ -1,0 +1,13 @@
+WorldMap.NCTCStopsFilter:
+  $type: WorldMapFilter_Record
+  enumName: Courier
+
+WorldMap.NCTCStopsFilterGroup:
+  $type: MappinUIFilterGroup_Record
+  filterName: UI-MappinTypes-NCTCStops
+  filterType: WorldMap.NCTCStopsFilter
+  mappins: [ Mappins.PointOfInterest_Zzz18_RacingVariant ]
+  shouldCollectMappins: true
+
+WorldMap.WorldMapCustomFiltersList.list:
+  - !append WorldMap.NCTCStopsFilterGroup
