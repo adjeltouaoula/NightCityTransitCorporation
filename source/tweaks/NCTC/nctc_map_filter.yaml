@@ -6,7 +6,7 @@ WorldMap.NCTCStopsFilterGroup:
   $type: MappinUIFilterGroup_Record
   filterName: UI-MappinTypes-NCTCStops
   filterType: WorldMap.NCTCStopsFilter
-  mappins: [ Mappins.PointOfInterest_Zzz18_RacingVariant ]
+  mappins: [ Mappins.PointOfInterest_ServicePointMeleeTrainerVariant ]
   shouldCollectMappins: true
 
 WorldMap.WorldMapCustomFiltersList.list:

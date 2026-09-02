@@ -112,7 +112,9 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
       markerData.line = stops[index].line;
       markerData.stop = stops[index].stop;
       data.mappinType = t"Mappins.DefaultStaticMappin";
-      data.variant = gamedataMappinVariant.Zzz18_RacingVariant;
+      // A static service-point variant has a complete world-map UI profile.
+      // Racing mappins do not, so they were registered but never drawn.
+      data.variant = gamedataMappinVariant.ServicePointMeleeTrainerVariant;
       data.active = true;
       data.scriptData = markerData;
       ArrayPush(this.m_registeredMappins, system.RegisterMappin(data, stops[index].position));
