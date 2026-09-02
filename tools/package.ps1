@@ -1,4 +1,4 @@
-param([string]$Version = "0.1.0-map-planning")
+param([string]$Version = "0.2.7-line-colors")
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -9,7 +9,11 @@ $archivePath = Join-Path $distRoot "NightCityTransitCorporation-$Version.zip"
 
 if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
 New-Item -ItemType Directory -Force (Join-Path $stageRoot "r6\scripts\NCTC"), (Join-Path $stageRoot "r6\tweaks\NCTC"), $distRoot, $oldDistRoot | Out-Null
-Get-ChildItem -LiteralPath $distRoot -Filter "NightCityTransitCorporation-*.zip" -File | ForEach-Object { Move-Item -LiteralPath $_.FullName -Destination (Join-Path $oldDistRoot $_.Name) }
+Get-ChildItem -LiteralPath $distRoot -Filter "NightCityTransitCorporation-*.zip" -File | ForEach-Object {
+    $oldArchivePath = Join-Path $oldDistRoot $_.Name
+    if (Test-Path -LiteralPath $oldArchivePath) { Remove-Item -LiteralPath $oldArchivePath -Force }
+    Move-Item -LiteralPath $_.FullName -Destination $oldArchivePath
+}
 Copy-Item -Path (Join-Path $projectRoot "source\redscript\NCTC\*.reds") -Destination (Join-Path $stageRoot "r6\scripts\NCTC")
 Copy-Item -Path (Join-Path $projectRoot "source\tweaks\NCTC\*.yaml") -Destination (Join-Path $stageRoot "r6\tweaks\NCTC")
 Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination $stageRoot

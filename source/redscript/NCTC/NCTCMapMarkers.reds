@@ -147,14 +147,27 @@ protected cb func OnDetach() -> Bool {
 @addMethod(BaseMappinBaseController)
 protected final func ApplyNCTCStopIcon(line: String) -> Void {
   let icon: wref<inkImage>;
+  let color: CName = n"MainColors.Green";
+
+  // Colours identify a route while all stops remain under the one NCTC map
+  // filter.  No vanilla filter category is repurposed for individual lines.
+  switch line {
+    case "17": color = n"MainColors.Green"; break;
+    case "22": color = n"MainColors.Blue"; break;
+    case "23": color = n"MainColors.Yellow"; break;
+    case "51": color = n"MainColors.Red"; break;
+    case "68": color = n"MainColors.Purple"; break;
+    case "72": color = n"MainColors.ActiveBlue"; break;
+  };
+
   inkImageRef.SetAtlasResource(this.iconWidget, r"base\\gameplay\\gui\\common\\icons\\mappin_icons.inkatlas");
   inkImageRef.SetTexturePart(this.iconWidget, n"fast_travel");
   // CPO_PingDoor binds yellow by default. NCTC owns the marker, so replace
-  // that vanilla binding with the operator's green map colour.
+  // that vanilla binding with the colour of its transit line.
   icon = inkImageRef.Get(this.iconWidget) as inkImage;
   if IsDefined(icon) {
     icon.UnbindProperty(n"tintColor");
-    icon.BindProperty(n"tintColor", n"MainColors.Green");
+    icon.BindProperty(n"tintColor", color);
   };
 }
 
