@@ -148,6 +148,7 @@ protected cb func OnDetach() -> Bool {
 protected final func ApplyNCTCStopIcon(line: String) -> Void {
   let icon: wref<inkImage>;
   let color: CName = n"MainColors.Green";
+  let useCustomOrange: Bool = false;
 
   // Colours identify a route while all stops remain under the one NCTC map
   // filter.  No vanilla filter category is repurposed for individual lines.
@@ -157,7 +158,7 @@ protected final func ApplyNCTCStopIcon(line: String) -> Void {
     case "23": color = n"MainColors.Yellow"; break;
     case "51": color = n"MainColors.Red"; break;
     case "68": color = n"MainColors.Purple"; break;
-    case "72": color = n"MainColors.ActiveYellow"; break;
+    case "72": useCustomOrange = true; break;
   };
 
   inkImageRef.SetAtlasResource(this.iconWidget, r"base\\gameplay\\gui\\common\\icons\\mappin_icons.inkatlas");
@@ -167,7 +168,11 @@ protected final func ApplyNCTCStopIcon(line: String) -> Void {
   icon = inkImageRef.Get(this.iconWidget) as inkImage;
   if IsDefined(icon) {
     icon.UnbindProperty(n"tintColor");
-    icon.BindProperty(n"tintColor", color);
+    if useCustomOrange {
+      icon.SetTintColor(new HDRColor(1.28, 0.32, 0.00, 1.00));
+    } else {
+      icon.BindProperty(n"tintColor", color);
+    };
   };
 }
 
