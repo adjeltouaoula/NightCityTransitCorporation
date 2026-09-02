@@ -1,0 +1,43 @@
+{
+  "operator": "Night City Transit Corporation",
+  "mapColor": "green",
+  "source": "Cyberpunk 2020 historical service patterns, adapted to Cyberpunk 2077 geography",
+  "lines": [
+    {
+      "id": "NCTC-17",
+      "name": "Central Loop",
+      "role": "Direct City Center and Westbrook circulation",
+      "stops": ["Downtown West", "Downtown North", "Corpo Plaza North", "Little China", "Kabuki South", "Japantown East", "Jig-Jig Street", "Charter Hill", "Downtown"]
+    },
+    {
+      "id": "NCTC-22",
+      "name": "Waterfront",
+      "role": "Waterfront, industrial jobs and downtown",
+      "stops": ["Downtown", "Corpo Plaza North", "Med Center / Little China", "Arasaka Waterfront South", "Arasaka Waterfront North", "Northside Industrial", "Kabuki Waterfront", "Little China", "Downtown"]
+    },
+    {
+      "id": "NCTC-23",
+      "name": "Corpo–Westbrook",
+      "role": "Business district and Westbrook residents",
+      "stops": ["Corpo Plaza", "Downtown East", "Little China West", "Japantown South", "Japantown Central", "Charter Hill South", "Charter Hill North", "North Oak Entrance", "Downtown", "Corpo Plaza"]
+    },
+    {
+      "id": "NCTC-51",
+      "name": "South Connector",
+      "role": "Heywood residential link to the central districts",
+      "stops": ["Wellsprings West", "Wellsprings East", "The Glen South", "The Glen North", "Vista del Rey", "Little China", "Japantown", "Charter Hill South", "Wellsprings"]
+    },
+    {
+      "id": "NCTC-68",
+      "name": "Central Local",
+      "role": "Fine local service through City Center, Westbrook and Watson",
+      "stops": ["Downtown Central", "Corpo Plaza West", "Charter Hill South", "Charter Hill Central", "Japantown West", "Japantown Central", "Little China West", "Med Center", "Kabuki South", "Downtown"]
+    },
+    {
+      "id": "NCTC-72",
+      "name": "Crosstown",
+      "role": "Long Heywood–Watson cross-city route",
+      "stops": ["Wellsprings", "The Glen", "Vista del Rey", "Downtown West", "Charter Hill", "Japantown North", "Northside", "Kabuki", "Little China / Med Center", "Downtown East", "The Glen", "Wellsprings"]
+    }
+  ]
+}
