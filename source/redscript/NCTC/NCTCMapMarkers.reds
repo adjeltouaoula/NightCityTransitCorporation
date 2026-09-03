@@ -28,6 +28,30 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     return definition;
   }
 
+  private func DisplayStopName(stop: String) -> String {
+    switch stop {
+      case "Old Downtown": return "Centre ville";
+      case "City Center": return "Centre ville";
+      case "Upper Marina": return "Marina Gold Beach";
+      case "East Marina": return "Marina Gold Beach";
+      case "Upper Eastside": return "Corporation Street";
+      case "Medical Center": return "Métro Med Center";
+      case "Bank Block": return "Tour Arasaka";
+      case "Japantown": return "Marché des fleurs de cerisier";
+      case "Little China": return "Martin Street";
+      case "Corporate Center": return "Memorial Park";
+      case "New Harbor": return "Métro Megabuilding H10";
+      case "Charter Hill": return "Métro Charter Hill";
+      case "South Night City": return "Métro Glen Sud";
+      case "University District": return "College Street";
+      case "West Hill": return "Métro Charter Hill";
+      case "Northside": return "Centre ville nord";
+      case "Studio City": return "Alexander Street";
+      case "Little Italy": return "6th Street West Station";
+    };
+    return stop;
+  }
+
   // Map-planning coordinates, intentionally independent from physical terminal,
   // kerb, and traffic approach coordinates which will be surveyed later.
   private func GetStops() -> array<NCTCStopDefinition> {
@@ -124,7 +148,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     stops = this.GetStops();
     while stopIndex < ArraySize(stops) {
       position = stops[stopIndex].position;
-      service = "NCTC " + stops[stopIndex].line + " — " + stops[stopIndex].stop;
+      service = "NCTC " + stops[stopIndex].line + " — " + this.DisplayStopName(stops[stopIndex].stop);
       found = -1;
       index = 0;
       while index < ArraySize(positions) {
