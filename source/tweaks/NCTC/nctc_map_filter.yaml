@@ -6,7 +6,7 @@ Mappins.NCTCStopVariant:
 WorldMap.NCTCStopsFilter:
   $type: gamedataWorldMapFilter_Record
   # This gives NCTC its own independent switch; it is not CustomFilter.
-  enumName: Courier
+  enumName: CustomFilter
 
 WorldMap.NCTCStopsFilterGroup:
   $type: gamedataMappinUIFilterGroup_Record
