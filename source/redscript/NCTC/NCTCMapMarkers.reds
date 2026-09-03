@@ -21,6 +21,8 @@ public class NCTCStopMappinData extends MappinScriptData {
 
 public class NCTCMapMarkerSystem extends ScriptableSystem {
   private let m_registeredMappins: array<NewMappinID>;
+  private let m_servicePositions: array<Vector4>;
+  private let m_serviceLines: array<String>;
 
   public static func GetInstance(game: GameInstance) -> ref<NCTCMapMarkerSystem> {
     return GameInstance.GetScriptableSystemsContainer(game).Get(NameOf<NCTCMapMarkerSystem>()) as NCTCMapMarkerSystem;
@@ -142,6 +144,25 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     return -1;
   }
 
+  public func GetNearestService(position: Vector4, out line: String, out stop: Vector4) -> Bool {
+    let index: Int32 = 0;
+    let nearest: Int32 = -1;
+    let nearestDistance: Float = 18.00;
+    let distance: Float;
+    while index < ArraySize(this.m_servicePositions) {
+      distance = Vector4.Distance(position, this.m_servicePositions[index]);
+      if distance < nearestDistance {
+        nearestDistance = distance;
+        nearest = index;
+      };
+      index += 1;
+    };
+    if nearest < 0 { return false; };
+    line = this.m_serviceLines[nearest];
+    stop = this.m_servicePositions[nearest];
+    return true;
+  }
+
   public func RegisterAllMarkers() -> Void {
     let data: MappinData;
     let markerData: ref<NCTCStopMappinData>;
@@ -203,12 +224,16 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
       ArrayPush(this.m_registeredMappins, system.RegisterMappin(data, positions[index]));
       index += 1;
     };
+    this.m_servicePositions = positions;
+    this.m_serviceLines = lines;
   }
 
   public func UnregisterAllMarkers() -> Void {
     let system: ref<MappinSystem> = GameInstance.GetMappinSystem(this.GetGameInstance());
     if IsDefined(system) { for id in this.m_registeredMappins { system.UnregisterMappin(id); }; };
     ArrayClear(this.m_registeredMappins);
+    ArrayClear(this.m_servicePositions);
+    ArrayClear(this.m_serviceLines);
   }
 }
 

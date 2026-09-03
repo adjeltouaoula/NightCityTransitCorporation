@@ -1,0 +1,8 @@
+# Public NCTC service vehicle. It deliberately stays out of Vehicle.vehicle_list:
+# it is never a garage, summon, fuel, or maintenance vehicle for V.
+Vehicle.nctc_service_mahir_mt28_coach:
+  $base: Vehicle.v_mahir_mt28_coach
+
+NCTCWaitForBus:
+  $base: SellectDestination
+  caption: "Wait for NCTC service"
