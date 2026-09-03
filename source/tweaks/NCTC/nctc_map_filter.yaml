@@ -14,7 +14,7 @@ WorldMap.NCTCStopsFilterGroup:
   filterType: WorldMap.NCTCStopsFilter
   mappins:
     - Mappins.NCTCStopVariant
-  shouldCollectMappins: false
+  shouldCollectMappins: true
 
 WorldMap.WorldMapCustomFiltersList.list:
   - !append-once WorldMap.NCTCStopsFilterGroup
