@@ -75,8 +75,9 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     ArrayPush(stops, this.Stop(-1928.0, 1090.0, 41.0, "22", "Medical Center"));
     ArrayPush(stops, this.Stop(-2127.0, 410.0, 57.0, "22", "Old Downtown"));
     ArrayPush(stops, this.Stop(-2143.0, 463.0, 9.0, "22", "New Harbor"));
+    // East Marina and Upper Marina resolve to the same 2077 terminal.
+    // Keep one physical stop so the line does not show Marina Gold Beach twice.
     ArrayPush(stops, this.Stop(-1359.0, 1710.0, 75.0, "22", "East Marina"));
-    ArrayPush(stops, this.Stop(-1753.0, 2445.0, 49.0, "22", "Upper Marina"));
     ArrayPush(stops, this.Stop(-1173.0, 1080.0, 108.0, "22", "Upper Eastside"));
     ArrayPush(stops, this.Stop(-1942.0, -103.0, 7.0, "22", "City Center"));
 
