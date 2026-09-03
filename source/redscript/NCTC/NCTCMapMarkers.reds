@@ -52,6 +52,25 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     return stop;
   }
 
+  private func LogTravelAnchors(system: ref<MappinSystem>) -> Void {
+    let mappins: array<ref<IMappin>> = system.GetAllMappins();
+    let mappin: ref<IMappin>;
+    let travel: ref<FastTravelMappin>;
+    let position: Vector4;
+    let index: Int32 = 0;
+    while index < ArraySize(mappins) {
+      mappin = mappins[index];
+      if IsDefined(mappin) && (Equals(mappin.GetVariant(), gamedataMappinVariant.FastTravelVariant) || Equals(mappin.GetVariant(), gamedataMappinVariant.Zzz17_NCARTVariant)) {
+        travel = mappin as FastTravelMappin;
+        if IsDefined(travel) {
+          position = travel.GetWorldPosition();
+          ModLog(n"NCTCAnchors", travel.GetPointData().GetPointDisplayName() + " | " + ToString(position));
+        };
+      };
+      index += 1;
+    };
+  }
+
   // Map-planning coordinates, intentionally independent from physical terminal,
   // kerb, and traffic approach coordinates which will be surveyed later.
   private func GetStops() -> array<NCTCStopDefinition> {
@@ -146,6 +165,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     this.UnregisterAllMarkers();
     system = GameInstance.GetMappinSystem(this.GetGameInstance());
     if !IsDefined(system) { return; };
+    this.LogTravelAnchors(system);
     stops = this.GetStops();
     while stopIndex < ArraySize(stops) {
       position = stops[stopIndex].position;
