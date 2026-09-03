@@ -14,6 +14,8 @@ public struct NCTCTravelAnchor {
 public class NCTCStopMappinData extends MappinScriptData {
   public let line: String;
   public let services: String;
+  public let serviceLines: array<String>;
+  public let serviceStops: array<String>;
   public let isHub: Bool;
 }
 
@@ -149,6 +151,8 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     let positions: array<Vector4>;
     let services: array<String>;
     let lines: array<String>;
+    let hubServiceLines: array<array<String>>;
+    let hubServiceStops: array<array<String>>;
     let counts: array<Int32>;
     let service: String;
     let anchorIndex: Int32;
@@ -170,9 +174,13 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
           ArrayPush(positions, anchors[anchorIndex].position);
           ArrayPush(services, service);
           ArrayPush(lines, stops[stopIndex].line);
+          ArrayPush(hubServiceLines, [stops[stopIndex].line]);
+          ArrayPush(hubServiceStops, [stops[stopIndex].stop]);
           ArrayPush(counts, 1);
         } else if !StrContains(services[hubIndex], service) {
           services[hubIndex] += "\n" + service;
+          ArrayPush(hubServiceLines[hubIndex], stops[stopIndex].line);
+          ArrayPush(hubServiceStops[hubIndex], stops[stopIndex].stop);
           counts[hubIndex] += 1;
         };
       };
@@ -183,6 +191,8 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     while index < ArraySize(positions) {
       markerData = new NCTCStopMappinData();
       markerData.services = services[index];
+      markerData.serviceLines = hubServiceLines[index];
+      markerData.serviceStops = hubServiceStops[index];
       markerData.isHub = counts[index] > 1;
       markerData.line = lines[index];
       if markerData.isHub { markerData.line = "HUB"; };
@@ -269,12 +279,62 @@ protected func UpdateIcon() -> Void {
 @wrapMethod(WorldMapTooltipController)
 public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<WorldMapMenuGameController>) -> Void {
   let stopData: ref<NCTCStopMappinData>;
+  let desc: ref<inkText>;
+  let parent: ref<inkCompoundWidget>;
+  let panel: ref<inkVerticalPanel>;
+  let serviceText: ref<inkText>;
+  let index: Int32 = 0;
   wrappedMethod(data, menu);
+  desc = inkTextRef.Get(this.m_descText) as inkText;
+  if IsDefined(this.nctcHubLines) { this.nctcHubLines.SetVisible(false); };
   if !IsDefined(Deref(data).mappin) { return; };
   stopData = Deref(data).mappin.GetScriptData() as NCTCStopMappinData;
   if IsDefined(stopData) {
     if stopData.isHub { inkTextRef.SetText(this.m_titleText, "NCTC Transit Hub"); }
     else { inkTextRef.SetText(this.m_titleText, stopData.services); };
     inkTextRef.SetText(this.m_descText, stopData.services);
+    if stopData.isHub && IsDefined(desc) {
+      parent = desc.GetParentWidget() as inkCompoundWidget;
+      if IsDefined(parent) {
+        if !IsDefined(this.nctcHubLines) {
+          panel = new inkVerticalPanel();
+          panel.SetName(n"NCTCHubLines");
+          panel.SetFitToContent(true);
+          panel.Reparent(parent);
+          this.nctcHubLines = panel;
+        };
+        this.nctcHubLines.RemoveAllChildren();
+        while index < ArraySize(stopData.serviceLines) {
+          serviceText = new inkText();
+          serviceText.SetFontFamily("base\\gameplay\\gui\\fonts\\raj\\raj.inkfontfamily");
+          serviceText.SetFontSize(28);
+          serviceText.SetLetterCase(textLetterCase.OriginalCase);
+          serviceText.SetStyle(r"base\\gameplay\\gui\\common\\main_colors.inkstyle");
+          serviceText.SetText("NCTC " + stopData.serviceLines[index] + " — " + stopData.serviceStops[index]);
+          serviceText.SetTintColor(NCTCHubLineColor(stopData.serviceLines[index]));
+          serviceText.Reparent(this.nctcHubLines);
+          index += 1;
+        };
+        desc.SetVisible(false);
+        this.nctcHubLines.SetVisible(true);
+      };
+    } else if IsDefined(desc) {
+      desc.SetVisible(true);
+    };
   };
+}
+
+@addField(WorldMapTooltipController)
+let nctcHubLines: wref<inkVerticalPanel>;
+
+public func NCTCHubLineColor(line: String) -> HDRColor {
+  switch line {
+    case "17": return new HDRColor(1.28, 0.32, 0.00, 1.00);
+    case "22": return new HDRColor(1.00, 0.86, 0.08, 1.00);
+    case "23": return new HDRColor(1.00, 0.25, 0.65, 1.00);
+    case "51": return new HDRColor(0.20, 0.90, 0.42, 1.00);
+    case "68": return new HDRColor(0.70, 0.38, 1.00, 1.00);
+    case "72": return new HDRColor(0.20, 0.55, 1.00, 1.00);
+  };
+  return new HDRColor(1.00, 1.00, 1.00, 1.00);
 }
