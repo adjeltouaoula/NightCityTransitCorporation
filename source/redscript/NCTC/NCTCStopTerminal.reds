@@ -1,6 +1,6 @@
 module NCTC
 
-public class NCTCRequestServiceAction extends OpenWorldMapDeviceAction {
+public class NCTCRequestServiceAction extends ActionBool {
   public func SetProperties() -> Void {
     this.actionName = n"NCTCRequestService";
     this.prop = DeviceActionPropertyFunctions.SetUpProperty_Bool(
@@ -10,9 +10,6 @@ public class NCTCRequestServiceAction extends OpenWorldMapDeviceAction {
     );
   }
 
-  public func GetTweakDBChoiceRecord() -> String {
-    return "NCTCRequestW01";
-  }
 }
 
 @wrapMethod(DataTermControllerPS)
@@ -43,16 +40,14 @@ public const func GetActions(out actions: array<ref<DeviceAction>>, context: Get
   return true;
 }
 
-@wrapMethod(DataTerm)
-private final func RequestFastTravelMenu() -> Void {
-  let player: ref<PlayerPuppet> = GameInstance.GetPlayerSystem(this.GetGame())
-    .GetLocalPlayerMainGameObject() as PlayerPuppet;
-  let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(this.GetGame());
+@addMethod(DataTermControllerPS)
+protected cb func OnActionNCTCRequestServiceAction(evt: ref<NCTCRequestServiceAction>) -> EntityNotificationType {
+  let player: ref<PlayerPuppet> = GetPlayer(this.GetGameInstance());
+  let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(this.GetGameInstance());
   let line: String;
   let stop: Vector4;
   if IsDefined(player) && IsDefined(markers) && markers.GetNearestService(player.GetWorldPosition(), line, stop) {
-    NCTCTransitSystem.Get(this.GetGame()).RequestService(line, stop);
-    return;
+    NCTCTransitSystem.Get(this.GetGameInstance()).RequestService(line, stop);
   };
-  wrappedMethod();
+  return EntityNotificationType.DoNotNotifyEntity;
 }
