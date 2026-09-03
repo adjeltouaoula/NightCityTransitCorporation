@@ -165,7 +165,6 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     this.UnregisterAllMarkers();
     system = GameInstance.GetMappinSystem(this.GetGameInstance());
     if !IsDefined(system) { return; };
-    this.LogTravelAnchors(system);
     stops = this.GetStops();
     while stopIndex < ArraySize(stops) {
       position = stops[stopIndex].position;
@@ -269,7 +268,16 @@ protected final func ApplyNCTCStopIcon(line: String) -> Void {
 protected func UpdateIcon() -> Void {
   wrappedMethod();
   let data: ref<NCTCStopMappinData> = this.GetMappin().GetScriptData() as NCTCStopMappinData;
+  let travel: ref<FastTravelMappin>;
+  let position: Vector4;
   if IsDefined(data) { this.ApplyNCTCStopIcon(data.line); };
+  if Equals(this.GetMappin().GetVariant(), gamedataMappinVariant.FastTravelVariant) || Equals(this.GetMappin().GetVariant(), gamedataMappinVariant.Zzz17_NCARTVariant) {
+    travel = this.GetMappin() as FastTravelMappin;
+    if IsDefined(travel) {
+      position = travel.GetWorldPosition();
+      ModLog(n"NCTCAnchors", travel.GetPointData().GetPointDisplayName() + " | " + ToString(position));
+    };
+  };
 }
 
 @wrapMethod(WorldMapTooltipController)
