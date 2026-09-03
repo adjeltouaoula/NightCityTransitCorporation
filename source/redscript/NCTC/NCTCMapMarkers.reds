@@ -210,6 +210,20 @@ protected cb func OnGameAttached() -> Bool {
   return result;
 }
 
+// Fast-travel and NCART mappins are populated after the player is attached.
+// Register again once the world map exists so the LocKey anchors are available.
+@wrapMethod(WorldMapMenuGameController)
+protected cb func OnInitialize() -> Bool {
+  let result: Bool = wrappedMethod();
+  let player: ref<PlayerPuppet> = this.GetPlayerControlledObject() as PlayerPuppet;
+  let system: ref<NCTCMapMarkerSystem>;
+  if IsDefined(player) {
+    system = NCTCMapMarkerSystem.GetInstance(player.GetGame());
+    if IsDefined(system) { system.RegisterAllMarkers(); };
+  };
+  return result;
+}
+
 @wrapMethod(PlayerPuppet)
 protected cb func OnDetach() -> Bool {
   let system: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(this.GetGame());
