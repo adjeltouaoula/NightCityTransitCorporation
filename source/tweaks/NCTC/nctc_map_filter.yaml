@@ -1,8 +1,26 @@
-# NCTC map mappin definition only.
-# No world-map filter list is modified in this reset build.
+# NCTC owns this filter group.  The `CustomFilter` enum is the engine's
+# dedicated slot for independently-defined map filters; the record and its
+# mappin variant below are NCTC-only and are not shared with another mod.
 Mappins.NCTCStopVariant:
   $type: gamedataMappinVariant_Record
   enumName: CPO_PingDoorVariant
+
+WorldMap.NCTCStopsFilter:
+  $type: gamedataWorldMapFilter_Record
+  enumName: CustomFilter
+
+WorldMap.NCTCStopsFilterGroup:
+  $type: gamedataMappinUIFilterGroup_Record
+  filterName: UI-MappinTypes-NCTCStops
+  filterType: WorldMap.NCTCStopsFilter
+  mappins:
+    - Mappins.NCTCStopVariant
+  shouldCollectMappins: false
+
+# This adds one checkbox, “Transport Corp Lines”, in the Custom tab only.
+# It does not replace, append to, or recolour any vanilla filter group.
+WorldMap.WorldMapCustomFiltersList.list:
+  - !append-once WorldMap.NCTCStopsFilterGroup
 
 Mappins.NCTCStopMappinDefinition:
   $type: gamedataMappinDefinition_Record
