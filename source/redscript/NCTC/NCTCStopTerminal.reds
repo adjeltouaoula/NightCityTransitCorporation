@@ -1,67 +1,122 @@
 module NCTC
 
-// A data terminal's in-world interaction widget is built specifically for
-// OpenWorldMapDeviceAction.  Keep that native action shape so the prompt is
-// rendered, then intercept the click below before it can open the map.
-public class NCTCRequestServiceAction extends OpenWorldMapDeviceAction {
-  public func SetProperties() -> Void {
-    this.actionName = n"NCTCRequestService";
-    this.prop = DeviceActionPropertyFunctions.SetUpProperty_Bool(
-      n"NCTCRequestService", true,
-      n"Request NCTC service",
-      n"Request NCTC service"
-    );
+// Native HUD prompt, independent from the fast-travel DataTerm widget.
+public class NCTCStopPrompt {
+  public static func IsNearStop(game: GameInstance, out line: String, out stop: Vector4) -> Bool {
+    let player: ref<PlayerPuppet> = GetPlayer(game);
+    let markers: ref<NCTCMapMarkerSystem>;
+    if !IsDefined(player) { return false; };
+    markers = NCTCMapMarkerSystem.GetInstance(game);
+    if !IsDefined(markers) || !markers.GetNearestService(player.GetWorldPosition(), line, stop) { return false; };
+    return Vector4.Distance(player.GetWorldPosition(), stop) <= 6.00;
   }
 
-  public func GetTweakDBChoiceRecord() -> String {
-    return "NCTCRequestW01";
+  public static func SetVisible(game: GameInstance, visible: Bool) -> Void {
+    let hub: InteractionChoiceHubData;
+    let choice: InteractionChoiceData;
+    let choiceType: ChoiceTypeWrapper;
+    let visualizers: VisualizersInfo;
+    let defs: ref<AllBlackboardDefinitions>;
+    let blackboard: ref<IBlackboard>;
+    hub.id = -12017;
+    hub.active = visible;
+    hub.flags = IntEnum<EVisualizerDefinitionFlags>(0);
+    hub.title = "Attendre le bus";
+    choice.localizedName = "Attendre le bus";
+    choice.inputAction = n"UI_Apply";
+    ChoiceTypeWrapper.SetType(choiceType, gameinteractionsChoiceType.Blueline);
+    choice.type = choiceType;
+    hub.choices = [choice];
+    visualizers.activeVisId = hub.id;
+    visualizers.visIds = [hub.id];
+    defs = GetAllBlackboardDefs();
+    blackboard = GameInstance.GetBlackboardSystem(game).Get(defs.UIInteractions);
+    blackboard.SetVariant(defs.UIInteractions.InteractionChoiceHub, ToVariant(hub), true);
+    blackboard.SetVariant(defs.UIInteractions.VisualizersInfo, ToVariant(visualizers), true);
   }
 
+  public static func Refresh(game: GameInstance) -> Void {
+    let player: ref<PlayerPuppet> = GetPlayer(game);
+    let line: String;
+    let stop: Vector4;
+    let visible: Bool = NCTCStopPrompt.IsNearStop(game, line, stop);
+    if !IsDefined(player) { return; };
+    // A nearby DataTerm refreshes the same UIInteractions blackboard every
+    // frame. Re-publish while visible so its empty action list cannot erase
+    // the NCTC prompt as V reaches the physical terminal.
+    if visible || !Equals(player.m_nctcPromptVisible, visible) {
+      NCTCStopPrompt.SetVisible(game, visible);
+    };
+    player.m_nctcPromptVisible = visible;
+  }
+}
+
+public class NCTCStopPromptCallback extends DelayCallback {
+  public let game: GameInstance;
+  public func Call() -> Void {
+    let next: ref<NCTCStopPromptCallback> = new NCTCStopPromptCallback();
+    NCTCStopPrompt.Refresh(this.game);
+    next.game = this.game;
+    GameInstance.GetDelaySystem(this.game).DelayCallback(next, 0.10);
+  }
+}
+
+public class NCTCStopPromptInputListener {
+  public let game: GameInstance;
+  protected cb func OnAction(action: ListenerAction, consumer: ListenerActionConsumer) -> Bool {
+    let player: ref<PlayerPuppet>;
+    let line: String;
+    let stop: Vector4;
+    if !Equals(ListenerAction.GetName(action), n"one_click_confirm") || !ListenerAction.IsButtonJustReleased(action) { return false; };
+    player = GetPlayer(this.game);
+    if !IsDefined(player) || !player.m_nctcPromptVisible || !NCTCStopPrompt.IsNearStop(this.game, line, stop) { return false; };
+    NCTCTransitSystem.Get(this.game).RequestService(line, stop);
+    return true;
+  }
+}
+
+@addField(PlayerPuppet)
+private let m_nctcPromptInputListener: ref<NCTCStopPromptInputListener>;
+
+@addField(PlayerPuppet)
+public let m_nctcPromptVisible: Bool;
+
+@wrapMethod(PlayerPuppet)
+protected cb func OnGameAttached() -> Bool {
+  let callback: ref<NCTCStopPromptCallback>;
+  wrappedMethod();
+  this.m_nctcPromptInputListener = new NCTCStopPromptInputListener();
+  this.m_nctcPromptInputListener.game = this.GetGame();
+  this.RegisterInputListener(this.m_nctcPromptInputListener);
+  callback = new NCTCStopPromptCallback();
+  callback.game = this.GetGame();
+  GameInstance.GetDelaySystem(this.GetGame()).DelayCallback(callback, 0.10);
+}
+
+@wrapMethod(PlayerPuppet)
+protected cb func OnDetach() -> Bool {
+  if IsDefined(this.m_nctcPromptInputListener) {
+    this.UnregisterInputListener(this.m_nctcPromptInputListener);
+    this.m_nctcPromptInputListener = null;
+  };
+  NCTCStopPrompt.SetVisible(this.GetGame(), false);
+  this.m_nctcPromptVisible = false;
+  wrappedMethod();
 }
 
 @wrapMethod(DataTermControllerPS)
 public const func GetActions(out actions: array<ref<DeviceAction>>, context: GetActionsContext) -> Bool {
   let result: Bool = wrappedMethod(actions, context);
-  let player: ref<PlayerPuppet> = GetPlayer(this.GetGameInstance());
-  let markers: ref<NCTCMapMarkerSystem>;
   let line: String;
   let stop: Vector4;
   let index: Int32;
   let mapAction: ref<OpenWorldMapDeviceAction>;
-  let action: ref<NCTCRequestServiceAction>;
-  if !result || !IsDefined(player) { return result; };
-  markers = NCTCMapMarkerSystem.GetInstance(this.GetGameInstance());
-  if !IsDefined(markers) || !markers.GetNearestService(player.GetWorldPosition(), line, stop) { return result; };
+  if !result || !NCTCStopPrompt.IsNearStop(this.GetGameInstance(), line, stop) { return result; };
   index = ArraySize(actions) - 1;
   while index >= 0 {
     mapAction = actions[index] as OpenWorldMapDeviceAction;
     if IsDefined(mapAction) { ArrayErase(actions, index); };
     index -= 1;
   };
-  action = new NCTCRequestServiceAction();
-  action.SetUp(this);
-  action.SetProperties();
-  action.AddDeviceName(this.GetDeviceName());
-  action.CreateActionWidgetPackage();
-  ArrayPush(actions, action);
-  return true;
-}
-
-@wrapMethod(DataTerm)
-private final func RequestFastTravelMenu() -> Void {
-  let player: ref<PlayerPuppet> = GameInstance.GetPlayerSystem(this.GetGame())
-    .GetLocalPlayerMainGameObject() as PlayerPuppet;
-  let markers: ref<NCTCMapMarkerSystem>;
-  let line: String;
-  let stop: Vector4;
-
-  if IsDefined(player) {
-    markers = NCTCMapMarkerSystem.GetInstance(this.GetGame());
-    if IsDefined(markers) && markers.GetNearestService(player.GetWorldPosition(), line, stop) {
-      NCTCTransitSystem.Get(this.GetGame()).RequestService(line, stop);
-      return;
-    };
-  };
-
-  wrappedMethod();
+  return result;
 }
