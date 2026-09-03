@@ -4,12 +4,13 @@ Mappins.NCTCStopVariant:
   enumName: CPO_PingDoorVariant
 
 WorldMap.NCTCStopsFilter:
-  $type: WorldMapFilter_Record
-  # This gives NCTC its own independent switch; it is not CustomFilter.
-  enumName: Courier
+  $type: gamedataWorldMapFilter_Record
+  # The enum is shared by the game, but this record and its mappin variant are
+  # unique to NCTC. This is the same model used by VehicleMileage gas stations.
+  enumName: CustomFilter
 
 WorldMap.NCTCStopsFilterGroup:
-  $type: MappinUIFilterGroup_Record
+  $type: gamedataMappinUIFilterGroup_Record
   filterName: UI-MappinTypes-NCTCStops
   filterType: WorldMap.NCTCStopsFilter
   mappins:
