@@ -13,6 +13,11 @@ public class NCTCStopMappinData extends MappinScriptData {
   public let isHub: Bool;
 }
 
+public struct NCTCTravelAnchor {
+  public let position: Vector4;
+  public let isMetro: Bool;
+}
+
 public class NCTCMapMarkerSystem extends ScriptableSystem {
   private let m_registeredMappins: array<NewMappinID>;
 
@@ -52,23 +57,45 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     return stop;
   }
 
-  private func LogTravelAnchors(system: ref<MappinSystem>) -> Void {
+  private func GetTravelAnchors(system: ref<MappinSystem>) -> array<NCTCTravelAnchor> {
+    let anchors: array<NCTCTravelAnchor>;
     let mappins: array<ref<IMappin>> = system.GetAllMappins();
     let mappin: ref<IMappin>;
-    let travel: ref<FastTravelMappin>;
-    let position: Vector4;
+    let anchor: NCTCTravelAnchor;
     let index: Int32 = 0;
     while index < ArraySize(mappins) {
       mappin = mappins[index];
       if IsDefined(mappin) && (Equals(mappin.GetVariant(), gamedataMappinVariant.FastTravelVariant) || Equals(mappin.GetVariant(), gamedataMappinVariant.Zzz17_NCARTVariant)) {
-        travel = mappin as FastTravelMappin;
-        if IsDefined(travel) {
-          position = travel.GetWorldPosition();
-          ModLog(n"NCTCAnchors", travel.GetPointData().GetPointDisplayName() + " | " + ToString(position));
-        };
+        anchor.position = mappin.GetWorldPosition();
+        anchor.isMetro = Equals(mappin.GetVariant(), gamedataMappinVariant.Zzz17_NCARTVariant);
+        ArrayPush(anchors, anchor);
       };
       index += 1;
     };
+    return anchors;
+  }
+
+  private func ResolveAnchor(stop: NCTCStopDefinition, anchors: array<NCTCTravelAnchor>) -> Vector4 {
+    let metro: Int32 = -1;
+    let fastTravel: Int32 = -1;
+    let metroDistance: Float = 700.00;
+    let fastTravelDistance: Float = 900.00;
+    let distance: Float;
+    let index: Int32 = 0;
+    while index < ArraySize(anchors) {
+      distance = Vector4.Distance2D(stop.position, anchors[index].position);
+      if anchors[index].isMetro && distance < metroDistance {
+        metro = index;
+        metroDistance = distance;
+      } else if !anchors[index].isMetro && distance < fastTravelDistance {
+        fastTravel = index;
+        fastTravelDistance = distance;
+      };
+      index += 1;
+    };
+    if metro >= 0 { return anchors[metro].position; };
+    if fastTravel >= 0 { return anchors[fastTravel].position; };
+    return stop.position;
   }
 
   // Map-planning coordinates, intentionally independent from physical terminal,
@@ -153,8 +180,10 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     let markerData: ref<NCTCStopMappinData>;
     let system: ref<MappinSystem>;
     let stops: array<NCTCStopDefinition>;
+    let anchors: array<NCTCTravelAnchor>;
     let positions: array<Vector4>;
     let services: array<String>;
+    let lines: array<String>;
     let counts: array<Int32>;
     let position: Vector4;
     let service: String;
@@ -166,8 +195,9 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     system = GameInstance.GetMappinSystem(this.GetGameInstance());
     if !IsDefined(system) { return; };
     stops = this.GetStops();
+    anchors = this.GetTravelAnchors(system);
     while stopIndex < ArraySize(stops) {
-      position = stops[stopIndex].position;
+      position = this.ResolveAnchor(stops[stopIndex], anchors);
       service = "NCTC " + stops[stopIndex].line + " — " + this.DisplayStopName(stops[stopIndex].stop);
       found = -1;
       index = 0;
@@ -178,6 +208,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
       if found < 0 {
         ArrayPush(positions, position);
         ArrayPush(services, service);
+        ArrayPush(lines, stops[stopIndex].line);
         ArrayPush(counts, 1);
       } else if !StrContains(services[found], service) {
         services[found] += "\n" + service;
@@ -188,10 +219,11 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     index = 0;
     while index < ArraySize(positions) {
       markerData = new NCTCStopMappinData();
-      markerData.line = "HUB";
+      markerData.line = lines[index];
       markerData.stop = "Transit Hub";
       markerData.services = services[index];
       markerData.isHub = counts[index] > 1;
+      if markerData.isHub { markerData.line = "HUB"; };
       data.mappinType = t"Mappins.NCTCStopMappinDefinition";
       data.variant = gamedataMappinVariant.CPO_PingDoorVariant;
       data.active = true;
@@ -268,16 +300,7 @@ protected final func ApplyNCTCStopIcon(line: String) -> Void {
 protected func UpdateIcon() -> Void {
   wrappedMethod();
   let data: ref<NCTCStopMappinData> = this.GetMappin().GetScriptData() as NCTCStopMappinData;
-  let travel: ref<FastTravelMappin>;
-  let position: Vector4;
   if IsDefined(data) { this.ApplyNCTCStopIcon(data.line); };
-  if Equals(this.GetMappin().GetVariant(), gamedataMappinVariant.FastTravelVariant) || Equals(this.GetMappin().GetVariant(), gamedataMappinVariant.Zzz17_NCARTVariant) {
-    travel = this.GetMappin() as FastTravelMappin;
-    if IsDefined(travel) {
-      position = travel.GetWorldPosition();
-      ModLog(n"NCTCAnchors", travel.GetPointData().GetPointDisplayName() + " | " + ToString(position));
-    };
-  };
 }
 
 @wrapMethod(WorldMapTooltipController)
