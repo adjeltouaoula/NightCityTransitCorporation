@@ -49,7 +49,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     // 22
     ArrayPush(stops, this.Stop("22", "LocKey#44695", "Sarsati & Republic"));
     ArrayPush(stops, this.Stop("22", "LocKey#44485", "Rocade"));
-    ArrayPush(stops, this.Stop("22", "LocKey#52554", "Memorial Park"));
+    ArrayPush(stops, this.Stop("22", "LocKey#52544", "Memorial Park"));
     ArrayPush(stops, this.Stop("22", "LocKey#44485", "Rocade"));
     ArrayPush(stops, this.Stop("22", "LocKey#44536", "QG Delamain"));
     ArrayPush(stops, this.Stop("22", "LocKey#44531", "Petrel Street"));
@@ -57,7 +57,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     ArrayPush(stops, this.Stop("22", "LocKey#44695", "Sarsati & Republic"));
 
     // 23
-    ArrayPush(stops, this.Stop("23", "LocKey#52554", "Memorial Park"));
+    ArrayPush(stops, this.Stop("23", "LocKey#52544", "Memorial Park"));
     ArrayPush(stops, this.Stop("23", "LocKey#44534", "Congress & Madison"));
     ArrayPush(stops, this.Stop("23", "LocKey#44532", "College Street"));
     ArrayPush(stops, this.Stop("23", "LocKey#44533", "Skyline Est"));
@@ -65,7 +65,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     ArrayPush(stops, this.Stop("23", "LocKey#44531", "Petrel Street"));
     ArrayPush(stops, this.Stop("23", "LocKey#44536", "QG Delamain"));
     ArrayPush(stops, this.Stop("23", "LocKey#44485", "Rocade"));
-    ArrayPush(stops, this.Stop("23", "LocKey#52554", "Memorial Park"));
+    ArrayPush(stops, this.Stop("23", "LocKey#52544", "Memorial Park"));
 
     // 51
     ArrayPush(stops, this.Stop("51", "LocKey#44679", "Wellsprings"));
@@ -78,7 +78,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     // 68
     ArrayPush(stops, this.Stop("68", "LocKey#44695", "Sarsati & Republic"));
     ArrayPush(stops, this.Stop("68", "LocKey#44485", "Rocade"));
-    ArrayPush(stops, this.Stop("68", "LocKey#52554", "Memorial Park"));
+    ArrayPush(stops, this.Stop("68", "LocKey#52544", "Memorial Park"));
     ArrayPush(stops, this.Stop("68", "LocKey#44501", "Cannery Plaza"));
     ArrayPush(stops, this.Stop("68", "LocKey#44515", "Senate and Market"));
     ArrayPush(stops, this.Stop("68", "LocKey#44534", "Congress & Madison"));

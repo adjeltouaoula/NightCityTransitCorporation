@@ -4,17 +4,17 @@ Mappins.NCTCStopVariant:
   enumName: CPO_PingDoorVariant
 
 WorldMap.NCTCStopsFilter:
-  $type: WorldMapFilter_Record
+  $type: gamedataWorldMapFilter_Record
   # This gives NCTC its own independent switch; it is not CustomFilter.
   enumName: Courier
 
 WorldMap.NCTCStopsFilterGroup:
-  $type: MappinUIFilterGroup_Record
+  $type: gamedataMappinUIFilterGroup_Record
   filterName: UI-MappinTypes-NCTCStops
   filterType: WorldMap.NCTCStopsFilter
   mappins:
     - Mappins.NCTCStopVariant
-  shouldCollectMappins: true
+  shouldCollectMappins: false
 
 WorldMap.WorldMapCustomFiltersList.list:
   - !append-once WorldMap.NCTCStopsFilterGroup
