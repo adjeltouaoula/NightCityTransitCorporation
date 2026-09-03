@@ -1,6 +1,9 @@
 module NCTC
 
-public class NCTCRequestServiceAction extends ActionBool {
+// A data terminal's in-world interaction widget is built specifically for
+// OpenWorldMapDeviceAction.  Keep that native action shape so the prompt is
+// rendered, then intercept the click below before it can open the map.
+public class NCTCRequestServiceAction extends OpenWorldMapDeviceAction {
   public func SetProperties() -> Void {
     this.actionName = n"NCTCRequestService";
     this.prop = DeviceActionPropertyFunctions.SetUpProperty_Bool(
@@ -8,6 +11,10 @@ public class NCTCRequestServiceAction extends ActionBool {
       n"Request NCTC service",
       n"Request NCTC service"
     );
+  }
+
+  public func GetTweakDBChoiceRecord() -> String {
+    return "NCTCRequestW01";
   }
 
 }
@@ -32,24 +39,29 @@ public const func GetActions(out actions: array<ref<DeviceAction>>, context: Get
     index -= 1;
   };
   action = new NCTCRequestServiceAction();
-  action.clearanceLevel = DefaultActionsParametersHolder.GetInteractiveClearance();
   action.SetUp(this);
   action.SetProperties();
   action.AddDeviceName(this.GetDeviceName());
-  action.SetObjectActionID(t"DeviceAction.NCTCRequestService");
   action.CreateActionWidgetPackage();
   ArrayPush(actions, action);
   return true;
 }
 
-@addMethod(DataTermControllerPS)
-protected cb func OnActionNCTCRequestServiceAction(evt: ref<NCTCRequestServiceAction>) -> EntityNotificationType {
-  let player: ref<PlayerPuppet> = GetPlayer(this.GetGameInstance());
-  let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(this.GetGameInstance());
+@wrapMethod(DataTerm)
+private final func RequestFastTravelMenu() -> Void {
+  let player: ref<PlayerPuppet> = GameInstance.GetPlayerSystem(this.GetGame())
+    .GetLocalPlayerMainGameObject() as PlayerPuppet;
+  let markers: ref<NCTCMapMarkerSystem>;
   let line: String;
   let stop: Vector4;
-  if IsDefined(player) && IsDefined(markers) && markers.GetNearestService(player.GetWorldPosition(), line, stop) {
-    NCTCTransitSystem.Get(this.GetGameInstance()).RequestService(line, stop);
+
+  if IsDefined(player) {
+    markers = NCTCMapMarkerSystem.GetInstance(this.GetGame());
+    if IsDefined(markers) && markers.GetNearestService(player.GetWorldPosition(), line, stop) {
+      NCTCTransitSystem.Get(this.GetGame()).RequestService(line, stop);
+      return;
+    };
   };
-  return EntityNotificationType.DoNotNotifyEntity;
+
+  wrappedMethod();
 }
