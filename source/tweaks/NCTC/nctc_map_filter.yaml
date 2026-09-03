@@ -1,13 +1,13 @@
-# NCTC owns this filter group.  The `CustomFilter` enum is the engine's
-# dedicated slot for independently-defined map filters; the record and its
-# mappin variant below are NCTC-only and are not shared with another mod.
+# NCTC owns this filter group and its marker variant.  A world-map filter
+# enum must be one already compiled into the game; Courier is otherwise
+# unused in this installation, unlike CustomFilter which Odometer also uses.
 Mappins.NCTCStopVariant:
   $type: gamedataMappinVariant_Record
   enumName: CPO_PingDoorVariant
 
 WorldMap.NCTCStopsFilter:
   $type: gamedataWorldMapFilter_Record
-  enumName: CustomFilter
+  enumName: Courier
 
 WorldMap.NCTCStopsFilterGroup:
   $type: gamedataMappinUIFilterGroup_Record
