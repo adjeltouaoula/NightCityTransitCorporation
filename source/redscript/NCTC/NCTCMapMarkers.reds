@@ -331,6 +331,7 @@ protected func UpdateIcon() -> Void {
 @wrapMethod(WorldMapTooltipController)
 public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<WorldMapMenuGameController>) -> Void {
   let stopData: ref<NCTCStopMappinData>;
+  let travel: ref<FastTravelMappin>;
   wrappedMethod(data, menu);
   if !IsDefined(Deref(data).mappin) { return; };
   stopData = Deref(data).mappin.GetScriptData() as NCTCStopMappinData;
@@ -341,5 +342,12 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
       inkTextRef.SetText(this.m_titleText, stopData.services);
     };
     inkTextRef.SetText(this.m_descText, stopData.services);
+    return;
+  };
+  // Temporary survey aid: hover a native travel/metro point to see the stable
+  // identifier needed for an exact NCTC anchor mapping.
+  travel = Deref(data).mappin as FastTravelMappin;
+  if IsDefined(travel) {
+    inkTextRef.SetText(this.m_descText, "NCTC survey key: " + travel.GetPointData().GetPointDisplayName());
   };
 }
