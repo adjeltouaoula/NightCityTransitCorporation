@@ -307,7 +307,8 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
         while index < ArraySize(stopData.serviceLines) {
           serviceText = new inkText();
           serviceText.SetFontFamily("base\\gameplay\\gui\\fonts\\raj\\raj.inkfontfamily");
-          serviceText.SetFontSize(28);
+          serviceText.SetFontSize(inkTextRef.GetFontSize(this.m_descText));
+          serviceText.SetFontStyle(inkTextRef.GetFontStyle(this.m_descText));
           serviceText.SetLetterCase(textLetterCase.OriginalCase);
           serviceText.SetStyle(r"base\\gameplay\\gui\\common\\main_colors.inkstyle");
           serviceText.SetText("NCTC " + stopData.serviceLines[index] + " — " + stopData.serviceStops[index]);
