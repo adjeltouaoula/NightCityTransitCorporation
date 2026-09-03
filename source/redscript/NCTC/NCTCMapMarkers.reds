@@ -268,6 +268,20 @@ protected cb func OnDetach() -> Bool {
   return wrappedMethod();
 }
 
+// Native fast-travel and NCART mappins exist only after the world map opens.
+// Registering here gives the exact-anchor table access to them.
+@wrapMethod(WorldMapMenuGameController)
+protected cb func OnInitialize() -> Bool {
+  let result: Bool = wrappedMethod();
+  let player: wref<GameObject> = this.GetPlayerControlledObject();
+  let system: ref<NCTCMapMarkerSystem>;
+  if IsDefined(player) {
+    system = NCTCMapMarkerSystem.GetInstance(player.GetGame());
+    if IsDefined(system) { system.RegisterAllMarkers(); };
+  };
+  return result;
+}
+
 @addMethod(BaseMappinBaseController)
 protected final func ApplyNCTCStopIcon(line: String) -> Void {
   let icon: wref<inkImage>;
