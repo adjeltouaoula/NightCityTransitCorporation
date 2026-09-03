@@ -2,6 +2,18 @@ module NCTC
 
 // Native HUD prompt, independent from the fast-travel DataTerm widget.
 public class NCTCStopPrompt {
+  public static func FormatTerminalTitle(lines: array<String>, stops: array<String>) -> String {
+    let index: Int32 = 1;
+    let title: String;
+    if ArraySize(lines) == 1 { return stops[0] + "\nNCTC • LIGNE " + lines[0]; };
+    title = stops[0] + "\nTRANSFER: " + lines[0];
+    while index < ArraySize(lines) {
+      title += " · " + lines[index];
+      index += 1;
+    };
+    return title;
+  }
+
   public static func IsNearStop(game: GameInstance, out line: String, out stop: Vector4) -> Bool {
     let player: ref<PlayerPuppet> = GetPlayer(game);
     let markers: ref<NCTCMapMarkerSystem>;
@@ -9,6 +21,27 @@ public class NCTCStopPrompt {
     markers = NCTCMapMarkerSystem.GetInstance(game);
     if !IsDefined(markers) || !markers.GetNearestService(player.GetWorldPosition(), line, stop) { return false; };
     return Vector4.Distance(player.GetWorldPosition(), stop) <= 6.00;
+  }
+
+  public static func FormatTitle(game: GameInstance) -> String {
+    let player: ref<PlayerPuppet> = GetPlayer(game);
+    let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(game);
+    let lines: array<String>;
+    let stops: array<String>;
+    let index: Int32 = 1;
+    let title: String;
+    if !IsDefined(player) || !IsDefined(markers) || !markers.GetNearestStopServices(player.GetWorldPosition(), lines, stops) {
+      return "Attendre le bus";
+    };
+    if ArraySize(lines) == 1 {
+      return "Ligne " + lines[0] + " — " + stops[0];
+    };
+    title = "Correspondance — lignes " + lines[0];
+    while index < ArraySize(lines) {
+      title += ", " + lines[index];
+      index += 1;
+    };
+    return title;
   }
 
   public static func SetVisible(game: GameInstance, visible: Bool) -> Void {
@@ -21,7 +54,7 @@ public class NCTCStopPrompt {
     hub.id = -12017;
     hub.active = visible;
     hub.flags = IntEnum<EVisualizerDefinitionFlags>(0);
-    hub.title = "Attendre le bus";
+    hub.title = NCTCStopPrompt.FormatTitle(game);
     choice.localizedName = "Attendre le bus";
     choice.inputAction = n"UI_Apply";
     ChoiceTypeWrapper.SetType(choiceType, gameinteractionsChoiceType.Blueline);
@@ -119,4 +152,20 @@ public const func GetActions(out actions: array<ref<DeviceAction>>, context: Get
     index -= 1;
   };
   return result;
+}
+
+// The title on the physical DataTerm screen is separate from its interaction
+// widget.  Keep all non-NCTC terminals untouched, then replace only the
+// screen's point-name label when its linked fast-travel point is an NCTC stop.
+@wrapMethod(DataTermInkGameController)
+private func UpdatePointText() -> Void {
+  let system: ref<NCTCMapMarkerSystem>;
+  let lines: array<String>;
+  let stops: array<String>;
+  wrappedMethod();
+  if !IsDefined(this.m_point) { return; };
+  system = NCTCMapMarkerSystem.GetInstance(this.GetOwner().GetGame());
+  if IsDefined(system) && system.GetServicesForLocKey(this.m_point.GetPointDisplayName(), lines, stops) {
+    this.m_pointText.SetText(NCTCStopPrompt.FormatTerminalTitle(lines, stops));
+  };
 }

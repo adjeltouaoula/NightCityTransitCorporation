@@ -35,6 +35,8 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
   private let m_registeredMappins: array<NewMappinID>;
   private let m_servicePositions: array<Vector4>;
   private let m_serviceLines: array<String>;
+  private let m_serviceHubLines: array<array<String>>;
+  private let m_serviceHubStops: array<array<String>>;
 
   public static func GetInstance(game: GameInstance) -> ref<NCTCMapMarkerSystem> {
     return GameInstance.GetScriptableSystemsContainer(game).Get(NameOf<NCTCMapMarkerSystem>()) as NCTCMapMarkerSystem;
@@ -175,6 +177,42 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     return true;
   }
 
+  public func GetNearestStopServices(position: Vector4, out lines: array<String>, out stops: array<String>) -> Bool {
+    let index: Int32 = 0;
+    let nearest: Int32 = -1;
+    let nearestDistance: Float = 18.00;
+    let distance: Float;
+    while index < ArraySize(this.m_servicePositions) {
+      distance = Vector4.Distance(position, this.m_servicePositions[index]);
+      if distance < nearestDistance {
+        nearestDistance = distance;
+        nearest = index;
+      };
+      index += 1;
+    };
+    if nearest < 0 { return false; };
+    lines = this.m_serviceHubLines[nearest];
+    stops = this.m_serviceHubStops[nearest];
+    return true;
+  }
+
+  // Used by the physical fast-travel terminal screen.  Unlike the map-marker
+  // cache, this is also safe while the world map is not open yet.
+  public func GetServicesForLocKey(locKey: String, out lines: array<String>, out stops: array<String>) -> Bool {
+    let definitions: array<NCTCStopDefinition> = this.GetStops();
+    let index: Int32 = 0;
+    let knownLines: String = "|";
+    while index < ArraySize(definitions) {
+      if Equals(definitions[index].locKey, locKey) && !StrContains(knownLines, "|" + definitions[index].line + "|") {
+        ArrayPush(lines, definitions[index].line);
+        ArrayPush(stops, definitions[index].stop);
+        knownLines += definitions[index].line + "|";
+      };
+      index += 1;
+    };
+    return ArraySize(lines) > 0;
+  }
+
   public func RegisterAllMarkers() -> Void {
     let data: MappinData;
     let markerData: ref<NCTCStopMappinData>;
@@ -238,6 +276,8 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     };
     this.m_servicePositions = positions;
     this.m_serviceLines = lines;
+    this.m_serviceHubLines = hubServiceLines;
+    this.m_serviceHubStops = hubServiceStops;
   }
 
   public func UnregisterAllMarkers() -> Void {
@@ -246,6 +286,8 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     ArrayClear(this.m_registeredMappins);
     ArrayClear(this.m_servicePositions);
     ArrayClear(this.m_serviceLines);
+    ArrayClear(this.m_serviceHubLines);
+    ArrayClear(this.m_serviceHubStops);
   }
 }
 
