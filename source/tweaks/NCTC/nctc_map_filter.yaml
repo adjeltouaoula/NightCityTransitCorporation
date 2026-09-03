@@ -4,7 +4,7 @@ Mappins.NCTCStopVariant:
 
 WorldMap.NCTCStopsFilter:
   $type: WorldMapFilter_Record
-  enumName: FastTravel
+  enumName: Courier
 
 WorldMap.NCTCStopsFilterGroup:
   $type: MappinUIFilterGroup_Record
