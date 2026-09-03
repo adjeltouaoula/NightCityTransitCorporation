@@ -1,26 +1,8 @@
+# NCTC map mappin definition only.
+# No world-map filter list is modified in this reset build.
 Mappins.NCTCStopVariant:
   $type: gamedataMappinVariant_Record
-  # NCTC-only variant. It is not used by Fuel/Odometer or any vanilla POI.
   enumName: CPO_PingDoorVariant
-
-WorldMap.NCTCStopsFilter:
-  $type: WorldMapFilter_Record
-  # This gives NCTC its own independent switch; it is not CustomFilter.
-  enumName: Courier
-
-WorldMap.NCTCStopsFilterGroup:
-  $type: MappinUIFilterGroup_Record
-  filterName: UI-MappinTypes-NCTCStops
-  filterType: WorldMap.NCTCStopsFilter
-  mappins:
-    - Mappins.NCTCStopVariant
-  shouldCollectMappins: false
-
-WorldMap.WorldMapCustomFiltersList.list:
-  - !append-once WorldMap.NCTCStopsFilterGroup
-
-WorldMap.WorldMapQuickFiltersList.list:
-  - !append-once WorldMap.NCTCStopsFilterGroup
 
 Mappins.NCTCStopMappinDefinition:
   $type: gamedataMappinDefinition_Record
@@ -33,15 +15,3 @@ Mappins.NCTCStopMappinDefinition:
 
 WorldMappinUIProfile.NCTCStop:
   $base: WorldMappinUIProfile.Quest
-
-WorldMap.ZoomLevelImportant.mappinFilterGroups:
-  - !append-once WorldMap.NCTCStopsFilterGroup
-
-WorldMap.ZoomLevelAllMappins.mappinFilterGroups:
-  - !append-once WorldMap.NCTCStopsFilterGroup
-
-WorldMap.ZoomLevelExtraMappins.mappinFilterGroups:
-  - !append-once WorldMap.NCTCStopsFilterGroup
-
-WorldMap.ZoomLevelSubDistricts.mappinFilterGroups:
-  - !append-once WorldMap.NCTCStopsFilterGroup
