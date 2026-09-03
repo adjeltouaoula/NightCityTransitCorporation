@@ -1,12 +1,12 @@
 module NCTC
 
 public class NCTCWaitForBusAction extends OpenWorldMapDeviceAction {
-  public func SetProperties(line: String) -> Void {
+  public func SetProperties() -> Void {
     this.actionName = n"NCTCWaitForBus";
     this.prop = DeviceActionPropertyFunctions.SetUpProperty_Bool(
       n"NCTCWaitForBus", true,
-      StringToName("Wait for NCTC line " + line),
-      StringToName("Wait for NCTC line " + line)
+      n"Wait for the NCTC bus",
+      n"Wait for the NCTC bus"
     );
   }
 
@@ -36,7 +36,7 @@ public const func GetActions(out actions: array<ref<DeviceAction>>, context: Get
   };
   action = new NCTCWaitForBusAction();
   action.SetUp(this);
-  action.SetProperties(line);
+  action.SetProperties();
   action.AddDeviceName(this.GetDeviceName());
   action.CreateActionWidgetPackage();
   ArrayPush(actions, action);
