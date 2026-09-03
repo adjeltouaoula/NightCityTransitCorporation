@@ -3,6 +3,6 @@
 Vehicle.nctc_service_mahir_mt28_coach:
   $base: Vehicle.v_mahir_mt28_coach
 
-NCTCRequestService:
+NCTCRequestW01:
   $base: SellectDestination
   caption: "Request NCTC service"

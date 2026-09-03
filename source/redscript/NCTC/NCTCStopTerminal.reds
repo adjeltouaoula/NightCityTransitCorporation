@@ -11,7 +11,7 @@ public class NCTCRequestServiceAction extends OpenWorldMapDeviceAction {
   }
 
   public func GetTweakDBChoiceRecord() -> String {
-    return "NCTCRequestService";
+    return "NCTCRequestW01";
   }
 }
 
