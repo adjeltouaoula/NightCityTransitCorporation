@@ -165,7 +165,7 @@ protected final func ApplyNCTCStopIcon(line: String) -> Void {
     case "23": useCustomPink = true; break;
     case "51": color = n"MainColors.Green"; break;
     case "68": color = n"MainColors.Purple"; break;
-    case "72": color = n"MainColors.Red"; break;
+    case "72": color = n"MainColors.Blue"; break;
   };
 
   inkImageRef.SetAtlasResource(this.iconWidget, r"base\\gameplay\\gui\\common\\icons\\mappin_icons.inkatlas");
