@@ -32,9 +32,11 @@ public const func GetActions(out actions: array<ref<DeviceAction>>, context: Get
     index -= 1;
   };
   action = new NCTCRequestServiceAction();
+  action.clearanceLevel = DefaultActionsParametersHolder.GetInteractiveClearance();
   action.SetUp(this);
   action.SetProperties();
   action.AddDeviceName(this.GetDeviceName());
+  action.SetObjectActionID(t"DeviceAction.NCTCRequestService");
   action.CreateActionWidgetPackage();
   ArrayPush(actions, action);
   return true;
