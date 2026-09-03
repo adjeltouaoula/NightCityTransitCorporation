@@ -1,5 +1,17 @@
 module NCTC
 
+public class NCTCMarkerRefreshCallback extends DelayCallback {
+  private let system: wref<NCTCMapMarkerSystem>;
+
+  public func Configure(system: ref<NCTCMapMarkerSystem>) -> Void {
+    this.system = system;
+  }
+
+  public func Call() -> Void {
+    if IsDefined(this.system) { this.system.RegisterAllMarkers(); };
+  }
+}
+
 public struct NCTCStopDefinition {
   public let locKey: String;
   public let line: String;
@@ -241,7 +253,13 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
 protected cb func OnGameAttached() -> Bool {
   let result: Bool = wrappedMethod();
   let system: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(this.GetGame());
-  if IsDefined(system) { system.RegisterAllMarkers(); };
+  let callback: ref<NCTCMarkerRefreshCallback>;
+  if IsDefined(system) {
+    system.RegisterAllMarkers();
+    callback = new NCTCMarkerRefreshCallback();
+    callback.Configure(system);
+    GameInstance.GetDelaySystem(this.GetGame()).DelayCallback(callback, 3.00, false);
+  };
   return result;
 }
 

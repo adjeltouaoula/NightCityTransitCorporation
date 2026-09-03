@@ -1,17 +1,17 @@
 module NCTC
 
-public class NCTCWaitForBusAction extends OpenWorldMapDeviceAction {
+public class NCTCRequestServiceAction extends OpenWorldMapDeviceAction {
   public func SetProperties() -> Void {
-    this.actionName = n"NCTCWaitForBus";
+    this.actionName = n"NCTCRequestService";
     this.prop = DeviceActionPropertyFunctions.SetUpProperty_Bool(
-      n"NCTCWaitForBus", true,
-      n"Wait for the NCTC bus",
-      n"Wait for the NCTC bus"
+      n"NCTCRequestService", true,
+      n"Request NCTC service",
+      n"Request NCTC service"
     );
   }
 
   public func GetTweakDBChoiceRecord() -> String {
-    return "NCTCWaitForBus";
+    return "NCTCRequestService";
   }
 }
 
@@ -24,7 +24,7 @@ public const func GetActions(out actions: array<ref<DeviceAction>>, context: Get
   let stop: Vector4;
   let index: Int32;
   let mapAction: ref<OpenWorldMapDeviceAction>;
-  let action: ref<NCTCWaitForBusAction>;
+  let action: ref<NCTCRequestServiceAction>;
   if !result || !IsDefined(player) { return result; };
   markers = NCTCMapMarkerSystem.GetInstance(this.GetGameInstance());
   if !IsDefined(markers) || !markers.GetNearestService(player.GetWorldPosition(), line, stop) { return result; };
@@ -34,7 +34,7 @@ public const func GetActions(out actions: array<ref<DeviceAction>>, context: Get
     if IsDefined(mapAction) { ArrayErase(actions, index); };
     index -= 1;
   };
-  action = new NCTCWaitForBusAction();
+  action = new NCTCRequestServiceAction();
   action.SetUp(this);
   action.SetProperties();
   action.AddDeviceName(this.GetDeviceName());

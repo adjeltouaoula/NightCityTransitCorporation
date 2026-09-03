@@ -3,6 +3,6 @@
 Vehicle.nctc_service_mahir_mt28_coach:
   $base: Vehicle.v_mahir_mt28_coach
 
-NCTCWaitForBus:
+NCTCRequestService:
   $base: SellectDestination
-  caption: "Wait for NCTC service"
+  caption: "Request NCTC service"
