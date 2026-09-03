@@ -15,7 +15,10 @@ WorldMap.NCTCStopsFilterGroup:
   filterType: WorldMap.NCTCStopsFilter
   mappins:
     - Mappins.NCTCStopVariant
-  shouldCollectMappins: false
+  # Runtime mappins registered by redscript must be collected explicitly.
+  # This matches NCGT's working filter architecture; the variant above keeps
+  # the result limited to NCTC markers.
+  shouldCollectMappins: true
 
 # This adds one checkbox, “Transport Corp Lines”, in the Custom tab only.
 # It does not replace, append to, or recolour any vanilla filter group.
