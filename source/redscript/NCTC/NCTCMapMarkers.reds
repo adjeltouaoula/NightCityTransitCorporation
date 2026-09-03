@@ -9,6 +9,8 @@ public struct NCTCStopDefinition {
 public class NCTCStopMappinData extends MappinScriptData {
   public let line: String;
   public let stop: String;
+  public let services: String;
+  public let isHub: Bool;
 }
 
 public class NCTCMapMarkerSystem extends ScriptableSystem {
@@ -107,21 +109,50 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     let markerData: ref<NCTCStopMappinData>;
     let system: ref<MappinSystem>;
     let stops: array<NCTCStopDefinition>;
+    let positions: array<Vector4>;
+    let services: array<String>;
+    let counts: array<Int32>;
+    let position: Vector4;
+    let service: String;
+    let stopIndex: Int32 = 0;
     let index: Int32 = 0;
+    let found: Int32;
 
     this.UnregisterAllMarkers();
     system = GameInstance.GetMappinSystem(this.GetGameInstance());
     if !IsDefined(system) { return; };
     stops = this.GetStops();
-    while index < ArraySize(stops) {
+    while stopIndex < ArraySize(stops) {
+      position = stops[stopIndex].position;
+      service = "NCTC " + stops[stopIndex].line + " — " + stops[stopIndex].stop;
+      found = -1;
+      index = 0;
+      while index < ArraySize(positions) {
+        if Vector4.Distance2D(positions[index], position) < 1.00 { found = index; break; };
+        index += 1;
+      };
+      if found < 0 {
+        ArrayPush(positions, position);
+        ArrayPush(services, service);
+        ArrayPush(counts, 1);
+      } else if !StrContains(services[found], service) {
+        services[found] += "\n" + service;
+        counts[found] += 1;
+      };
+      stopIndex += 1;
+    };
+    index = 0;
+    while index < ArraySize(positions) {
       markerData = new NCTCStopMappinData();
-      markerData.line = stops[index].line;
-      markerData.stop = stops[index].stop;
+      markerData.line = "HUB";
+      markerData.stop = "Transit Hub";
+      markerData.services = services[index];
+      markerData.isHub = counts[index] > 1;
       data.mappinType = t"Mappins.NCTCStopMappinDefinition";
       data.variant = gamedataMappinVariant.CPO_PingDoorVariant;
       data.active = true;
       data.scriptData = markerData;
-      ArrayPush(this.m_registeredMappins, system.RegisterMappin(data, stops[index].position));
+      ArrayPush(this.m_registeredMappins, system.RegisterMappin(data, positions[index]));
       index += 1;
     };
   }
@@ -156,6 +187,7 @@ protected final func ApplyNCTCStopIcon(line: String) -> Void {
   let color: CName = n"MainColors.Green";
   let useCustomOrange: Bool = false;
   let useCustomPink: Bool = false;
+  let useCustomHub: Bool = false;
 
   // Colours identify a route while all stops remain under the one NCTC map
   // filter.  No vanilla filter category is repurposed for individual lines.
@@ -166,6 +198,7 @@ protected final func ApplyNCTCStopIcon(line: String) -> Void {
     case "51": color = n"MainColors.Green"; break;
     case "68": color = n"MainColors.Purple"; break;
     case "72": color = n"MainColors.Blue"; break;
+    case "HUB": useCustomHub = true; break;
   };
 
   inkImageRef.SetAtlasResource(this.iconWidget, r"base\\gameplay\\gui\\common\\icons\\mappin_icons.inkatlas");
@@ -179,6 +212,8 @@ protected final func ApplyNCTCStopIcon(line: String) -> Void {
       icon.SetTintColor(new HDRColor(1.28, 0.32, 0.00, 1.00));
     } else if useCustomPink {
       icon.SetTintColor(new HDRColor(1.00, 0.25, 0.65, 1.00));
+    } else if useCustomHub {
+      icon.SetTintColor(new HDRColor(0.37, 0.96, 1.00, 1.00));
     } else {
       icon.BindProperty(n"tintColor", color);
     };
@@ -199,7 +234,11 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
   if !IsDefined(Deref(data).mappin) { return; };
   stopData = Deref(data).mappin.GetScriptData() as NCTCStopMappinData;
   if IsDefined(stopData) {
-    inkTextRef.SetText(this.m_titleText, "NCTC " + stopData.line + " — " + stopData.stop);
-    inkTextRef.SetText(this.m_descText, "Map-planning candidate. Physical terminal location to be surveyed.");
+    if stopData.isHub {
+      inkTextRef.SetText(this.m_titleText, "NCTC Transit Hub");
+    } else {
+      inkTextRef.SetText(this.m_titleText, stopData.services);
+    };
+    inkTextRef.SetText(this.m_descText, stopData.services);
   };
 }
