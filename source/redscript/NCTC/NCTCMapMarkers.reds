@@ -15,7 +15,8 @@ public class NCTCStopMappinData extends MappinScriptData {
 
 public struct NCTCTravelAnchor {
   public let position: Vector4;
-  public let isMetro: Bool;
+  public let locKey: String;
+  public let displayName: String;
 }
 
 public class NCTCMapMarkerSystem extends ScriptableSystem {
@@ -62,40 +63,46 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     let mappins: array<ref<IMappin>> = system.GetAllMappins();
     let mappin: ref<IMappin>;
     let anchor: NCTCTravelAnchor;
+    let travel: ref<FastTravelMappin>;
     let index: Int32 = 0;
     while index < ArraySize(mappins) {
       mappin = mappins[index];
       if IsDefined(mappin) && (Equals(mappin.GetVariant(), gamedataMappinVariant.FastTravelVariant) || Equals(mappin.GetVariant(), gamedataMappinVariant.Zzz17_NCARTVariant)) {
-        anchor.position = mappin.GetWorldPosition();
-        anchor.isMetro = Equals(mappin.GetVariant(), gamedataMappinVariant.Zzz17_NCARTVariant);
-        ArrayPush(anchors, anchor);
+        travel = mappin as FastTravelMappin;
+        if IsDefined(travel) {
+          anchor.position = travel.GetWorldPosition();
+          anchor.locKey = travel.GetPointData().GetPointDisplayName();
+          anchor.displayName = GetLocalizedText(anchor.locKey);
+          ArrayPush(anchors, anchor);
+        };
       };
       index += 1;
     };
     return anchors;
   }
 
-  private func ResolveAnchor(stop: NCTCStopDefinition, anchors: array<NCTCTravelAnchor>) -> Vector4 {
-    let metro: Int32 = -1;
-    let fastTravel: Int32 = -1;
-    let metroDistance: Float = 700.00;
-    let fastTravelDistance: Float = 900.00;
-    let distance: Float;
+  private func RequiredLocKey(stop: String) -> String {
+    switch stop {
+      case "Medical Center": return "LocKey#44728";
+      case "Bank Block": return "LocKey#52544";
+      case "New Harbor": return "LocKey#52585";
+      case "Charter Hill": return "LocKey#52574";
+      case "West Hill": return "LocKey#52574";
+      case "South Night City": return "LocKey#44676";
+    };
+    return "";
+  }
+
+  // Exact anchor lookup only. It never substitutes a nearby terminal.
+  private func ResolveAnchor(stop: NCTCStopDefinition, anchors: array<NCTCTravelAnchor>) -> Int32 {
+    let targetName: String = this.DisplayStopName(stop.stop);
+    let targetLocKey: String = this.RequiredLocKey(stop.stop);
     let index: Int32 = 0;
     while index < ArraySize(anchors) {
-      distance = Vector4.Distance2D(stop.position, anchors[index].position);
-      if anchors[index].isMetro && distance < metroDistance {
-        metro = index;
-        metroDistance = distance;
-      } else if !anchors[index].isMetro && distance < fastTravelDistance {
-        fastTravel = index;
-        fastTravelDistance = distance;
-      };
+      if (StrLen(targetLocKey) > 0 && Equals(anchors[index].locKey, targetLocKey)) || Equals(anchors[index].displayName, targetName) { return index; };
       index += 1;
     };
-    if metro >= 0 { return anchors[metro].position; };
-    if fastTravel >= 0 { return anchors[fastTravel].position; };
-    return stop.position;
+    return -1;
   }
 
   // Map-planning coordinates, intentionally independent from physical terminal,
@@ -190,6 +197,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     let stopIndex: Int32 = 0;
     let index: Int32 = 0;
     let found: Int32;
+    let anchorIndex: Int32;
 
     this.UnregisterAllMarkers();
     system = GameInstance.GetMappinSystem(this.GetGameInstance());
@@ -197,22 +205,25 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     stops = this.GetStops();
     anchors = this.GetTravelAnchors(system);
     while stopIndex < ArraySize(stops) {
-      position = this.ResolveAnchor(stops[stopIndex], anchors);
-      service = "NCTC " + stops[stopIndex].line + " — " + this.DisplayStopName(stops[stopIndex].stop);
-      found = -1;
-      index = 0;
-      while index < ArraySize(positions) {
-        if Vector4.Distance2D(positions[index], position) < 1.00 { found = index; break; };
-        index += 1;
-      };
-      if found < 0 {
-        ArrayPush(positions, position);
-        ArrayPush(services, service);
-        ArrayPush(lines, stops[stopIndex].line);
-        ArrayPush(counts, 1);
-      } else if !StrContains(services[found], service) {
-        services[found] += "\n" + service;
-        counts[found] += 1;
+      anchorIndex = this.ResolveAnchor(stops[stopIndex], anchors);
+      if anchorIndex >= 0 {
+        position = anchors[anchorIndex].position;
+        service = "NCTC " + stops[stopIndex].line + " — " + this.DisplayStopName(stops[stopIndex].stop);
+        found = -1;
+        index = 0;
+        while index < ArraySize(positions) {
+          if Vector4.Distance2D(positions[index], position) < 1.00 { found = index; break; };
+          index += 1;
+        };
+        if found < 0 {
+          ArrayPush(positions, position);
+          ArrayPush(services, service);
+          ArrayPush(lines, stops[stopIndex].line);
+          ArrayPush(counts, 1);
+        } else if !StrContains(services[found], service) {
+          services[found] += "\n" + service;
+          counts[found] += 1;
+        };
       };
       stopIndex += 1;
     };
