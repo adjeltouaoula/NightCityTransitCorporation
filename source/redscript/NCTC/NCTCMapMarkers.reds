@@ -16,6 +16,9 @@ public struct NCTCStopDefinition {
   public let locKey: String;
   public let line: String;
   public let stop: String;
+  public let position: Vector4;
+  public let isManual: Bool;
+  public let color: Int32;
 }
 
 public struct NCTCTravelAnchor {
@@ -29,6 +32,8 @@ public class NCTCStopMappinData extends MappinScriptData {
   public let serviceLines: array<String>;
   public let serviceStops: array<String>;
   public let isHub: Bool;
+  public let color: Int32;
+  public let serviceColors: array<Int32>;
 }
 
 public class NCTCMapMarkerSystem extends ScriptableSystem {
@@ -47,75 +52,21 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     definition.line = line;
     definition.locKey = locKey;
     definition.stop = stop;
+    definition.position = Vector4.EmptyVector();
+    definition.isManual = false;
+    definition.color = -1;
     return definition;
   }
 
-  // The network is anchored directly to native fast-travel / NCART LocKeys.
-  // No district coordinates and no "nearest station" fallback are used.
-  private func GetStops() -> array<NCTCStopDefinition> {
-    let stops: array<NCTCStopDefinition>;
-
-    // 17
-    ArrayPush(stops, this.Stop("17", "LocKey#44536", "QG Delamain"));
-    ArrayPush(stops, this.Stop("17", "LocKey#44531", "Petrel Street"));
-    ArrayPush(stops, this.Stop("17", "LocKey#44485", "Rocade"));
-    ArrayPush(stops, this.Stop("17", "LocKey#44534", "Congress & Madison"));
-    ArrayPush(stops, this.Stop("17", "LocKey#44532", "College Street"));
-    ArrayPush(stops, this.Stop("17", "LocKey#44533", "Skyline Est"));
-    ArrayPush(stops, this.Stop("17", "LocKey#44536", "QG Delamain"));
-
-    // 22
-    ArrayPush(stops, this.Stop("22", "LocKey#44695", "Sarsati & Republic"));
-    ArrayPush(stops, this.Stop("22", "LocKey#44485", "Rocade"));
-    ArrayPush(stops, this.Stop("22", "LocKey#52544", "Memorial Park"));
-    ArrayPush(stops, this.Stop("22", "LocKey#44485", "Rocade"));
-    ArrayPush(stops, this.Stop("22", "LocKey#44536", "QG Delamain"));
-    ArrayPush(stops, this.Stop("22", "LocKey#44531", "Petrel Street"));
-    ArrayPush(stops, this.Stop("22", "LocKey#44485", "Rocade"));
-    ArrayPush(stops, this.Stop("22", "LocKey#44695", "Sarsati & Republic"));
-
-    // 23
-    ArrayPush(stops, this.Stop("23", "LocKey#52544", "Memorial Park"));
-    ArrayPush(stops, this.Stop("23", "LocKey#44534", "Congress & Madison"));
-    ArrayPush(stops, this.Stop("23", "LocKey#44532", "College Street"));
-    ArrayPush(stops, this.Stop("23", "LocKey#44533", "Skyline Est"));
-    ArrayPush(stops, this.Stop("23", "LocKey#44530", "Republic and Vine"));
-    ArrayPush(stops, this.Stop("23", "LocKey#44531", "Petrel Street"));
-    ArrayPush(stops, this.Stop("23", "LocKey#44536", "QG Delamain"));
-    ArrayPush(stops, this.Stop("23", "LocKey#44485", "Rocade"));
-    ArrayPush(stops, this.Stop("23", "LocKey#52544", "Memorial Park"));
-
-    // 51
-    ArrayPush(stops, this.Stop("51", "LocKey#44679", "Wellsprings"));
-    ArrayPush(stops, this.Stop("51", "LocKey#44533", "Skyline Est"));
-    ArrayPush(stops, this.Stop("51", "LocKey#44532", "College Street"));
-    ArrayPush(stops, this.Stop("51", "LocKey#44534", "Congress & Madison"));
-    ArrayPush(stops, this.Stop("51", "LocKey#44515", "Senate and Market"));
-    ArrayPush(stops, this.Stop("51", "LocKey#44679", "Wellsprings"));
-
-    // 68
-    ArrayPush(stops, this.Stop("68", "LocKey#44695", "Sarsati & Republic"));
-    ArrayPush(stops, this.Stop("68", "LocKey#44485", "Rocade"));
-    ArrayPush(stops, this.Stop("68", "LocKey#52544", "Memorial Park"));
-    ArrayPush(stops, this.Stop("68", "LocKey#44501", "Cannery Plaza"));
-    ArrayPush(stops, this.Stop("68", "LocKey#44515", "Senate and Market"));
-    ArrayPush(stops, this.Stop("68", "LocKey#44534", "Congress & Madison"));
-    ArrayPush(stops, this.Stop("68", "LocKey#44532", "College Street"));
-    ArrayPush(stops, this.Stop("68", "LocKey#44485", "Rocade"));
-    ArrayPush(stops, this.Stop("68", "LocKey#44695", "Sarsati & Republic"));
-
-    // 72
-    ArrayPush(stops, this.Stop("72", "LocKey#44679", "Wellsprings"));
-    ArrayPush(stops, this.Stop("72", "LocKey#44515", "Senate and Market"));
-    ArrayPush(stops, this.Stop("72", "LocKey#44501", "Cannery Plaza"));
-    ArrayPush(stops, this.Stop("72", "LocKey#44473", "Marina de Gold Beach"));
-    ArrayPush(stops, this.Stop("72", "LocKey#44700", "Alexander Street"));
-    ArrayPush(stops, this.Stop("72", "LocKey#44485", "Rocade"));
-    ArrayPush(stops, this.Stop("72", "LocKey#44695", "Sarsati & Republic"));
-    ArrayPush(stops, this.Stop("72", "LocKey#44485", "Rocade"));
-    ArrayPush(stops, this.Stop("72", "LocKey#44531", "Petrel Street"));
-    ArrayPush(stops, this.Stop("72", "LocKey#44679", "Wellsprings"));
-    return stops;
+  private func ManualStop(line: String, position: Vector4) -> NCTCStopDefinition {
+    let definition: NCTCStopDefinition;
+    definition.line = line;
+    definition.locKey = "";
+    definition.stop = "Survey stop";
+    definition.position = position;
+    definition.isManual = true;
+    definition.color = -1;
+    return definition;
   }
 
   private func GetTravelAnchors(system: ref<MappinSystem>) -> array<NCTCTravelAnchor> {
@@ -152,7 +103,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
   private func FindHub(positions: array<Vector4>, position: Vector4) -> Int32 {
     let index: Int32 = 0;
     while index < ArraySize(positions) {
-      if Vector4.Distance2D(positions[index], position) < 1.00 { return index; };
+      if Vector4.Distance2D(positions[index], position) < 20.00 { return index; };
       index += 1;
     };
     return -1;
@@ -177,6 +128,57 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     return true;
   }
 
+  public func GetNearestTravelAnchor(position: Vector4, out locKey: String, out anchorPosition: Vector4) -> Bool {
+    let system: ref<MappinSystem> = GameInstance.GetMappinSystem(this.GetGameInstance());
+    let anchors: array<NCTCTravelAnchor>;
+    let index: Int32 = 0;
+    let nearest: Int32 = -1;
+    let distance: Float;
+    let nearestDistance: Float = 12.00;
+    if !IsDefined(system) { return false; };
+    anchors = this.GetTravelAnchors(system);
+    while index < ArraySize(anchors) {
+      distance = Vector4.Distance(position, anchors[index].position);
+      if distance < nearestDistance { nearestDistance = distance; nearest = index; };
+      index += 1;
+    };
+    if nearest < 0 { return false; };
+    locKey = anchors[nearest].locKey; anchorPosition = anchors[nearest].position;
+    return true;
+  }
+
+  private func GetExternalStops() -> array<NCTCStopDefinition> {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    let stops: array<NCTCStopDefinition>;
+    let count: Int32;
+    let index: Int32 = 0;
+    let prefix: String;
+    let line: Int32;
+    let locKey: Int32;
+    let definition: NCTCStopDefinition;
+    if !IsDefined(quests) || !Equals(quests.GetFact(n"nctc_external_network_ready"), 1) { return stops; };
+    count = quests.GetFact(n"nctc_external_network_stop_count");
+    while index < count {
+      prefix = "nctc_external_stop_" + ToString(index) + "_";
+      line = quests.GetFact(StringToName(prefix + "line"));
+      locKey = quests.GetFact(StringToName(prefix + "loc_key"));
+      if locKey > 0 {
+        definition = this.Stop(ToString(line), "LocKey#" + ToString(locKey), GetLocalizedText("LocKey#" + ToString(locKey)));
+      } else {
+        definition = this.ManualStop(ToString(line), new Vector4(Cast<Float>(quests.GetFact(StringToName(prefix + "x"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "y"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "z"))) / 1000.00, 1.00));
+      };
+      definition.color = quests.GetFact(StringToName("nctc_external_line_" + ToString(line) + "_color"));
+      ArrayPush(stops, definition);
+      index += 1;
+    };
+    return stops;
+  }
+
+  private func GetNetworkStops() -> array<NCTCStopDefinition> {
+    // The external JSON network is the sole runtime source.
+    return this.GetExternalStops();
+  }
+
   public func GetNearestStopServices(position: Vector4, out lines: array<String>, out stops: array<String>) -> Bool {
     let index: Int32 = 0;
     let nearest: Int32 = -1;
@@ -199,7 +201,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
   // Used by the physical fast-travel terminal screen.  Unlike the map-marker
   // cache, this is also safe while the world map is not open yet.
   public func GetServicesForLocKey(locKey: String, out lines: array<String>, out stops: array<String>) -> Bool {
-    let definitions: array<NCTCStopDefinition> = this.GetStops();
+    let definitions: array<NCTCStopDefinition> = this.GetNetworkStops();
     let index: Int32 = 0;
     let knownLines: String = "|";
     while index < ArraySize(definitions) {
@@ -224,6 +226,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     let lines: array<String>;
     let hubServiceLines: array<array<String>>;
     let hubServiceStops: array<array<String>>;
+    let hubServiceColors: array<array<Int32>>;
     let counts: array<Int32>;
     let service: String;
     let anchorIndex: Int32;
@@ -234,11 +237,30 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     this.UnregisterAllMarkers();
     system = GameInstance.GetMappinSystem(this.GetGameInstance());
     if !IsDefined(system) { return; };
-    stops = this.GetStops();
+    stops = this.GetNetworkStops();
     anchors = this.GetTravelAnchors(system);
     while stopIndex < ArraySize(stops) {
       anchorIndex = this.FindAnchor(anchors, stops[stopIndex].locKey);
-      if anchorIndex >= 0 {
+      if stops[stopIndex].isManual {
+        anchorIndex = -1;
+        service = "NCTC " + stops[stopIndex].line + " — " + stops[stopIndex].stop;
+        hubIndex = this.FindHub(positions, stops[stopIndex].position);
+        if hubIndex < 0 {
+          ArrayPush(positions, stops[stopIndex].position);
+          ArrayPush(services, service);
+          ArrayPush(lines, stops[stopIndex].line);
+          ArrayPush(hubServiceLines, [stops[stopIndex].line]);
+          ArrayPush(hubServiceStops, [stops[stopIndex].stop]);
+          ArrayPush(hubServiceColors, [stops[stopIndex].color]);
+          ArrayPush(counts, 1);
+        } else if !StrContains(services[hubIndex], service) {
+          services[hubIndex] += "\n" + service;
+          ArrayPush(hubServiceLines[hubIndex], stops[stopIndex].line);
+          ArrayPush(hubServiceStops[hubIndex], stops[stopIndex].stop);
+          ArrayPush(hubServiceColors[hubIndex], stops[stopIndex].color);
+          counts[hubIndex] += 1;
+        };
+      } else if anchorIndex >= 0 {
         service = "NCTC " + stops[stopIndex].line + " — " + stops[stopIndex].stop;
         hubIndex = this.FindHub(positions, anchors[anchorIndex].position);
         if hubIndex < 0 {
@@ -247,11 +269,13 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
           ArrayPush(lines, stops[stopIndex].line);
           ArrayPush(hubServiceLines, [stops[stopIndex].line]);
           ArrayPush(hubServiceStops, [stops[stopIndex].stop]);
+          ArrayPush(hubServiceColors, [stops[stopIndex].color]);
           ArrayPush(counts, 1);
         } else if !StrContains(services[hubIndex], service) {
           services[hubIndex] += "\n" + service;
           ArrayPush(hubServiceLines[hubIndex], stops[stopIndex].line);
           ArrayPush(hubServiceStops[hubIndex], stops[stopIndex].stop);
+          ArrayPush(hubServiceColors[hubIndex], stops[stopIndex].color);
           counts[hubIndex] += 1;
         };
       };
@@ -264,8 +288,10 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
       markerData.services = services[index];
       markerData.serviceLines = hubServiceLines[index];
       markerData.serviceStops = hubServiceStops[index];
+      markerData.serviceColors = hubServiceColors[index];
       markerData.isHub = counts[index] > 1;
       markerData.line = lines[index];
+      markerData.color = hubServiceColors[index][0];
       if markerData.isHub { markerData.line = "HUB"; };
       data.mappinType = t"Mappins.NCTCStopMappinDefinition";
       data.variant = gamedataMappinVariant.CPO_PingDoorVariant;
@@ -327,30 +353,17 @@ protected cb func OnDetach() -> Bool {
 }
 
 @addMethod(BaseMappinBaseController)
-protected final func ApplyNCTCStopIcon(line: String) -> Void {
+protected final func ApplyNCTCStopIcon(line: String, lineColor: Int32) -> Void {
   let icon: wref<inkImage>;
-  let color: CName = n"MainColors.White";
-  let customOrange: Bool = false;
-  let customPink: Bool = false;
   let customHub: Bool = false;
-  switch line {
-    case "17": customOrange = true; break;
-    case "22": color = n"MainColors.Yellow"; break;
-    case "23": customPink = true; break;
-    case "51": color = n"MainColors.Green"; break;
-    case "68": color = n"MainColors.Purple"; break;
-    case "72": color = n"MainColors.Blue"; break;
-    case "HUB": customHub = true; break;
-  };
+  if Equals(line, "HUB") { customHub = true; };
   inkImageRef.SetAtlasResource(this.iconWidget, r"base\\gameplay\\gui\\common\\icons\\mappin_icons.inkatlas");
   inkImageRef.SetTexturePart(this.iconWidget, n"fast_travel");
   icon = inkImageRef.Get(this.iconWidget) as inkImage;
   if IsDefined(icon) {
     icon.UnbindProperty(n"tintColor");
-    if customOrange { icon.SetTintColor(new HDRColor(1.28, 0.32, 0.00, 1.00)); }
-    else if customPink { icon.SetTintColor(new HDRColor(1.00, 0.25, 0.65, 1.00)); }
-    else if customHub { icon.SetTintColor(new HDRColor(0.37, 0.96, 1.00, 1.00)); }
-    else { icon.BindProperty(n"tintColor", color); };
+    if customHub { icon.SetTintColor(new HDRColor(0.37, 0.96, 1.00, 1.00)); }
+    else { icon.SetTintColor(NCTCLineColor(lineColor)); };
   };
 }
 
@@ -358,7 +371,7 @@ protected final func ApplyNCTCStopIcon(line: String) -> Void {
 protected func UpdateIcon() -> Void {
   wrappedMethod();
   let data: ref<NCTCStopMappinData> = this.GetMappin().GetScriptData() as NCTCStopMappinData;
-  if IsDefined(data) { this.ApplyNCTCStopIcon(data.line); };
+  if IsDefined(data) { this.ApplyNCTCStopIcon(data.line, data.color); };
 }
 
 @wrapMethod(WorldMapTooltipController)
@@ -397,7 +410,7 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
           serviceText.SetLetterCase(textLetterCase.OriginalCase);
           serviceText.SetStyle(r"base\\gameplay\\gui\\common\\main_colors.inkstyle");
           serviceText.SetText("NCTC " + stopData.serviceLines[index] + " — " + stopData.serviceStops[index]);
-          serviceText.SetTintColor(NCTCHubLineColor(stopData.serviceLines[index]));
+          serviceText.SetTintColor(NCTCLineColor(stopData.serviceColors[index]));
           serviceText.Reparent(this.nctcHubLines);
           index += 1;
         };
@@ -413,14 +426,15 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
 @addField(WorldMapTooltipController)
 let nctcHubLines: wref<inkVerticalPanel>;
 
-public func NCTCHubLineColor(line: String) -> HDRColor {
-  switch line {
-    case "17": return new HDRColor(1.28, 0.32, 0.00, 1.00);
-    case "22": return new HDRColor(1.00, 0.86, 0.08, 1.00);
-    case "23": return new HDRColor(1.00, 0.25, 0.65, 1.00);
-    case "51": return new HDRColor(0.20, 0.90, 0.42, 1.00);
-    case "68": return new HDRColor(0.70, 0.38, 1.00, 1.00);
-    case "72": return new HDRColor(0.20, 0.55, 1.00, 1.00);
+public func NCTCLineColor(color: Int32) -> HDRColor {
+  switch color {
+    case 0: return new HDRColor(1.28, 0.32, 0.00, 1.00);
+    case 1: return new HDRColor(1.00, 0.86, 0.08, 1.00);
+    case 2: return new HDRColor(1.00, 0.25, 0.65, 1.00);
+    case 3: return new HDRColor(0.20, 0.90, 0.42, 1.00);
+    case 4: return new HDRColor(0.70, 0.38, 1.00, 1.00);
+    case 5: return new HDRColor(0.20, 0.55, 1.00, 1.00);
+    case 6: return new HDRColor(1.00, 0.18, 0.18, 1.00);
   };
   return new HDRColor(1.00, 1.00, 1.00, 1.00);
 }

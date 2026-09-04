@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 2,
+  "generatedBy": "NCTC default network",
+  "revision": 1,
+  "lastEventId": 0,
+  "lineColors": {"17":0,"22":1,"23":2,"51":3,"68":4,"72":5},
+  "captures": [],
+  "hubs": [],
+  "stops": [
+    {"line":17,"sequence":1,"locKey":44536},{"line":17,"sequence":2,"locKey":44531},{"line":17,"sequence":3,"locKey":44485},{"line":17,"sequence":4,"locKey":44534},{"line":17,"sequence":5,"locKey":44532},{"line":17,"sequence":6,"locKey":44533},{"line":17,"sequence":7,"locKey":44536},
+    {"line":22,"sequence":1,"locKey":44695},{"line":22,"sequence":2,"locKey":44485},{"line":22,"sequence":3,"locKey":52544},{"line":22,"sequence":4,"locKey":44485},{"line":22,"sequence":5,"locKey":44536},{"line":22,"sequence":6,"locKey":44531},{"line":22,"sequence":7,"locKey":44485},{"line":22,"sequence":8,"locKey":44695},
+    {"line":23,"sequence":1,"locKey":52544},{"line":23,"sequence":2,"locKey":44534},{"line":23,"sequence":3,"locKey":44532},{"line":23,"sequence":4,"locKey":44533},{"line":23,"sequence":5,"locKey":44530},{"line":23,"sequence":6,"locKey":44531},{"line":23,"sequence":7,"locKey":44536},{"line":23,"sequence":8,"locKey":44485},{"line":23,"sequence":9,"locKey":52544},
+    {"line":51,"sequence":1,"locKey":44679},{"line":51,"sequence":2,"locKey":44533},{"line":51,"sequence":3,"locKey":44532},{"line":51,"sequence":4,"locKey":44534},{"line":51,"sequence":5,"locKey":44515},{"line":51,"sequence":6,"locKey":44679},
+    {"line":68,"sequence":1,"locKey":44695},{"line":68,"sequence":2,"locKey":44485},{"line":68,"sequence":3,"locKey":52544},{"line":68,"sequence":4,"locKey":44501},{"line":68,"sequence":5,"locKey":44515},{"line":68,"sequence":6,"locKey":44534},{"line":68,"sequence":7,"locKey":44532},{"line":68,"sequence":8,"locKey":44485},{"line":68,"sequence":9,"locKey":44695},
+    {"line":72,"sequence":1,"locKey":44679},{"line":72,"sequence":2,"locKey":44515},{"line":72,"sequence":3,"locKey":44501},{"line":72,"sequence":4,"locKey":44473},{"line":72,"sequence":5,"locKey":44700},{"line":72,"sequence":6,"locKey":44485},{"line":72,"sequence":7,"locKey":44695},{"line":72,"sequence":8,"locKey":44485},{"line":72,"sequence":9,"locKey":44531},{"line":72,"sequence":10,"locKey":44679}
+  ]
+}
