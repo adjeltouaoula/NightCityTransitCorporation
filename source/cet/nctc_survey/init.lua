@@ -12,12 +12,16 @@ local BACKUP_FILE = nil
 local LOG_FILE = nil
 local HUB_RADIUS_METRES = 20.0
 local DELETE_RADIUS_METRES = 25.0
+-- Two stops on the same service this close are an authoring mistake, not a
+-- transfer: transfers only exist between different lines.
+local SAME_LINE_DUPLICATE_RADIUS_METRES = 10.0
 
 local last_event_id = -1
 local next_sync_time = 0
 local survey_events_initialized = false
 local runtime_announced = false
 local runtime_session_id = 0
+local deduplicate_same_line_stops
 
 
 local function load_settings()
@@ -96,6 +100,7 @@ local function load_network()
   network.captures = network.captures or {}
   network.hubs = network.hubs or {}
   network.lineColors = network.lineColors or {}
+  local duplicates_merged = deduplicate_same_line_stops(network)
   local colors_migrated = false
   -- Migration for networks created before per-line colours existed.
   local legacy_colors = { ["17"] = 0, ["22"] = 1, ["23"] = 2, ["51"] = 3, ["68"] = 4, ["72"] = 5 }
@@ -106,10 +111,11 @@ local function load_network()
     end
   end
   network.revision = network.revision or 1
-  if colors_migrated then
+  if colors_migrated or duplicates_merged then
     network.revision = network.revision + 1
     write_network(network)
-    log("migrated legacy line colours into active network")
+    if colors_migrated then log("migrated legacy line colours into active network") end
+    if duplicates_merged then log("normalized same-line duplicate stops in active network") end
   end
   return network
 end
@@ -164,8 +170,92 @@ end
 
 local function add_stop(network, stop, event_id)
   stop.sequence = stop.sequence or next_sequence(network, stop.line)
+  local duplicate_radius_squared = SAME_LINE_DUPLICATE_RADIUS_METRES * SAME_LINE_DUPLICATE_RADIUS_METRES
+  for _, existing in ipairs(network.stops) do
+    if existing.line == stop.line and existing.position and stop.position
+      and distance_squared(existing.position, stop.position) <= duplicate_radius_squared then
+      log("ignored duplicate stop on line " .. tostring(stop.line))
+      return false
+    end
+  end
   stop.hubId = assign_hub(network, stop.position, event_id)
   table.insert(network.stops, stop)
+  return true
+end
+
+local function line_stop_index(network, global_index, line)
+  local ordinal = 0
+  for index, stop in ipairs(network.stops) do
+    if stop.line == line then ordinal = ordinal + 1 end
+    if index == global_index then return ordinal end
+  end
+  return 0
+end
+
+-- Captures are currently keyed by the user-facing ordinal in a line. When a
+-- duplicate is removed, move its measurements to the earlier surviving stop
+-- and shift later ordinals so no recorded spawn/berth becomes orphaned.
+local function remap_captures_after_duplicate(network, line, kept_index, removed_index)
+  for _, capture in ipairs(network.captures or {}) do
+    if capture.line == line and capture.stopIndex then
+      if capture.stopIndex == removed_index then
+        capture.stopIndex = kept_index
+      elseif capture.stopIndex > removed_index then
+        capture.stopIndex = capture.stopIndex - 1
+      end
+    end
+  end
+end
+
+local function vector_has_position(vector)
+  return vector and ((vector.x or 0) ~= 0 or (vector.y or 0) ~= 0 or (vector.z or 0) ~= 0)
+end
+
+local function capture_score(network, line, stop_index)
+  local score = 0
+  for _, capture in ipairs(network.captures or {}) do
+    if capture.line == line and capture.stopIndex == stop_index then
+      local spawn = vector_has_position(capture.spawn)
+      local berth = vector_has_position(capture.berth)
+      if spawn and berth then return 2 end
+      if spawn or berth then score = 1 end
+    end
+  end
+  return score
+end
+
+deduplicate_same_line_stops = function(network)
+  local changed = false
+  local radius_squared = SAME_LINE_DUPLICATE_RADIUS_METRES * SAME_LINE_DUPLICATE_RADIUS_METRES
+  local index = 1
+  while index <= #network.stops do
+    local kept = network.stops[index]
+    local candidate = index + 1
+    while candidate <= #network.stops do
+      local other = network.stops[candidate]
+      if kept.line == other.line and kept.position and other.position
+        and distance_squared(kept.position, other.position) <= radius_squared then
+        local kept_ordinal = line_stop_index(network, index, kept.line)
+        local removed_ordinal = line_stop_index(network, candidate, kept.line)
+        -- Prefer the stop for which the survey already contains both end
+        -- points. This matters when two nearby manual placements differ by a
+        -- few metres: we retain the coordinate that has been actually driven.
+        if capture_score(network, kept.line, removed_ordinal) > capture_score(network, kept.line, kept_ordinal) then
+          network.stops[index] = other
+          kept = other
+        end
+        remap_captures_after_duplicate(network, kept.line, kept_ordinal, removed_ordinal)
+        table.remove(network.stops, candidate)
+        changed = true
+        log("merged duplicate stop on line " .. tostring(kept.line)
+          .. " (stop " .. tostring(removed_ordinal) .. " into " .. tostring(kept_ordinal) .. ")")
+      else
+        candidate = candidate + 1
+      end
+    end
+    index = index + 1
+  end
+  return changed
 end
 
 local function delete_nearest_stop(network, line, position, loc_key)
