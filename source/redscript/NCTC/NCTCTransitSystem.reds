@@ -305,6 +305,19 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if !EntityID.IsDefined(this.busEntityID) { return; };
     if !this.ResolveBus() { this.ScheduleDispatch(0.25); return; };
     if this.arrived {
+      // 999 is the short door-closing phase. Revoke opening permission first,
+      // then wait for the Mahir PS to report Closed before changing stop.
+      if Equals(this.dwellPolls, 999) {
+        GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_service_bus_at_stop", 0);
+        this.controller.ClosePassengerDoor();
+        if !this.controller.IsPassengerDoorClosed() { this.ScheduleDispatch(0.25); return; };
+        this.dwellPolls = 0;
+        if !this.AdvanceToNextStop() { this.ScheduleDispatch(1.00); return; };
+      } else {
+      // Scriptable-system state survives save loading, while transient quest
+      // facts may not. Reassert the stop permission on every arrived poll so
+      // the proximity door controller is restored after loading a save.
+      GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_service_bus_at_stop", 1);
       if !this.controller.IsPlayerAboard() {
         if Equals(this.dwellPolls, 0) { this.PublishLoopDiagnostic(2, 0); };
         if this.controller.DistanceToPlayer() > 180.00 { this.DespawnServiceBus(); return; };
@@ -318,10 +331,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
         this.ScheduleDispatch(0.50);
         return;
       };
-      if !this.AdvanceToNextStop() {
-        this.dwellPolls = 0;
-        this.ScheduleDispatch(1.00);
-        return;
+      this.dwellPolls = 999;
+      this.ScheduleDispatch(0.01);
+      return;
       };
     };
     if !this.driveCommandSent {
@@ -361,11 +373,6 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.PublishLoopDiagnostic(5, nextStopId);
       return false;
     };
-    // Revoke the stop-door permission before asking for closure. Otherwise
-    // the CET proximity controller reopens the door during this same phase.
-    GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_service_bus_at_stop", 0);
-    this.controller.ClosePassengerDoor();
-    if !this.controller.IsPassengerDoorClosed() { return false; };
     this.requestedStopId = nextStopId;
     this.requestedStop = nextStop;
     this.surveySpawn = nextSpawn;
