@@ -19,6 +19,23 @@ public class NCTCServiceBusController extends IScriptable {
     return this.IsReady() && Vector4.Distance(this.bus.GetWorldPosition(), position) <= radius;
   }
 
+  public func IsPlayerAboard() -> Bool {
+    let player: ref<PlayerPuppet>;
+    let mounted: ref<VehicleObject>;
+    if !this.IsReady() { return false; };
+    player = GetPlayer(this.bus.GetGame());
+    if !IsDefined(player) { return false; };
+    mounted = player.GetMountedVehicle();
+    return IsDefined(mounted) && Equals(mounted.GetEntityID(), this.bus.GetEntityID());
+  }
+
+  public func DistanceToPlayer() -> Float {
+    let player: ref<PlayerPuppet>;
+    if !this.IsReady() { return 0.00; };
+    player = GetPlayer(this.bus.GetGame());
+    return IsDefined(player) ? Vector4.Distance(player.GetWorldPosition(), this.bus.GetWorldPosition()) : 0.00;
+  }
+
   public func DriveToTraffic(target: Vector4, minimumDistance: Float) -> Bool {
     let command: ref<AIVehicleDriveToPointCommand>;
     let event: ref<AICommandEvent>;
@@ -57,6 +74,13 @@ public class NCTCServiceBusController extends IScriptable {
     slot.id = n"seat_front_right";
     VehicleComponent.OpenDoor(this.bus, slot);
   }
+
+  public func ClosePassengerDoor() -> Void {
+    let slot: MountingSlotId;
+    if !this.IsReady() { return; };
+    slot.id = n"seat_front_right";
+    VehicleComponent.CloseDoor(this.bus, slot);
+  }
 }
 
 public class NCTCServiceProfiles {
@@ -73,6 +97,45 @@ public class NCTCServiceProfiles {
     berth = NCTCServiceProfiles.ReadVector(quests, prefix + "berth_");
     yaw = Cast<Float>(quests.GetFact(StringToName(prefix + "spawn_yaw"))) / 1000.00;
     return true;
+  }
+
+  public static func TryGetNextStop(game: GameInstance, line: String, currentStopId: Int32, out nextStopId: Int32, out nextStop: Vector4) -> Bool {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
+    let requestedLine: Int32 = StringToInt(line, -1);
+    let count: Int32;
+    let index: Int32 = 0;
+    let stopLine: Int32;
+    let stopId: Int32;
+    let firstId: Int32 = 0;
+    let firstPosition: Vector4;
+    let currentFound: Bool = false;
+    let prefix: String;
+    if !IsDefined(quests) || requestedLine < 1 || !Equals(quests.GetFact(n"nctc_external_network_ready"), 1) { return false; };
+    count = quests.GetFact(n"nctc_external_network_stop_count");
+    while index < count {
+      prefix = "nctc_external_stop_" + ToString(index) + "_";
+      stopLine = quests.GetFact(StringToName(prefix + "line"));
+      stopId = quests.GetFact(StringToName(prefix + "id"));
+      if Equals(stopLine, requestedLine) {
+        if firstId < 1 {
+          firstId = stopId;
+          firstPosition = NCTCServiceProfiles.ReadVector(quests, prefix);
+        };
+        if currentFound {
+          nextStopId = stopId;
+          nextStop = NCTCServiceProfiles.ReadVector(quests, prefix);
+          return nextStopId > 0;
+        };
+        if Equals(stopId, currentStopId) { currentFound = true; };
+      };
+      index += 1;
+    };
+    if currentFound && firstId > 0 {
+      nextStopId = firstId;
+      nextStop = firstPosition;
+      return true;
+    };
+    return false;
   }
 
   private static func ReadVector(quests: ref<QuestsSystem>, prefix: String) -> Vector4 {
@@ -102,6 +165,8 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let surveyBerth: Vector4;
   private let surveyYaw: Float;
   private let approachCommandSent: Bool;
+  private let routeStarted: Bool;
+  private let dwellPolls: Int32;
 
   public static func Get(game: GameInstance) -> ref<NCTCTransitSystem> {
     return GameInstance.GetScriptableSystemsContainer(game).Get(NameOf<NCTCTransitSystem>()) as NCTCTransitSystem;
@@ -162,8 +227,12 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.requestPending = false;
     this.driveCommandSent = false;
     this.approachCommandSent = false;
+    this.routeStarted = false;
+    this.dwellPolls = 0;
     this.arrived = false;
     this.hasSurveyProfile = false;
+    this.routeStarted = false;
+    this.dwellPolls = 0;
     return hadBus;
   }
 
@@ -187,6 +256,24 @@ public class NCTCTransitSystem extends ScriptableSystem {
     };
     if !EntityID.IsDefined(this.busEntityID) { return; };
     if !this.ResolveBus() { this.ScheduleDispatch(0.25); return; };
+    if this.arrived {
+      if !this.controller.IsPlayerAboard() {
+        if this.controller.DistanceToPlayer() > 180.00 { this.DespawnServiceBus(); return; };
+        this.dwellPolls = 0;
+        this.ScheduleDispatch(0.50);
+        return;
+      };
+      this.dwellPolls += 1;
+      if this.dwellPolls < 6 {
+        this.ScheduleDispatch(0.50);
+        return;
+      };
+      if !this.AdvanceToNextStop() {
+        this.dwellPolls = 0;
+        this.ScheduleDispatch(1.00);
+        return;
+      };
+    };
     if !this.driveCommandSent {
       // An approach point is route context, never an ADE destination: using
       // it as one made the bus brake, stop, then restart before the berth.
@@ -197,9 +284,36 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if !this.arrived && this.controller.IsNear(this.hasSurveyProfile ? this.surveyBerth : this.requestedStop, 4.00) {
       this.controller.ArriveAndOpenDoor();
       this.arrived = true;
+      this.dwellPolls = 0;
+      this.ScheduleDispatch(0.50);
       return;
     };
     if !this.arrived { this.ScheduleDispatch(0.50); };
+  }
+
+  private func AdvanceToNextStop() -> Bool {
+    let nextStopId: Int32;
+    let nextStop: Vector4;
+    let nextSpawn: Vector4;
+    let nextApproach: Vector4;
+    let nextBerth: Vector4;
+    let nextYaw: Float;
+    if !NCTCServiceProfiles.TryGetNextStop(this.GetGameInstance(), this.requestedLine, this.requestedStopId, nextStopId, nextStop) { return false; };
+    if !NCTCServiceProfiles.TryGet(this.GetGameInstance(), this.requestedLine, nextStopId, nextSpawn, nextApproach, nextBerth, nextYaw) { return false; };
+    this.controller.ClosePassengerDoor();
+    this.requestedStopId = nextStopId;
+    this.requestedStop = nextStop;
+    this.surveySpawn = nextSpawn;
+    this.surveyApproach = nextApproach;
+    this.surveyBerth = nextBerth;
+    this.surveyYaw = nextYaw;
+    this.hasSurveyProfile = true;
+    this.arrived = false;
+    this.driveCommandSent = false;
+    this.approachCommandSent = false;
+    this.routeStarted = true;
+    this.dwellPolls = 0;
+    return true;
   }
 
   public func SpawnRequestedService() -> Bool {
