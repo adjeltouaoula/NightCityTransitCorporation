@@ -480,8 +480,8 @@ protected func UpdateIcon() -> Void {
 public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<WorldMapMenuGameController>) -> Void {
   let stopData: ref<NCTCStopMappinData>;
   let travelData: ref<FastTravelMappin>;
-  let player: ref<PlayerPuppet>;
   let settings: ref<NCTCSettings>;
+  let anchorLocKey: String;
   let desc: ref<inkText>;
   let parent: ref<inkCompoundWidget>;
   let panel: ref<inkVerticalPanel>;
@@ -497,11 +497,13 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
   // mappin type, overlay, or map-filter interaction.
   if !IsDefined(stopData) {
     travelData = Deref(data).mappin as FastTravelMappin;
-    player = menu.GetPlayerControlledObject() as PlayerPuppet;
-    settings = IsDefined(player) ? NCTCSettings.Get(player.GetGame()) : null;
-    if IsDefined(travelData) && IsDefined(settings) && settings.developerMode && settings.showTravelAnchorLocKeys
-      && (Equals(Deref(data).mappin.GetVariant(), gamedataMappinVariant.FastTravelVariant) || Equals(Deref(data).mappin.GetVariant(), gamedataMappinVariant.Zzz17_NCARTVariant)) {
-      inkTextRef.SetText(this.m_descText, travelData.GetPointData().GetPointDisplayName());
+    settings = IsDefined(menu.GetPlayerControlledObject()) ? NCTCSettings.Get(menu.GetPlayerControlledObject().GetGame()) : null;
+    if IsDefined(travelData) && IsDefined(settings) && settings.developerMode && settings.showTravelAnchorLocKeys {
+      anchorLocKey = travelData.GetPointData().GetPointDisplayName();
+      // Preserve the native stop/station name as title, and put the raw key
+      // alone in the normal description slot for easy copying into JSON.
+      inkTextRef.SetText(this.m_titleText, GetLocalizedText(anchorLocKey));
+      inkTextRef.SetText(this.m_descText, anchorLocKey);
     };
     return;
   };
