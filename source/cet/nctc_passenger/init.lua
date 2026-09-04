@@ -5,8 +5,8 @@ local NCTC = { tag = "NCTC.ServiceBus", ui = nil, hub = nil, visible = false,
   uiMissingLogged = false, wasInside = false }
 
 local seats = {
-  { id = "seat_back_left", label = "Sit — left rear seat" },
-  { id = "seat_back_right", label = "Sit — right rear seat" }
+  { id = "seat_back_left", sideLocKey = "LocKey#40664" },
+  { id = "seat_back_right", sideLocKey = "LocKey#40665" }
 }
 
 local function bus()
@@ -59,21 +59,37 @@ local function same(a, b)
 end
 
 local function available(vehicle, player)
-  if not inside(vehicle, player) then return {} end
+  -- Exact rear-seat interaction area from Drive a Bus 1.2.0.  The player may
+  -- walk anywhere in the cabin, but the prompt is only presented from the
+  -- aisle immediately in front of the two validated rear workspots.
+  local p = localPosition(vehicle, player)
+  if not (p.x > -0.50 and p.x < 0.50 and p.y > -1.20 and p.y < -0.20 and p.z > 0.00 and p.z < 1.80) then return {} end
+  local angle = player:GetWorldOrientation():ToEulerAngles().yaw - vehicle:GetWorldOrientation():ToEulerAngles().yaw
+  if angle > 180 then angle = angle - 360 elseif angle < -180 then angle = angle + 360 end
   local result = {}
-  for _, seat in ipairs(seats) do if free(vehicle, seat.id) then table.insert(result, seat) end end
+  if math.abs(angle) < 40 or math.abs(angle) > 140 then
+    for _, seat in ipairs(seats) do if free(vehicle, seat.id) then table.insert(result, seat) end end
+  elseif angle > 0 and free(vehicle, seats[1].id) then
+    table.insert(result, seats[1])
+  elseif angle < 0 and free(vehicle, seats[2].id) then
+    table.insert(result, seats[2])
+  end
   return result
 end
 
 local function makeHub()
   local hub = gameinteractionsvisListChoiceHubData.new()
-  hub.title, hub.activityState, hub.hubPriority, hub.id = "Night City Transit Corporation", gameinteractionsvisEVisualizerActivityState.Active, 1, 77902
+  -- Drive a Bus deliberately uses a fresh hub id. A fixed id can collide with
+  -- another native interaction and results in choices being built but never
+  -- rendered, which is exactly what the NCTC diagnostic log showed.
+  hub.title, hub.activityState, hub.hubPriority, hub.id = GetLocalizedText("LocKey#77041"), gameinteractionsvisEVisualizerActivityState.Active, 1, 77777 + math.random(99999)
   hub.choices = {}
   for _, seat in ipairs(NCTC.offered) do
     local caption, kind = gameinteractionsChoiceCaption.new(), gameinteractionsChoiceTypeWrapper.new()
     caption:AddPartFromRecord(TweakDBInterface.GetChoiceCaptionIconPartRecord("ChoiceCaptionParts.SitIcon")); kind:SetType(gameinteractionsChoiceType.Selected)
     local choice = gameinteractionsvisListChoiceData.new()
-    choice.localizedName, choice.inputActionName, choice.captionParts, choice.type = seat.label, CName.new("None"), caption, kind
+    choice.localizedName = GetLocalizedText("LocKey#522") .. " [" .. GetLocalizedText(seat.sideLocKey) .. "]"
+    choice.inputActionName, choice.captionParts, choice.type = CName.new("None"), caption, kind
     table.insert(hub.choices, choice)
   end
   return hub
@@ -141,12 +157,18 @@ end)
 registerForEvent("onUpdate", function()
   NCTC.locked=false
   local player, vehicle = Game.GetPlayer(), bus()
-  if not player or not vehicle then hide(); return end
+  if not player or not vehicle then
+    local quests = Game.GetQuestsSystem()
+    if quests then quests:SetFactStr("nctc_player_in_service_bus", 0) end
+    hide(); return
+  end
   local quests=Game.GetQuestsSystem(); local state=quests and quests:GetFact(CName.new("nctc_dev_loop_code")) or 0
   setDoor(vehicle, state == 1 or state == 2 or state == 3)
   if player:GetMountedVehicle() then hide(); return end
   local offered=available(vehicle, player)
   local isInside = inside(vehicle, player)
+  local quests = Game.GetQuestsSystem()
+  if quests then quests:SetFactStr("nctc_player_in_service_bus", isInside and 1 or 0) end
   if isInside ~= NCTC.wasInside then
     NCTC.wasInside = isInside
     print(isInside and "[NCTC Passenger] Player entered walkable cabin" or "[NCTC Passenger] Player left walkable cabin")

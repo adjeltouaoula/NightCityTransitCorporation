@@ -23,6 +23,9 @@ public class NCTCServiceBusController extends IScriptable {
     let player: ref<PlayerPuppet>;
     let mounted: ref<VehicleObject>;
     if !this.IsReady() { return false; };
+    // The permitted Drive a Bus cabin detector also covers V while standing.
+    // Mounting is only one possible passenger state, not a departure gate.
+    if GameInstance.GetQuestsSystem(this.bus.GetGame()).GetFact(n"nctc_player_in_service_bus") > 0 { return true; };
     player = GetPlayer(this.bus.GetGame());
     if !IsDefined(player) { return false; };
     if VehicleComponent.IsMountedToProvidedVehicle(this.bus.GetGame(), player.GetEntityID(), this.bus) { return true; };
