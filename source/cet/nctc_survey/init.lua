@@ -214,10 +214,9 @@ local function selected_stop(network, line, stop_index)
   for _, stop in ipairs(network.stops or {}) do
     if stop.line == line then table.insert(matches, stop) end
   end
-  table.sort(matches, function(a, b)
-    if (a.sequence or 0) == (b.sequence or 0) then return (a.eventId or 0) < (b.eventId or 0) end
-    return (a.sequence or 0) < (b.sequence or 0)
-  end)
+  -- JSON array order is the authored service order. Do not sort by the old
+  -- sparse sequence field: manual edits and deletions can leave duplicates or
+  -- gaps, which previously made the settings notification select another stop.
   return matches[stop_index], #matches
 end
 
