@@ -108,6 +108,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
   }
 
   public func RequestService(line: String, stopId: Int32, stop: Vector4) -> Bool {
+    let quests: ref<QuestsSystem>;
+    let spawnDistance: Float;
+    let player: ref<PlayerPuppet>;
     if this.requestPending { return false; };
     // Dynamic entities can be invalidated by a load/streaming transition
     // while their EntityID survives in this scriptable system. Treat that as
@@ -125,6 +128,18 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.driveCommandSent = false;
     this.approachCommandSent = false;
     this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), line, stopId, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);
+    // Development-only diagnostic bridge. CET writes this to nctc_survey.log;
+    // it never creates a player-facing notification and is absent from public builds.
+    quests = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    player = GetPlayer(this.GetGameInstance());
+    if IsDefined(quests) {
+      spawnDistance = this.hasSurveyProfile && IsDefined(player) ? Vector4.Distance(this.surveySpawn, player.GetWorldPosition()) : -1.00;
+      quests.SetFact(n"nctc_dev_dispatch_line", StringToInt(line, -1));
+      quests.SetFact(n"nctc_dev_dispatch_stop_id", stopId);
+      quests.SetFact(n"nctc_dev_dispatch_has_profile", this.hasSurveyProfile ? 1 : 0);
+      quests.SetFact(n"nctc_dev_dispatch_spawn_distance_mm", Cast<Int32>(spawnDistance * 1000.00));
+      quests.SetFact(n"nctc_dev_dispatch_id", quests.GetFact(n"nctc_dev_dispatch_id") + 1);
+    };
     this.ScheduleDispatch(0.50);
     return true;
   }

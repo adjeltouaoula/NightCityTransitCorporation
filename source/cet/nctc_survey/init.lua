@@ -21,6 +21,7 @@ local next_sync_time = 0
 local survey_events_initialized = false
 local runtime_announced = false
 local runtime_session_id = 0
+local last_dispatch_log_id = 0
 local deduplicate_same_line_stops
 local normalize_captures
 local ensure_stop_ids
@@ -44,6 +45,11 @@ local function log(message)
     file:write(os.date("%Y-%m-%d %H:%M:%S") .. " " .. message .. "\n")
     file:close()
   end
+end
+
+local function round3(value)
+  if value >= 0 then return math.floor(value * 1000.0 + 0.5) / 1000.0 end
+  return math.ceil(value * 1000.0 - 0.5) / 1000.0
 end
 
 local function read_json(path, fallback)
@@ -522,7 +528,7 @@ local function capture_directly(kind)
   capture.stopLocKey = target.locKey
   capture.stopName = target.name
   capture.eventId = (capture.eventId or 0) + 1
-  local point = { x = position.x, y = position.y, z = position.z, yaw = player:GetWorldYaw() }
+  local point = { x = round3(position.x), y = round3(position.y), z = round3(position.z), yaw = round3(player:GetWorldYaw()) }
   update_capture_point(capture, kind == "spawn" and 1 or (kind == "approach" and 2 or 3), point)
   network.revision = (network.revision or 0) + 1
   if write_network(network) then
@@ -617,6 +623,24 @@ local function synchronize_external_survey(quests)
   set_fact(quests, "nctc_external_survey_revision", revision)
 end
 
+-- Dev-only dispatch telemetry, written by NCTCTransitSystem just before it
+-- asks the engine to create the bus. It is intentionally file-log only.
+local function log_dispatch_attempt(quests)
+  local id = fact(quests, "nctc_dev_dispatch_id")
+  if id <= last_dispatch_log_id then return end
+  last_dispatch_log_id = id
+  local line = fact(quests, "nctc_dev_dispatch_line")
+  local stop_id = fact(quests, "nctc_dev_dispatch_stop_id")
+  if fact(quests, "nctc_dev_dispatch_has_profile") ~= 1 then
+    log("dispatch " .. tostring(id) .. ": L" .. tostring(line) .. " stopId " .. tostring(stop_id) .. " rejected: no spawn/berth profile")
+    return
+  end
+  local metres = fact(quests, "nctc_dev_dispatch_spawn_distance_mm") / 1000.0
+  local note = metres > 150.0 and " WARNING: beyond reliable streaming range" or ""
+  log("dispatch " .. tostring(id) .. ": L" .. tostring(line) .. " stopId " .. tostring(stop_id)
+    .. " spawn is " .. string.format("%.1f", metres) .. "m from V" .. note)
+end
+
 registerForEvent("onUpdate", function()
   local quests = Game.GetQuestsSystem()
   if not quests then return end
@@ -624,6 +648,7 @@ registerForEvent("onUpdate", function()
     runtime_announced = true
     print("[NCTC Survey] Runtime active; external path: " .. tostring(NETWORK_FILE))
   end
+  log_dispatch_attempt(quests)
   local event_id = fact(quests, "nctc_survey_event_id")
   -- A save load restores the old event counter. Treat that first observed
   -- value as a baseline, never as a brand-new capture that could overwrite
