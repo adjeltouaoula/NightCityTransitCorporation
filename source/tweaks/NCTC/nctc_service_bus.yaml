@@ -2,6 +2,10 @@
 # it is never a garage, summon, fuel, or maintenance vehicle for V.
 Vehicle.nctc_service_mahir_mt28_coach:
   $base: Vehicle.v_mahir_mt28_coach
+  # Standalone passenger coach entity created for NCBN 0.0.10/0.0.11. It
+  # preserves the validated walkable cabin, passenger workspots and animated
+  # boarding door without depending on Drive a Bus.
+  entityTemplatePath: "base/ncbn/v_mahir_mt28_coach_passenger.ent"
 
 NCTCRequestW01:
   $base: SellectDestination
