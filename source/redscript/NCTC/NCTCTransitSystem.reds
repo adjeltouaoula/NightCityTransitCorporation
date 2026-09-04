@@ -181,6 +181,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
     let player: ref<PlayerPuppet>;
     let rotation: EulerAngles;
     if !this.requestPending { return false; };
+    // A save may restore before CET has republished the external JSON into
+    // quest facts. Resolve again at actual entity creation, not only when the
+    // player pressed the terminal, so the fresh persisted profile wins.
+    this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), this.requestedLine, this.requestedStop, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);
     entitySystem = GameInstance.GetDynamicEntitySystem();
     player = GetPlayer(this.GetGameInstance());
     record = TweakDBInterface.GetVehicleRecord(t"Vehicle.nctc_service_mahir_mt28_coach");
