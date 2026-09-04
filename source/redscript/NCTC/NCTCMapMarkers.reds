@@ -12,23 +12,6 @@ public class NCTCMarkerRefreshCallback extends DelayCallback {
   }
 }
 
-// Several installed mods wrap the same tooltip method. A direct SetText can
-// therefore be overwritten later in the same call chain. This callback runs
-// on the next UI frame and deliberately applies the final description.
-public class NCTCLocKeyTooltipCallback extends DelayCallback {
-  public let tooltip: wref<WorldMapTooltipController>;
-  public let locKey: String;
-
-  public func Configure(tooltip: ref<WorldMapTooltipController>, locKey: String) -> Void {
-    this.tooltip = tooltip;
-    this.locKey = locKey;
-  }
-
-  public func Call() -> Void {
-    if IsDefined(this.tooltip) { this.tooltip.NCTCSetLocKeyDescription(this.locKey); };
-  }
-}
-
 public struct NCTCStopDefinition {
   public let locKey: String;
   public let line: String;
@@ -502,6 +485,7 @@ protected func UpdateIcon() -> Void {
 public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<WorldMapMenuGameController>) -> Void {
   let stopData: ref<NCTCStopMappinData>;
   let travel: ref<FastTravelMappin>;
+  let settings: ref<NCTCSettings>;
   let desc: ref<inkText>;
   let parent: ref<inkCompoundWidget>;
   let panel: ref<inkVerticalPanel>;
@@ -514,7 +498,8 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
   stopData = Deref(data).mappin.GetScriptData() as NCTCStopMappinData;
   if !IsDefined(stopData) {
     travel = Deref(data).mappin as FastTravelMappin;
-    if IsDefined(travel) {
+    settings = NCTCSettings.Get(menu.GetPlayerControlledObject().GetGame());
+    if IsDefined(travel) && IsDefined(settings) && settings.developerMode && settings.showTravelAnchorLocKeys {
       if IsDefined(desc) { desc.SetVisible(true); };
       inkTextRef.SetText(this.m_descText, "NCTC survey key: " + travel.GetPointData().GetPointDisplayName());
     };
@@ -558,11 +543,6 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
 
 @addField(WorldMapTooltipController)
 let nctcHubLines: wref<inkVerticalPanel>;
-
-@addMethod(WorldMapTooltipController)
-public func NCTCSetLocKeyDescription(locKey: String) -> Void {
-  inkTextRef.SetText(this.m_descText, locKey);
-}
 
 public func NCTCLineColor(color: Int32) -> HDRColor {
   switch color {
