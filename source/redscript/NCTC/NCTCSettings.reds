@@ -301,6 +301,15 @@ public class NCTCSettings extends ScriptableSystem {
     // writer. No hard-coded passage table participates in new captures.
     quests.SetFact(n"nctc_survey_capture_line", this.GetSelectedLineNumber());
     quests.SetFact(n"nctc_survey_capture_stop_index", this.surveyStopIndex);
+    if Equals(kind, "spawn") {
+      quests.SetFact(n"nctc_survey_capture_point", 1);
+    } else {
+      if Equals(kind, "approach") {
+        quests.SetFact(n"nctc_survey_capture_point", 2);
+      } else {
+        quests.SetFact(n"nctc_survey_capture_point", 3);
+      };
+    };
     quests.SetFact(n"nctc_survey_event_kind", 1);
     quests.SetFact(n"nctc_survey_event_id", quests.GetFact(n"nctc_survey_event_id") + 1);
     NCTCSettings.Notify(this.GetGameInstance(), "NCTC survey saved: " + kind);

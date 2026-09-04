@@ -22,6 +22,7 @@ local survey_events_initialized = false
 local runtime_announced = false
 local runtime_session_id = 0
 local deduplicate_same_line_stops
+local normalize_captures
 
 
 local function load_settings()
@@ -101,6 +102,7 @@ local function load_network()
   network.hubs = network.hubs or {}
   network.lineColors = network.lineColors or {}
   local duplicates_merged = deduplicate_same_line_stops(network)
+  local captures_normalized = normalize_captures(network)
   local colors_migrated = false
   -- Migration for networks created before per-line colours existed.
   local legacy_colors = { ["17"] = 0, ["22"] = 1, ["23"] = 2, ["51"] = 3, ["68"] = 4, ["72"] = 5 }
@@ -111,11 +113,12 @@ local function load_network()
     end
   end
   network.revision = network.revision or 1
-  if colors_migrated or duplicates_merged then
+  if colors_migrated or duplicates_merged or captures_normalized then
     network.revision = network.revision + 1
     write_network(network)
     if colors_migrated then log("migrated legacy line colours into active network") end
     if duplicates_merged then log("normalized same-line duplicate stops in active network") end
+    if captures_normalized then log("merged legacy duplicate survey captures") end
   end
   return network
 end
@@ -209,6 +212,33 @@ end
 
 local function vector_has_position(vector)
   return vector and ((vector.x or 0) ~= 0 or (vector.y or 0) ~= 0 or (vector.z or 0) ~= 0)
+end
+
+normalize_captures = function(network)
+  local unique, ordered, changed = {}, {}, false
+  for _, capture in ipairs(network.captures or {}) do
+    local key = tostring(capture.line or 0) .. ":" .. tostring(capture.stopIndex or 0)
+    local saved = unique[key]
+    if not saved then
+      saved = capture
+      unique[key] = saved
+      table.insert(ordered, saved)
+    else
+      -- Legacy versions wrote a complete snapshot for every key press. Keep
+      -- the latest non-empty value for each point while reducing it to one
+      -- record, so no useful spawn or berth is thrown away.
+      if vector_has_position(capture.spawn) then saved.spawn = capture.spawn end
+      if vector_has_position(capture.approach) then saved.approach = capture.approach end
+      if vector_has_position(capture.berth) then saved.berth = capture.berth end
+      saved.eventId = capture.eventId or saved.eventId
+      saved.stopSequence = capture.stopSequence or saved.stopSequence
+      saved.stopLocKey = capture.stopLocKey or saved.stopLocKey
+      saved.stopName = capture.stopName or saved.stopName
+      changed = true
+    end
+  end
+  if changed then network.captures = ordered end
+  return changed
 end
 
 local function capture_score(network, line, stop_index)
@@ -310,6 +340,26 @@ local function selected_stop(network, line, stop_index)
   return matches[stop_index], #matches
 end
 
+local function find_capture(network, line, stop_index)
+  for index = #(network.captures or {}), 1, -1 do
+    local capture = network.captures[index]
+    if capture.line == line and capture.stopIndex == stop_index then return capture end
+  end
+  return nil
+end
+
+local function update_capture_point(capture, point, value)
+  if point == 1 then
+    capture.spawn = value
+    return "spawn"
+  elseif point == 2 then
+    capture.approach = value
+    return "approach"
+  end
+  capture.berth = value
+  return "berth"
+end
+
 local function persist_capture(quests, event_id)
   local network = load_network()
   network.lineColors = network.lineColors or {}
@@ -366,18 +416,26 @@ local function persist_capture(quests, event_id)
       log("rejected survey event " .. tostring(event_id) .. ": line " .. tostring(capture_line) .. " stop " .. tostring(capture_stop_index) .. " unavailable")
       return
     end
-    table.insert(network.captures, {
-      eventId = event_id,
-      line = capture_line,
-      stopIndex = capture_stop_index,
-      stopSequence = target.sequence,
-      stopLocKey = target.locKey,
-      stopName = target.name,
-      spawn = vector_from_facts(quests, "nctc_survey_spawn_"),
-      approach = vector_from_facts(quests, "nctc_survey_approach_"),
-      berth = vector_from_facts(quests, "nctc_survey_berth_")
-    })
-    kind = "survey L" .. tostring(capture_line) .. " stop " .. tostring(capture_stop_index) .. "/" .. tostring(count)
+    -- A stop has one editable survey record. Re-recording a point updates
+    -- only that point and retains the other two measurements.
+    local capture = find_capture(network, capture_line, capture_stop_index)
+    if not capture then
+      capture = {
+        line = capture_line,
+        stopIndex = capture_stop_index,
+        spawn = {}, approach = {}, berth = {}
+      }
+      table.insert(network.captures, capture)
+    end
+    capture.eventId = event_id
+    capture.stopSequence = target.sequence
+    capture.stopLocKey = target.locKey
+    capture.stopName = target.name
+    local point = fact(quests, "nctc_survey_capture_point")
+    local point_prefix = point == 1 and "nctc_survey_spawn_"
+      or (point == 2 and "nctc_survey_approach_" or "nctc_survey_berth_")
+    local point_name = update_capture_point(capture, point, vector_from_facts(quests, point_prefix))
+    kind = "survey " .. point_name .. " L" .. tostring(capture_line) .. " stop " .. tostring(capture_stop_index) .. "/" .. tostring(count)
   end
   network.lastEventId = event_id
   network.revision = (network.revision or 0) + 1
