@@ -12,6 +12,23 @@ public class NCTCMarkerRefreshCallback extends DelayCallback {
   }
 }
 
+// Several installed mods wrap the same tooltip method. A direct SetText can
+// therefore be overwritten later in the same call chain. This callback runs
+// on the next UI frame and deliberately applies the final description.
+public class NCTCLocKeyTooltipCallback extends DelayCallback {
+  public let tooltip: wref<WorldMapTooltipController>;
+  public let locKey: String;
+
+  public func Configure(tooltip: ref<WorldMapTooltipController>, locKey: String) -> Void {
+    this.tooltip = tooltip;
+    this.locKey = locKey;
+  }
+
+  public func Call() -> Void {
+    if IsDefined(this.tooltip) { this.tooltip.NCTCSetLocKeyDescription(this.locKey); };
+  }
+}
+
 public struct NCTCStopDefinition {
   public let locKey: String;
   public let line: String;
@@ -485,6 +502,7 @@ protected func UpdateIcon() -> Void {
 public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<WorldMapMenuGameController>) -> Void {
   let stopData: ref<NCTCStopMappinData>;
   let travel: ref<FastTravelMappin>;
+  let locKeyCallback: ref<NCTCLocKeyTooltipCallback>;
   let desc: ref<inkText>;
   let parent: ref<inkCompoundWidget>;
   let panel: ref<inkVerticalPanel>;
@@ -499,14 +517,22 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
   // and NCART mappins expose their unlocalized identifier through point data.
   if !IsDefined(stopData) {
     travel = Deref(data).mappin as FastTravelMappin;
-    if IsDefined(travel) { inkTextRef.SetText(this.m_descText, travel.GetPointData().GetPointDisplayName()); };
+    if IsDefined(travel) {
+      locKeyCallback = new NCTCLocKeyTooltipCallback();
+      locKeyCallback.Configure(this, travel.GetPointData().GetPointDisplayName());
+      GameInstance.GetDelaySystem(menu.GetPlayerControlledObject().GetGame()).DelayCallback(locKeyCallback, 0.01, false);
+    };
     return;
   };
   if IsDefined(stopData) {
     if stopData.isHub { inkTextRef.SetText(this.m_titleText, "NCTC Transit Hub"); }
     else { inkTextRef.SetText(this.m_titleText, stopData.services); };
     inkTextRef.SetText(this.m_descText, stopData.services);
-    if !stopData.isHub && !Equals(stopData.anchorLocKey, "") { inkTextRef.SetText(this.m_descText, stopData.anchorLocKey); };
+    if !stopData.isHub && !Equals(stopData.anchorLocKey, "") {
+      locKeyCallback = new NCTCLocKeyTooltipCallback();
+      locKeyCallback.Configure(this, stopData.anchorLocKey);
+      GameInstance.GetDelaySystem(menu.GetPlayerControlledObject().GetGame()).DelayCallback(locKeyCallback, 0.01, false);
+    };
     if stopData.isHub && IsDefined(desc) {
       parent = desc.GetParentWidget() as inkCompoundWidget;
       if IsDefined(parent) {
@@ -541,6 +567,11 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
 
 @addField(WorldMapTooltipController)
 let nctcHubLines: wref<inkVerticalPanel>;
+
+@addMethod(WorldMapTooltipController)
+public func NCTCSetLocKeyDescription(locKey: String) -> Void {
+  inkTextRef.SetText(this.m_descText, locKey);
+}
 
 public func NCTCLineColor(color: Int32) -> HDRColor {
   switch color {
