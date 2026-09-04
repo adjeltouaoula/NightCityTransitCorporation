@@ -244,6 +244,7 @@ public class NCTCSettings extends ScriptableSystem {
   public func OnModSettingsChange() -> Void {
     this.PublishSurveySettings();
     this.UpdateDeveloperVisibility();
+    if this.developerMode { this.NotifySelectedSurveyStop(); };
   }
 
   private func PublishSurveySettings() -> Void {
@@ -252,6 +253,13 @@ public class NCTCSettings extends ScriptableSystem {
     quests.SetFact(n"nctc_survey_developer_mode", this.developerMode ? 1 : 0);
     quests.SetFact(n"nctc_survey_line", EnumInt(this.surveyLine));
     quests.SetFact(n"nctc_survey_passage", EnumInt(this.surveyPassage));
+  }
+
+  private func NotifySelectedSurveyStop() -> Void {
+    let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(this.GetGameInstance());
+    let line: Int32 = this.GetSelectedLineNumber();
+    if !IsDefined(markers) || line < 1 { return; };
+    NCTCSettings.Notify(this.GetGameInstance(), "NCTC survey: line " + ToString(line) + " · stop " + ToString(this.surveyStopIndex) + " · " + markers.GetSurveyStopName(line, this.surveyStopIndex));
   }
 
   @if(ModuleExists("ModSettingsModule"))

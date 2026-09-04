@@ -206,6 +206,36 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     return this.GetExternalStops();
   }
 
+  // Used by the developer settings confirmation. Stop index is the current
+  // ordinal within the selected line, not the JSON's possibly sparse sequence.
+  public func GetSurveyStopName(line: Int32, stopIndex: Int32) -> String {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    let count: Int32;
+    let index: Int32 = 0;
+    let ordinal: Int32 = 0;
+    let prefix: String;
+    let stopLine: Int32;
+    let locKey: Int32;
+    let position: Vector4;
+    if !IsDefined(quests) || stopIndex < 1 { return "Unknown stop"; };
+    count = quests.GetFact(n"nctc_external_network_stop_count");
+    while index < count {
+      prefix = "nctc_external_stop_" + ToString(index) + "_";
+      stopLine = quests.GetFact(StringToName(prefix + "line"));
+      if Equals(stopLine, line) {
+        ordinal += 1;
+        if Equals(ordinal, stopIndex) {
+          locKey = quests.GetFact(StringToName(prefix + "loc_key"));
+          if locKey > 0 { return GetLocalizedText("LocKey#" + ToString(locKey)); };
+          position = new Vector4(Cast<Float>(quests.GetFact(StringToName(prefix + "x"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "y"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "z"))) / 1000.00, 1.00);
+          return this.GetManualStopName(position);
+        };
+      };
+      index += 1;
+    };
+    return "Stop not found";
+  }
+
   public func GetNearestStopServices(position: Vector4, out lines: array<String>, out stops: array<String>) -> Bool {
     let index: Int32 = 0;
     let nearest: Int32 = -1;
