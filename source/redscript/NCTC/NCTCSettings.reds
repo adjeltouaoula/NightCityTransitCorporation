@@ -27,6 +27,38 @@ public class NCTCSurveyWriteConfirmationCallback extends DelayCallback {
   }
 }
 
+// CET writes survey coordinates directly to disk in the experimental devkit.
+// This small fact channel is notification-only: it never carries positions or
+// persists any survey data through a save.
+public class NCTCDirectSurveyNoticeCallback extends DelayCallback {
+  public let game: GameInstance;
+  public let lastNoticeId: Int32;
+
+  public func Configure(game: GameInstance, lastNoticeId: Int32) -> Void {
+    this.game = game; this.lastNoticeId = lastNoticeId;
+  }
+
+  public func Call() -> Void {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.game);
+    let noticeId: Int32;
+    let point: Int32;
+    let next: ref<NCTCDirectSurveyNoticeCallback>;
+    if IsDefined(quests) {
+      noticeId = quests.GetFact(n"nctc_survey_direct_notice_id");
+      if noticeId > this.lastNoticeId {
+        point = quests.GetFact(n"nctc_survey_direct_notice_point");
+        NCTCSettings.Notify(this.game, "NCTC survey confirmed: " + (Equals(point, 1) ? "spawn" : Equals(point, 2) ? "approach" : "berth"));
+        this.lastNoticeId = noticeId;
+      } else if noticeId < this.lastNoticeId {
+        this.lastNoticeId = noticeId;
+      };
+    };
+    next = new NCTCDirectSurveyNoticeCallback();
+    next.Configure(this.game, this.lastNoticeId);
+    GameInstance.GetDelaySystem(this.game).DelayCallback(next, 0.25, false);
+  }
+}
+
 public enum NCTCSurveyPassage {
   L17_SkylineEst_QGDelamain_PetrelStreet = 0,
   L17_QGDelamain_PetrelStreet_Rocade = 1,
@@ -244,10 +276,16 @@ public class NCTCSettings extends ScriptableSystem {
   public let beginDraftLine: Bool = false;
 
   private func OnAttach() -> Void {
+    let callback: ref<NCTCDirectSurveyNoticeCallback>;
+    let quests: ref<QuestsSystem>;
     this.RegisterSettings();
     this.PublishSurveySettings();
     this.UpdateDeveloperVisibility();
     GameInstance.GetCallbackSystem().RegisterCallback(n"Input/Key", this, n"OnSurveyKeyInput");
+    quests = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    callback = new NCTCDirectSurveyNoticeCallback();
+    callback.Configure(this.GetGameInstance(), IsDefined(quests) ? quests.GetFact(n"nctc_survey_direct_notice_id") : 0);
+    GameInstance.GetDelaySystem(this.GetGameInstance()).DelayCallback(callback, 0.25, false);
   }
 
   private func OnDetach() -> Void {
@@ -449,7 +487,7 @@ public class NCTCSettings extends ScriptableSystem {
   @if(!ModuleExists("ModSettingsModule"))
   private func ClearBeginDraftSetting() -> Void {}
 
-  private static func Notify(game: GameInstance, text: String) -> Void {
+  public static func Notify(game: GameInstance, text: String) -> Void {
     let message: SimpleScreenMessage;
     let defs: ref<AllBlackboardDefinitions> = GetAllBlackboardDefs();
     message.isShown = true; message.duration = 2.50; message.message = text;

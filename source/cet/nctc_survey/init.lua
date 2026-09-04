@@ -519,6 +519,9 @@ local function capture_directly(kind)
   update_capture_point(capture, kind == "spawn" and 1 or (kind == "approach" and 2 or 3), point)
   network.revision = (network.revision or 0) + 1
   if write_network(network) then
+    local point_code = kind == "spawn" and 1 or (kind == "approach" and 2 or 3)
+    set_fact(quests, "nctc_survey_direct_notice_point", point_code)
+    set_fact(quests, "nctc_survey_direct_notice_id", fact(quests, "nctc_survey_direct_notice_id") + 1)
     log("direct saved " .. kind .. " L" .. tostring(line) .. " stop " .. tostring(stop_index) .. "/" .. tostring(count)
       .. " at (" .. tostring(point.x) .. ", " .. tostring(point.y) .. ", " .. tostring(point.z) .. ")")
   end
