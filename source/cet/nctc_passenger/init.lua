@@ -1,7 +1,8 @@
 -- Passenger cabin interaction adapted from Drive a Bus 1.2.0 by tidusMD,
 -- used with the author's explicit permission. See THIRD_PARTY_NOTICES.md.
 local NCTC = { tag = "NCTC.ServiceBus", ui = nil, hub = nil, visible = false,
-  selected = 0, locked = false, offered = {}, lastSlot = nil }
+  selected = 0, locked = false, offered = {}, lastSlot = nil,
+  uiMissingLogged = false, wasInside = false }
 
 local seats = {
   { id = "seat_back_left", label = "Sit — left rear seat" },
@@ -88,7 +89,18 @@ local function hide()
 end
 
 local function show()
-  if not NCTC.ui or #NCTC.offered == 0 then return end
+  if not NCTC.ui or #NCTC.offered == 0 then
+    if not NCTC.ui and not NCTC.uiMissingLogged then
+      print("[NCTC Passenger] Seat prompt waiting for InteractionUIBase")
+      NCTC.uiMissingLogged = true
+    end
+    -- Do not latch the prompt in a fictitious visible state.  The HUD can be
+    -- initialized one or more frames after V enters the cabin; clearing this
+    -- flag makes onUpdate retry until InteractionUIBase actually exists.
+    NCTC.visible = false
+    return
+  end
+  NCTC.uiMissingLogged = false
   NCTC.hub = makeHub()
   local defs = GetAllBlackboardDefs().UIInteractions
   local board = Game.GetBlackboardSystem():Get(defs)
@@ -104,6 +116,7 @@ local function mount(seat)
   data.isInstant, data.slotName, data.mountParentEntityId = false, seat.id, vehicle:GetEntityID(); slot.id = seat.id
   info.childId, info.parentId, info.slotId = player:GetEntityID(), vehicle:GetEntityID(), slot
   request.lowLevelMountingInfo, request.mountData = info, data
+  print("[NCTC Passenger] Mount requested: " .. seat.id)
   Game.GetMountingFacility():Mount(request); hide()
 end
 
@@ -133,6 +146,16 @@ registerForEvent("onUpdate", function()
   setDoor(vehicle, state == 1 or state == 2 or state == 3)
   if player:GetMountedVehicle() then hide(); return end
   local offered=available(vehicle, player)
-  if not same(NCTC.offered, offered) then hide(); NCTC.offered, NCTC.selected=offered, 0 end
+  local isInside = inside(vehicle, player)
+  if isInside ~= NCTC.wasInside then
+    NCTC.wasInside = isInside
+    print(isInside and "[NCTC Passenger] Player entered walkable cabin" or "[NCTC Passenger] Player left walkable cabin")
+  end
+  if not same(NCTC.offered, offered) then
+    hide(); NCTC.offered, NCTC.selected=offered, 0
+    local names = {}
+    for _, seat in ipairs(offered) do table.insert(names, seat.id) end
+    print("[NCTC Passenger] Seat choices: " .. (#names > 0 and table.concat(names, ", ") or "none"))
+  end
   if #offered > 0 and not NCTC.visible then NCTC.visible=true; show() elseif #offered == 0 then hide() end
 end)
