@@ -156,7 +156,15 @@ public class NCTCTransitSystem extends ScriptableSystem {
   // Dynamic entities become available one or more frames after CreateEntity,
   // therefore command dispatch is deferred and retries only while requested.
   public func UpdateRequestedService() -> Void {
-    if this.requestPending { this.SpawnRequestedService(); };
+    if this.requestPending {
+      // Right after loading a save the dynamic entity system can briefly be
+      // unavailable. Do not silently abandon the request: retry until the
+      // bus entity has actually been created.
+      if !this.SpawnRequestedService() {
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+    };
     if !EntityID.IsDefined(this.busEntityID) { return; };
     if !this.ResolveBus() { this.ScheduleDispatch(0.25); return; };
     if !this.driveCommandSent {
@@ -205,8 +213,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
     spec.active = true;
     spec.tags = [n"NCTC.ServiceBus"];
     this.busEntityID = entitySystem.CreateEntity(spec);
+    if !EntityID.IsDefined(this.busEntityID) { return false; };
     this.requestPending = false;
-    return EntityID.IsDefined(this.busEntityID);
+    return true;
   }
 
   private func ResolveBus() -> Bool {
