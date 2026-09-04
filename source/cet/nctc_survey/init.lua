@@ -486,6 +486,44 @@ local function persist_capture(quests, event_id)
   end
 end
 
+-- Direct CET survey capture. Unlike the legacy redscript bridge above, the
+-- position never lives in quest facts and therefore cannot be restored from a
+-- save and replayed over the external JSON.
+local function capture_directly(kind)
+  local quests = Game.GetQuestsSystem()
+  local player = Game.GetPlayer()
+  if not quests or not player or fact(quests, "nctc_survey_developer_mode") ~= 1 then return end
+  local line = fact(quests, "nctc_survey_selected_line")
+  local stop_index = fact(quests, "nctc_survey_selected_stop_index")
+  local network = load_network()
+  local target, count = selected_stop(network, line, stop_index)
+  if not target then
+    log("direct " .. kind .. " rejected: line " .. tostring(line) .. " stop " .. tostring(stop_index) .. " unavailable")
+    return
+  end
+  local position = player:GetWorldPosition()
+  if not position then return end
+  local capture = find_capture(network, target.id)
+  if not capture then
+    capture = { line = line, stopId = target.id, stopIndex = stop_index, spawn = {}, approach = {}, berth = {} }
+    table.insert(network.captures, capture)
+  end
+  capture.line = line
+  capture.stopId = target.id
+  capture.stopIndex = stop_index
+  capture.stopSequence = target.sequence
+  capture.stopLocKey = target.locKey
+  capture.stopName = target.name
+  capture.eventId = (capture.eventId or 0) + 1
+  local point = { x = position.x, y = position.y, z = position.z, yaw = player:GetWorldYaw() }
+  update_capture_point(capture, kind == "spawn" and 1 or (kind == "approach" and 2 or 3), point)
+  network.revision = (network.revision or 0) + 1
+  if write_network(network) then
+    log("direct saved " .. kind .. " L" .. tostring(line) .. " stop " .. tostring(stop_index) .. "/" .. tostring(count)
+      .. " at (" .. tostring(point.x) .. ", " .. tostring(point.y) .. ", " .. tostring(point.z) .. ")")
+  end
+end
+
 local function publish_network(quests, network)
   local count = math.min(#(network.stops or {}), 160)
   for index = 1, count do
@@ -610,4 +648,15 @@ registerForEvent("onInit", function()
   LOG_FILE = OUTPUT_DIRECTORY .. "/nctc_survey.log"
   print("[NCTC Survey] Initialized; external path: " .. tostring(NETWORK_FILE))
   log("NCTC survey persistence loaded")
+  -- These bindings appear in CET's Bindings tab. Defaults are assigned there
+  -- by the user; Numpad 1/2/3 remain the intended choices for the devkit.
+  registerInput("nctc_survey_spawn", "NCTC Survey: record spawn", function(down)
+    if down then capture_directly("spawn") end
+  end)
+  registerInput("nctc_survey_approach", "NCTC Survey: record approach", function(down)
+    if down then capture_directly("approach") end
+  end)
+  registerInput("nctc_survey_berth", "NCTC Survey: record berth", function(down)
+    if down then capture_directly("berth") end
+  end)
 end)

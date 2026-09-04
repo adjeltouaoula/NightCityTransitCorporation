@@ -267,6 +267,8 @@ public class NCTCSettings extends ScriptableSystem {
     if !IsDefined(quests) { return; };
     quests.SetFact(n"nctc_survey_developer_mode", this.developerMode ? 1 : 0);
     quests.SetFact(n"nctc_survey_line", EnumInt(this.surveyLine));
+    quests.SetFact(n"nctc_survey_selected_line", this.GetSelectedLineNumber());
+    quests.SetFact(n"nctc_survey_selected_stop_index", this.surveyStopIndex);
     quests.SetFact(n"nctc_survey_passage", EnumInt(this.surveyPassage));
   }
 
@@ -283,7 +285,7 @@ public class NCTCSettings extends ScriptableSystem {
     // A single category prevents empty developer headings leaking into the
     // normal configuration screen. Only the master switch stays visible.
     for variable in ModSettings.GetVars(n"Night City Transit Corporation", n"Developer mode") {
-      if Equals(variable.GetName(), n"surveyPassage") { variable.SetVisible(false); }
+      if Equals(variable.GetName(), n"surveyPassage") || Equals(variable.GetName(), n"recordSpawnKey") || Equals(variable.GetName(), n"recordApproachKey") || Equals(variable.GetName(), n"recordBerthKey") { variable.SetVisible(false); }
       else if !Equals(variable.GetName(), n"developerMode") { variable.SetVisible(this.developerMode); };
     };
   }
@@ -292,9 +294,8 @@ public class NCTCSettings extends ScriptableSystem {
 
   protected cb func OnSurveyKeyInput(event: ref<KeyInputEvent>) -> Void {
     if !this.developerMode || !Equals(event.GetAction(), EInputAction.IACT_Press) { return; };
-    if Equals(event.GetKey(), this.recordSpawnKey) { this.Record("spawn"); return; };
-    if Equals(event.GetKey(), this.recordApproachKey) { this.Record("approach"); return; };
-    if Equals(event.GetKey(), this.recordBerthKey) { this.Record("berth"); return; };
+    // Spawn / approach / berth are captured directly by CET in the devkit
+    // branch. That prevents a save restore from replaying old coordinates.
     if Equals(event.GetKey(), this.addManualStopKey) { this.RecordManualStop(); return; };
     if Equals(event.GetKey(), this.deleteNearestStopKey) { this.DeleteNearestStop(); };
   }
