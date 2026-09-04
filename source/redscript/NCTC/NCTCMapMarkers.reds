@@ -24,6 +24,7 @@ public struct NCTCStopDefinition {
 public struct NCTCTravelAnchor {
   public let position: Vector4;
   public let locKey: String;
+  public let isMetro: Bool;
 }
 
 public class NCTCStopMappinData extends MappinScriptData {
@@ -58,11 +59,11 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     return definition;
   }
 
-  private func ManualStop(line: String, position: Vector4) -> NCTCStopDefinition {
+  private func ManualStop(line: String, position: Vector4, stop: String) -> NCTCStopDefinition {
     let definition: NCTCStopDefinition;
     definition.line = line;
     definition.locKey = "";
-    definition.stop = "Survey stop";
+    definition.stop = stop;
     definition.position = position;
     definition.isManual = true;
     definition.color = -1;
@@ -83,6 +84,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
         if IsDefined(travel) {
           anchor.position = travel.GetWorldPosition();
           anchor.locKey = travel.GetPointData().GetPointDisplayName();
+          anchor.isMetro = Equals(mappin.GetVariant(), gamedataMappinVariant.Zzz17_NCARTVariant);
           ArrayPush(anchors, anchor);
         };
       };
@@ -107,6 +109,30 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
       index += 1;
     };
     return -1;
+  }
+
+  // Roadside/manual stops borrow the native name of the closest NCART station
+  // within 35m. A metro wins over a fast-travel point at the same location.
+  private func GetManualStopName(position: Vector4) -> String {
+    let system: ref<MappinSystem> = GameInstance.GetMappinSystem(this.GetGameInstance());
+    let anchors: array<NCTCTravelAnchor>;
+    let index: Int32 = 0;
+    let nearest: Int32 = -1;
+    let nearestMetro: Int32 = -1;
+    let nearestDistance: Float = 35.00;
+    let nearestMetroDistance: Float = 35.00;
+    let distance: Float;
+    if !IsDefined(system) { return "Survey stop"; };
+    anchors = this.GetTravelAnchors(system);
+    while index < ArraySize(anchors) {
+      distance = Vector4.Distance(position, anchors[index].position);
+      if distance < nearestDistance { nearest = index; nearestDistance = distance; };
+      if anchors[index].isMetro && distance < nearestMetroDistance { nearestMetro = index; nearestMetroDistance = distance; };
+      index += 1;
+    };
+    if nearestMetro >= 0 { return GetLocalizedText(anchors[nearestMetro].locKey); };
+    if nearest >= 0 { return GetLocalizedText(anchors[nearest].locKey); };
+    return "Survey stop";
   }
 
   public func GetNearestService(position: Vector4, out line: String, out stop: Vector4) -> Bool {
@@ -165,7 +191,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
       if locKey > 0 {
         definition = this.Stop(ToString(line), "LocKey#" + ToString(locKey), GetLocalizedText("LocKey#" + ToString(locKey)));
       } else {
-        definition = this.ManualStop(ToString(line), new Vector4(Cast<Float>(quests.GetFact(StringToName(prefix + "x"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "y"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "z"))) / 1000.00, 1.00));
+        definition = this.ManualStop(ToString(line), new Vector4(Cast<Float>(quests.GetFact(StringToName(prefix + "x"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "y"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "z"))) / 1000.00, 1.00), this.GetManualStopName(new Vector4(Cast<Float>(quests.GetFact(StringToName(prefix + "x"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "y"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "z"))) / 1000.00, 1.00)));
       };
       definition.color = quests.GetFact(StringToName("nctc_external_line_" + ToString(line) + "_color"));
       ArrayPush(stops, definition);
