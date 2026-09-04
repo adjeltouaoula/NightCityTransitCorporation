@@ -407,6 +407,13 @@ local function persist_capture(quests, event_id)
   local draft_count = fact(quests, "nctc_draft_line_stop_count")
   local draft_line = fact(quests, "nctc_draft_line_number")
   local kind = "survey"
+  -- Direct CET capture owns all survey points in this experimental branch.
+  -- Saved quest facts from old builds may still contain event kind 1; never
+  -- let them overwrite a direct JSON capture after a load.
+  if event_kind == 1 then
+    log("ignored legacy survey-point event " .. tostring(event_id))
+    return
+  end
   if event_kind == 2 and draft_count > 0 then
     local index = draft_count - 1
     local prefix = "nctc_draft_line_" .. tostring(draft_line) .. "_stop_" .. tostring(index) .. "_"
@@ -651,16 +658,19 @@ registerForEvent("onInit", function()
   LOG_FILE = OUTPUT_DIRECTORY .. "/nctc_survey.log"
   print("[NCTC Survey] Initialized; external path: " .. tostring(NETWORK_FILE))
   log("NCTC survey persistence loaded")
-end)
-
--- Register while CET loads the mod, so the bindings are visible in its menu
--- even before a save has reached the game's onInit state.
-registerInput("nctc_survey_spawn", "NCTC Survey: record spawn", function(down)
-  if down then capture_directly("spawn") end
-end)
-registerInput("nctc_survey_approach", "NCTC Survey: record approach", function(down)
-  if down then capture_directly("approach") end
-end)
-registerInput("nctc_survey_berth", "NCTC Survey: record berth", function(down)
-  if down then capture_directly("berth") end
+  -- CET exposes registerInput only after the game reaches this lifecycle
+  -- stage. The bindings then appear in its Bindings tab for the session.
+  if type(registerInput) == "function" then
+    registerInput("nctc_survey_spawn", "NCTC Survey: record spawn", function(down)
+      if down then capture_directly("spawn") end
+    end)
+    registerInput("nctc_survey_approach", "NCTC Survey: record approach", function(down)
+      if down then capture_directly("approach") end
+    end)
+    registerInput("nctc_survey_berth", "NCTC Survey: record berth", function(down)
+      if down then capture_directly("berth") end
+    end)
+  else
+    log("direct survey bindings unavailable: CET registerInput not ready")
+  end
 end)

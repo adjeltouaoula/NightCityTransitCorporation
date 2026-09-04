@@ -59,6 +59,20 @@ public class NCTCDirectSurveyNoticeCallback extends DelayCallback {
   }
 }
 
+public class NCTCSurveySelectionPublishCallback extends DelayCallback {
+  public let game: GameInstance;
+
+  public func Configure(game: GameInstance) -> Void { this.game = game; }
+
+  public func Call() -> Void {
+    let settings: ref<NCTCSettings> = NCTCSettings.Get(this.game);
+    let next: ref<NCTCSurveySelectionPublishCallback> = new NCTCSurveySelectionPublishCallback();
+    if IsDefined(settings) { settings.PublishSurveySettings(); };
+    next.Configure(this.game);
+    GameInstance.GetDelaySystem(this.game).DelayCallback(next, 1.00, false);
+  }
+}
+
 public enum NCTCSurveyPassage {
   L17_SkylineEst_QGDelamain_PetrelStreet = 0,
   L17_QGDelamain_PetrelStreet_Rocade = 1,
@@ -277,6 +291,7 @@ public class NCTCSettings extends ScriptableSystem {
 
   private func OnAttach() -> Void {
     let callback: ref<NCTCDirectSurveyNoticeCallback>;
+    let selectionCallback: ref<NCTCSurveySelectionPublishCallback>;
     let quests: ref<QuestsSystem>;
     this.RegisterSettings();
     this.PublishSurveySettings();
@@ -286,6 +301,9 @@ public class NCTCSettings extends ScriptableSystem {
     callback = new NCTCDirectSurveyNoticeCallback();
     callback.Configure(this.GetGameInstance(), IsDefined(quests) ? quests.GetFact(n"nctc_survey_direct_notice_id") : 0);
     GameInstance.GetDelaySystem(this.GetGameInstance()).DelayCallback(callback, 0.25, false);
+    selectionCallback = new NCTCSurveySelectionPublishCallback();
+    selectionCallback.Configure(this.GetGameInstance());
+    GameInstance.GetDelaySystem(this.GetGameInstance()).DelayCallback(selectionCallback, 1.00, false);
   }
 
   private func OnDetach() -> Void {
@@ -300,7 +318,7 @@ public class NCTCSettings extends ScriptableSystem {
     if this.developerMode { this.NotifySelectedSurveyStop(); };
   }
 
-  private func PublishSurveySettings() -> Void {
+  public func PublishSurveySettings() -> Void {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
     if !IsDefined(quests) { return; };
     quests.SetFact(n"nctc_survey_developer_mode", this.developerMode ? 1 : 0);
