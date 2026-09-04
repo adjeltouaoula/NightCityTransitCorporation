@@ -6,7 +6,8 @@
 
 local NCBN = { tag = "NightCityBusNetwork.PrototypeBus", interactionUI = nil, choiceHub = nil,
     choiceVisible = false, selectedSeat = 0, inputLocked = false, offeredSeats = {},
-    uiMissingLogged = false, wasInside = false, lastMountedSlot = nil }
+    uiMissingLogged = false, wasInside = false, lastMountedSlot = nil,
+    boardedAtStop = false, exitDoorArmed = false }
 
 -- Local-space zone in the aisle beside the two validated rear passenger seats.
 local seatAreas = {
@@ -15,6 +16,13 @@ local seatAreas = {
 }
 
 local passengerSlots = { seat_back_left = true, seat_back_right = true }
+
+local function getFact(name)
+    local quests = Game.GetQuestsSystem()
+    if not quests then return 0 end
+    local ok, value = pcall(function() return quests:GetFact(CName.new(name)) end)
+    return ok and value or 0
+end
 
 local function setFact(name, value)
     local quests = Game.GetQuestsSystem()
@@ -54,6 +62,13 @@ end
 local function playerIsInside(bus, player)
     local p = localPosition(bus, player)
     return p.x > -1.20 and p.x < 1.20 and p.y > -3.00 and p.y < 5.00 and p.z > 0.00 and p.z < 1.80
+end
+
+-- Right-hand front doorway of the Mahir, expressed in vehicle-local space.
+-- The 1.50m-deep zone is intentionally much smaller than the full cabin.
+local function playerIsAtInteriorDoor(bus, player)
+    local p = localPosition(bus, player)
+    return p.x > 0.30 and p.x < 1.40 and p.y > 2.30 and p.y < 3.80 and p.z > 0.00 and p.z < 1.80
 end
 
 local function isSeatFree(bus, seat)
@@ -201,16 +216,37 @@ registerForEvent("onUpdate", function()
     local player, bus = Game.GetPlayer(), findServiceBus()
     if not player or not bus then
         setFact("nctc_player_in_service_bus", 0)
+        NCBN.boardedAtStop, NCBN.exitDoorArmed, NCBN.wasInside = false, false, false
         hideChoice()
         return
     end
     local distance = Vector4.Distance(player:GetWorldPosition(), bus:GetWorldPosition())
     local isMounted = player:GetMountedVehicle() ~= nil
     local insideNow = playerIsInside(bus, player)
-    -- Validated NCBN 0.0.13 / Drive a Bus proximity behaviour: while the
-    -- Mahir is stationary, an unmounted V inside or within 10m opens the
-    -- boarding door. Mounting or leaving the area closes it.
-    setBoardingDoor(bus, math.abs(bus:GetCurrentSpeed()) <= 1.00 and not isMounted and distance < 10.00)
+    local atStop = getFact("nctc_service_bus_at_stop") > 0
+    local stopped = math.abs(bus:GetCurrentSpeed()) <= 1.00
+    local enteredNow = insideNow and not NCBN.wasInside
+    local atInteriorDoor = insideNow and playerIsAtInteriorDoor(bus, player)
+
+    if enteredNow then
+        -- First cabin crossing always closes the door, including when V
+        -- remains standing. Walking away from the doorway arms a later exit.
+        NCBN.boardedAtStop, NCBN.exitDoorArmed = true, false
+    elseif insideNow and NCBN.boardedAtStop and not atInteriorDoor then
+        NCBN.exitDoorArmed = true
+    elseif not insideNow and distance >= 5.00 then
+        NCBN.boardedAtStop, NCBN.exitDoorArmed = false, false
+    end
+
+    local shouldOpen = false
+    if atStop and stopped and not isMounted and not enteredNow then
+        if not insideNow then
+            shouldOpen = distance < 5.00
+        elseif NCBN.boardedAtStop and NCBN.exitDoorArmed and atInteriorDoor then
+            shouldOpen = true
+        end
+    end
+    setBoardingDoor(bus, shouldOpen)
 
     if isMounted then
         setFact("nctc_player_in_service_bus", isSameEntity(player:GetMountedVehicle(), bus) and 1 or 0)
