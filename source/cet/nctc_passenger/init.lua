@@ -6,7 +6,8 @@
 
 local NCBN = { tag = "NightCityBusNetwork.PrototypeBus", interactionUI = nil, choiceHub = nil,
     choiceVisible = false, selectedSeat = 0, inputLocked = false, offeredSeats = {},
-    uiMissingLogged = false, wasInside = false, lastMountedSlot = nil }
+    uiMissingLogged = false, wasInside = false, lastMountedSlot = nil,
+    passengerMountRequested = false, mountRequestDeadline = 0, wasMounted = false }
 
 -- Local-space zone in the aisle beside the two validated rear passenger seats.
 local seatAreas = {
@@ -20,6 +21,26 @@ local function setFact(name, value)
     local quests = Game.GetQuestsSystem()
     if not quests then return false end
     return pcall(function() quests:SetFact(CName.new(name), value) end)
+end
+
+local function getFact(name)
+    local quests = Game.GetQuestsSystem()
+    if not quests then return 0 end
+    local ok, value = pcall(function() return quests:GetFact(CName.new(name)) end)
+    if ok and type(value) == "number" then return value end
+    ok, value = pcall(function() return quests:GetFact(name) end)
+    return ok and type(value) == "number" and value or 0
+end
+
+local function signalTransitSystem(value)
+    local container = Game.GetScriptableSystemsContainer()
+    if not container then return false end
+    local ok, system = pcall(function() return container:Get("NCTC.NCTCTransitSystem") end)
+    if not ok or not system then
+        ok, system = pcall(function() return container:Get(CName.new("NCTC.NCTCTransitSystem")) end)
+    end
+    if not ok or not system then return false end
+    return pcall(function() system:SetPlayerAboard(value) end)
 end
 
 NCBN.tag = "NCTC.ServiceBus"
@@ -153,6 +174,15 @@ local function mountPassenger(seat)
     slot.id = seat.id
     info.childId, info.parentId, info.slotId = player:GetEntityID(), bus:GetEntityID(), slot
     request.lowLevelMountingInfo, request.mountData = info, data
+    -- This interaction only ever targets the two rear passenger workspots.
+    -- Remember that provenance until the game confirms V is mounted; querying
+    -- the workspot back from the Mahir is unreliable in CET.
+    NCBN.passengerMountRequested = true
+    NCBN.mountRequestDeadline = os.clock() + 5.0
+    -- This is an edge-triggered service request, not a mirror of the game's
+    -- unreliable Mahir mounted-slot state. The transit loop acknowledges it
+    -- exactly once after allowing the seating animation to complete.
+    setFact("nctc_passenger_departure_requested", 1)
     Game.GetMountingFacility():Mount(request)
     hideChoice()
 end
@@ -200,7 +230,11 @@ registerForEvent("onUpdate", function()
     NCBN.inputLocked = false
     local player, bus = Game.GetPlayer(), findServiceBus()
     if not player or not bus then
+        NCBN.passengerMountRequested = false
+        NCBN.mountRequestDeadline = 0
+        NCBN.wasMounted = false
         setFact("nctc_player_in_service_bus", 0)
+        signalTransitSystem(false)
         hideChoice()
         return
     end
@@ -208,12 +242,24 @@ registerForEvent("onUpdate", function()
     local isMounted = player:GetMountedVehicle() ~= nil
     local insideNow = playerIsInside(bus, player)
     -- Exact validated Drive a Bus / NCBN 0.0.13 door behaviour.
-    setBoardingDoor(bus, math.abs(bus:GetCurrentSpeed()) <= 1.00 and not isMounted and distance < 10.00)
+    -- Proximity may open the door only during an official NCTC stop. When the
+    -- route loop revokes this fact, CET must allow the door to stay closed so
+    -- the departure state can advance.
+    local boardingAllowed = getFact("nctc_service_bus_at_stop") == 1
+    -- At a scheduled stop the door stays open for boarding and alighting,
+    -- including while V is already mounted in a rear passenger workspot.
+    setBoardingDoor(bus, boardingAllowed and math.abs(bus:GetCurrentSpeed()) <= 1.00 and (isMounted or distance < 10.00))
 
     if isMounted then
-        setFact("nctc_player_in_service_bus", isSameEntity(player:GetMountedVehicle(), bus) and 1 or 0)
         local slot = bus:GetSlotIdForMountedObject(player)
         local slotName = slot and slot.value or "unknown"
+        -- The mounted vehicle wrapper is not stable for these passenger
+        -- workspots. The slot belongs to this exact bus and is the reliable
+        -- proof that V is seated in one of NCTC's rear passenger places.
+        local aboard = NCBN.passengerMountRequested or passengerSlots[slotName] == true
+        NCBN.wasMounted = true
+        setFact("nctc_player_in_service_bus", aboard and 1 or 0)
+        signalTransitSystem(aboard)
         if slotName ~= NCBN.lastMountedSlot then
             NCBN.lastMountedSlot = slotName
             print("[NCBN] Player mounted slot: " .. slotName .. (passengerSlots[slotName] and " (passenger)" or " (forbidden)"))
@@ -221,9 +267,20 @@ registerForEvent("onUpdate", function()
         hideChoice()
         return
     end
+    -- Mounting is asynchronous. Do not clear the provenance on the frame
+    -- between Mount(request) and GetMountedVehicle() becoming valid.
+    if NCBN.wasMounted then
+        NCBN.passengerMountRequested = false
+        NCBN.mountRequestDeadline = 0
+        NCBN.wasMounted = false
+    elseif NCBN.passengerMountRequested and os.clock() > NCBN.mountRequestDeadline then
+        NCBN.passengerMountRequested = false
+        NCBN.mountRequestDeadline = 0
+    end
     NCBN.lastMountedSlot = nil
     local inside = insideNow
     setFact("nctc_player_in_service_bus", inside and 1 or 0)
+    signalTransitSystem(inside)
     if inside ~= NCBN.wasInside then
         NCBN.wasInside = inside
         print(inside and "[NCBN] Player entered the walkable cabin." or "[NCBN] Player left the walkable cabin.")

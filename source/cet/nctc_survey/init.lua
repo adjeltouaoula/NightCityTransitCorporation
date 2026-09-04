@@ -548,6 +548,7 @@ local function publish_network(quests, network)
     local prefix = "nctc_external_stop_" .. tostring(index - 1) .. "_"
     set_fact(quests, prefix .. "line", stop.line or 0)
     set_fact(quests, prefix .. "id", stop.id or 0)
+    set_fact(quests, prefix .. "sequence", stop.sequence or index)
     set_fact(quests, prefix .. "loc_key", stop.locKey or 0)
     local position = stop.position or {}
     set_fact(quests, prefix .. "x", math.floor((position.x or 0) * 1000))
@@ -656,7 +657,22 @@ local function log_service_loop(quests)
     [3] = "V detected aboard; dwell timer started",
     [4] = "blocked: current stop was not found in the line order",
     [5] = "blocked: next stop has no complete spawn/berth profile",
-    [6] = "departing for next stop"
+    [6] = "departing for next stop",
+    [7] = "one-leg destination reached",
+    [10] = "dwell complete; door closure requested",
+    [11] = "second AI command scheduled",
+    [20] = "minimal loop: drive command sent",
+    [21] = "minimal loop: berth reached",
+    [22] = "minimal loop: next berth command sent",
+    [23] = "minimal loop: next berth command rejected",
+    [24] = "minimal loop: stopped-near fallback reached",
+    [25] = "minimal loop: active AI command failed",
+    [29] = "route loop: initial berth command sent",
+    [30] = "route loop: entered 18m berth zone; stop opened",
+    [32] = "route loop: departed for next stopSequence",
+    [33] = "route loop: next drive command rejected",
+    [34] = "route loop: next stopSequence/profile unavailable",
+    [35] = "route loop: active drive command failed before 18m zone"
   }
   log("service loop " .. tostring(id) .. ": L" .. tostring(line) .. " stopId " .. tostring(stop_id)
     .. " -> " .. tostring(next_stop_id) .. " " .. (states[code] or ("state " .. tostring(code))))

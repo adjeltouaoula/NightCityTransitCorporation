@@ -1,10 +1,49 @@
 module NCTC
 import AutoDriveEnhanced.*
 
+public class NCTCDeferredDriveCommand extends DelayCallback {
+  private let bus: wref<VehicleObject>;
+  private let controller: wref<NCTCServiceBusController>;
+  private let target: Vector4;
+
+  public func Configure(bus: ref<VehicleObject>, controller: ref<NCTCServiceBusController>, target: Vector4) -> ref<NCTCDeferredDriveCommand> {
+    this.bus = bus;
+    this.controller = controller;
+    this.target = target;
+    return this;
+  }
+
+  public func Call() -> Void {
+    let command: ref<AIVehicleDriveToPointCommand>;
+    let settings: ref<Settings>;
+    if !IsDefined(this.bus) || !this.bus.IsAttached() || !IsDefined(this.bus.GetAIComponent()) { return; };
+    settings = Settings.GetInstance(this.bus.GetGame());
+    if !IsDefined(settings) { return; };
+    command = new AIVehicleDriveToPointCommand();
+    command.secureTimeOut = settings.secureTimeOut;
+    command.useTraffic = settings.useTraffic;
+    command.speedInTraffic = settings.speedInTraffic;
+    command.forceGreenLights = settings.forceGreenLights;
+    command.trafficTryNeighborsForStart = settings.trafficTryNeighborsForStart;
+    command.trafficTryNeighborsForEnd = settings.trafficTryNeighborsForEnd;
+    command.targetPosition = Vector4.Vector4To3(this.target);
+    command.minimumDistanceToTarget = 8.00;
+    command.needDriver = false;
+    command.driveDownTheRoadIndefinitely = false;
+    // SendCommand is the path used by Delamain while V is mounted as a
+    // passenger. QueueEvent + SetInitCmd is suitable for an empty traffic
+    // vehicle, but PassengerEvents can cancel that initialization on 2.3+.
+    this.bus.GetAIComponent().SendCommand(command);
+    if IsDefined(this.controller) { this.controller.SetActiveRouteCommand(command); };
+  }
+}
+
 // Direct traffic command supplied by Auto Drive Enhanced. It controls the bus
 // only: V remains an ordinary passenger and its AutoDrive UI is never used.
 public class NCTCServiceBusController extends IScriptable {
   private let bus: wref<VehicleObject>;
+  private let playerAboardSignal: Bool;
+  private let activeRouteCommand: ref<AIVehicleDriveToPointCommand>;
 
   public func Bind(bus: ref<VehicleObject>) -> Bool {
     if !IsDefined(bus) || !IsDefined(bus.GetAIComponent()) { return false; };
@@ -23,11 +62,22 @@ public class NCTCServiceBusController extends IScriptable {
     let player: ref<PlayerPuppet>;
     let mounted: ref<VehicleObject>;
     if !this.IsReady() { return false; };
+    if this.playerAboardSignal { return true; };
     player = GetPlayer(this.bus.GetGame());
     if !IsDefined(player) { return false; };
+    // The rear passenger workspots are mounted by the CET cabin module.
+    // Depending on the current vehicle state, the vanilla mounting helpers do
+    // not always expose that workspot immediately. The cabin module publishes
+    // the exact service-bus match every frame, so use it as the authoritative
+    // departure signal and keep the native checks as fallbacks.
+    if Equals(GameInstance.GetQuestsSystem(this.bus.GetGame()).GetFact(n"nctc_player_in_service_bus"), 1) { return true; };
     if VehicleComponent.IsMountedToProvidedVehicle(this.bus.GetGame(), player.GetEntityID(), this.bus) { return true; };
     mounted = player.GetMountedVehicle();
     return IsDefined(mounted) && Equals(mounted.GetEntityID(), this.bus.GetEntityID());
+  }
+
+  public func SetPlayerAboardSignal(value: Bool) -> Void {
+    this.playerAboardSignal = value;
   }
 
   public func DistanceToPlayer() -> Float {
@@ -38,28 +88,35 @@ public class NCTCServiceBusController extends IScriptable {
   }
 
   public func DriveToTraffic(target: Vector4, minimumDistance: Float) -> Bool {
-    let command: ref<AIVehicleDriveToPointCommand>;
-    let event: ref<AICommandEvent>;
-    let settings: ref<Settings>;
+    let callback: ref<NCTCDeferredDriveCommand>;
     if !this.IsReady() { return false; };
-    settings = Settings.GetInstance(this.bus.GetGame());
-    if !IsDefined(settings) { return false; };
-    command = new AIVehicleDriveToPointCommand();
-    command.secureTimeOut = settings.secureTimeOut;
-    command.useTraffic = settings.useTraffic;
-    command.speedInTraffic = settings.speedInTraffic;
-    command.forceGreenLights = settings.forceGreenLights;
-    command.trafficTryNeighborsForStart = settings.trafficTryNeighborsForStart;
-    command.trafficTryNeighborsForEnd = settings.trafficTryNeighborsForEnd;
-    command.targetPosition = Vector4.Vector4To3(target);
-    // ADE's ordinary-car stopping distance is too broad for a bus berth.
-    command.minimumDistanceToTarget = minimumDistance;
-    command.needDriver = false;
-    command.driveDownTheRoadIndefinitely = false;
-    event = new AICommandEvent();
-    event.command = command;
-    this.bus.QueueEvent(event);
+    // ADE schedules NoDriver next-frame and DriverReady 0.1s later. Sending a
+    // drive command synchronously here lets those events cancel its start.
+    this.bus.WorkaroundForAutoDriveDontStart_ADE();
+    callback = new NCTCDeferredDriveCommand();
+    this.activeRouteCommand = null;
+    callback.Configure(this.bus, this, target);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.25, false);
     return true;
+  }
+
+  public func SetActiveRouteCommand(command: ref<AIVehicleDriveToPointCommand>) -> Void {
+    this.activeRouteCommand = command;
+  }
+
+  public func IsRouteCommandSuccessful() -> Bool {
+    return IsDefined(this.activeRouteCommand) && Equals(this.activeRouteCommand.state, AICommandState.Success);
+  }
+
+  public func IsRouteCommandFailed() -> Bool {
+    if !IsDefined(this.activeRouteCommand) { return false; };
+    return Equals(this.activeRouteCommand.state, AICommandState.Failure)
+      || Equals(this.activeRouteCommand.state, AICommandState.Cancelled)
+      || Equals(this.activeRouteCommand.state, AICommandState.Interrupted);
+  }
+
+  public func IsStoppedNear(position: Vector4, radius: Float) -> Bool {
+    return this.IsReady() && AbsF(this.bus.GetCurrentSpeed()) <= 0.50 && this.IsNear(position, radius);
   }
 
   public func CancelTrafficRoute() -> Void {
@@ -114,6 +171,24 @@ public class NCTCServiceBusController extends IScriptable {
   public func IsPassengerDoorClosed() -> Bool {
     return this.IsReady() && Equals(this.bus.GetVehiclePS().GetDoorState(EVehicleDoor.seat_front_right), VehicleDoorState.Closed);
   }
+
+  public func IsPassengerDoorOpen() -> Bool {
+    return this.IsReady() && Equals(this.bus.GetVehiclePS().GetDoorState(EVehicleDoor.seat_front_right), VehicleDoorState.Open);
+  }
+
+  public func StartPlayerAutoDriveTo(target: Vector4, out waypoint: NewMappinID) -> Bool {
+    let data: MappinData;
+    let mappins: ref<MappinSystem>;
+    if !this.IsReady() || !this.IsPlayerAboard() { return false; };
+    mappins = GameInstance.GetMappinSystem(this.bus.GetGame());
+    if !IsDefined(mappins) { return false; };
+    data.mappinType = t"Mappins.DefaultStaticMappin";
+    data.variant = gamedataMappinVariant.CustomPositionVariant;
+    data.active = true;
+    data.debugCaption = "NCTC next stop";
+    waypoint = mappins.RegisterMappin(data, target);
+    return this.DriveToTraffic(target, 8.00);
+  }
 }
 
 public class NCTCServiceProfiles {
@@ -139,31 +214,51 @@ public class NCTCServiceProfiles {
     let index: Int32 = 0;
     let stopLine: Int32;
     let stopId: Int32;
+    let stopSequence: Int32;
+    let currentSequence: Int32 = -1;
+    let nextSequence: Int32 = 2147483647;
+    let firstSequence: Int32 = 2147483647;
     let firstId: Int32 = 0;
     let firstPosition: Vector4;
-    let currentFound: Bool = false;
     let prefix: String;
     if !IsDefined(quests) || requestedLine < 1 || !Equals(quests.GetFact(n"nctc_external_network_ready"), 1) { return false; };
     count = quests.GetFact(n"nctc_external_network_stop_count");
+    // IDs are persistent capture keys and are deliberately unrelated to route
+    // order. Resolve the current stop's explicit sequence first.
     while index < count {
       prefix = "nctc_external_stop_" + ToString(index) + "_";
       stopLine = quests.GetFact(StringToName(prefix + "line"));
       stopId = quests.GetFact(StringToName(prefix + "id"));
-      if Equals(stopLine, requestedLine) {
-        if firstId < 1 {
-          firstId = stopId;
-          firstPosition = NCTCServiceProfiles.ReadVector(quests, prefix);
-        };
-        if currentFound {
-          nextStopId = stopId;
-          nextStop = NCTCServiceProfiles.ReadVector(quests, prefix);
-          return nextStopId > 0;
-        };
-        if Equals(stopId, currentStopId) { currentFound = true; };
+      if Equals(stopLine, requestedLine) && Equals(stopId, currentStopId) {
+        currentSequence = quests.GetFact(StringToName(prefix + "sequence"));
+        break;
       };
       index += 1;
     };
-    if currentFound && firstId > 0 {
+    if currentSequence < 0 { return false; };
+
+    index = 0;
+    while index < count {
+      prefix = "nctc_external_stop_" + ToString(index) + "_";
+      stopLine = quests.GetFact(StringToName(prefix + "line"));
+      if Equals(stopLine, requestedLine) {
+        stopId = quests.GetFact(StringToName(prefix + "id"));
+        stopSequence = quests.GetFact(StringToName(prefix + "sequence"));
+        if stopSequence < firstSequence {
+          firstSequence = stopSequence;
+          firstId = stopId;
+          firstPosition = NCTCServiceProfiles.ReadVector(quests, prefix);
+        };
+        if stopSequence > currentSequence && stopSequence < nextSequence {
+          nextSequence = stopSequence;
+          nextStopId = stopId;
+          nextStop = NCTCServiceProfiles.ReadVector(quests, prefix);
+        };
+      };
+      index += 1;
+    };
+    if nextSequence < 2147483647 { return nextStopId > 0; };
+    if firstId > 0 {
       nextStopId = firstId;
       nextStop = firstPosition;
       return true;
@@ -200,6 +295,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let approachCommandSent: Bool;
   private let routeStarted: Bool;
   private let dwellPolls: Int32;
+  private let boardingDoorWasOpen: Bool;
+  private let routeWaypoint: NewMappinID;
+  private let departureRequested: Bool;
+  private let legPolls: Int32;
 
   private func PublishLoopDiagnostic(code: Int32, nextStopId: Int32) -> Void {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
@@ -236,6 +335,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
     GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_service_bus_at_stop", 0);
     this.driveCommandSent = false;
     this.approachCommandSent = false;
+    this.boardingDoorWasOpen = false;
+    this.departureRequested = false;
+    this.legPolls = 0;
+    GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_passenger_departure_requested", 0);
     this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), line, stopId, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);
     // Development-only diagnostic bridge. CET writes this to nctc_survey.log;
     // it never creates a player-facing notification and is absent from public builds.
@@ -273,6 +376,11 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.approachCommandSent = false;
     this.routeStarted = false;
     this.dwellPolls = 0;
+    this.boardingDoorWasOpen = false;
+    this.departureRequested = false;
+    this.legPolls = 0;
+    GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_passenger_departure_requested", 0);
+    this.ClearRouteWaypoint();
     this.arrived = false;
     GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_service_bus_at_stop", 0);
     this.hasSurveyProfile = false;
@@ -287,9 +395,27 @@ public class NCTCTransitSystem extends ScriptableSystem {
     GameInstance.GetDelaySystem(this.GetGameInstance()).DelayCallback(callback, delay, false);
   }
 
+  // Direct CET bridge used by the passenger-seat module. Passenger workspots
+  // on the Mahir are not reported consistently by the vanilla mounted-vehicle
+  // helpers, so the module that performs the mount is the authoritative source.
+  public func SetPlayerAboard(value: Bool) -> Void {
+    if IsDefined(this.controller) {
+      this.controller.SetPlayerAboardSignal(value);
+    };
+  }
+
+  private func ClearRouteWaypoint() -> Void {
+    let mappins: ref<MappinSystem> = GameInstance.GetMappinSystem(this.GetGameInstance());
+    if IsDefined(mappins) && IsDefined(mappins.GetMappin(this.routeWaypoint)) {
+      mappins.UnregisterMappin(this.routeWaypoint);
+    };
+  }
+
   // Dynamic entities become available one or more frames after CreateEntity,
   // therefore command dispatch is deferred and retries only while requested.
   public func UpdateRequestedService() -> Void {
+    let boarded: Bool;
+    let quests: ref<QuestsSystem>;
     if this.requestPending {
       // Right after loading a save the dynamic entity system can briefly be
       // unavailable. Do not silently abandon the request: retry until the
@@ -301,58 +427,69 @@ public class NCTCTransitSystem extends ScriptableSystem {
     };
     if !EntityID.IsDefined(this.busEntityID) { return; };
     if !this.ResolveBus() { this.ScheduleDispatch(0.25); return; };
+    quests = GameInstance.GetQuestsSystem(this.GetGameInstance());
+
+    // Stop state: open for passengers, leave as soon as V boards, or after a
+    // maximum ten-second dwell when nobody takes this service.
     if this.arrived {
-      // 999 is the short door-closing phase. Revoke opening permission first,
-      // then wait for the Mahir PS to report Closed before changing stop.
-      if Equals(this.dwellPolls, 999) {
-        GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_service_bus_at_stop", 0);
-        this.controller.ClosePassengerDoor();
-        if !this.controller.IsPassengerDoorClosed() { this.ScheduleDispatch(0.25); return; };
-        this.dwellPolls = 0;
-        if !this.AdvanceToNextStop() { this.ScheduleDispatch(1.00); return; };
-      } else {
-      // Scriptable-system state survives save loading, while transient quest
-      // facts may not. Reassert the stop permission on every arrived poll so
-      // the proximity door controller is restored after loading a save.
-      GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_service_bus_at_stop", 1);
-      if !this.controller.IsPlayerAboard() {
-        if Equals(this.dwellPolls, 0) { this.PublishLoopDiagnostic(2, 0); };
-        if this.controller.DistanceToPlayer() > 180.00 { this.DespawnServiceBus(); return; };
-        this.dwellPolls = -1;
-        this.ScheduleDispatch(0.50);
+      quests.SetFact(n"nctc_service_bus_at_stop", 1);
+      this.controller.KeepPassengerDoorOpen();
+      boarded = this.controller.IsPlayerAboard()
+        || Equals(quests.GetFact(n"nctc_passenger_departure_requested"), 1);
+      // Always leave enough time for the door animation to be visible.
+      if this.dwellPolls < 8 {
+        this.dwellPolls += 1;
+        this.ScheduleDispatch(0.25);
         return;
       };
-      if this.dwellPolls < 0 { this.dwellPolls = 0; this.PublishLoopDiagnostic(3, 0); };
-      this.dwellPolls += 1;
-      if this.dwellPolls < 6 {
-        this.ScheduleDispatch(0.50);
+      if !boarded && this.dwellPolls < 40 {
+        this.dwellPolls += 1;
+        this.ScheduleDispatch(0.25);
         return;
       };
-      this.dwellPolls = 999;
-      this.ScheduleDispatch(0.01);
-      return;
+
+      quests.SetFact(n"nctc_passenger_departure_requested", 0);
+      quests.SetFact(n"nctc_service_bus_at_stop", 0);
+      this.controller.ClosePassengerDoor();
+      if !this.AdvanceToNextStop() {
+        this.PublishLoopDiagnostic(34, 0);
+        this.ScheduleDispatch(1.00);
+        return;
       };
-    };
-    if !this.driveCommandSent {
-      // An approach point is route context, never an ADE destination: using
-      // it as one made the bus brake, stop, then restart before the berth.
-      this.driveCommandSent = this.controller.DriveToTraffic(this.hasSurveyProfile ? this.surveyBerth : this.requestedStop, 8.00);
+      this.arrived = false;
+      this.dwellPolls = 0;
+      this.legPolls = 0;
+      this.driveCommandSent = this.controller.DriveToTraffic(this.surveyBerth, 8.00);
+      this.PublishLoopDiagnostic(this.driveCommandSent ? 32 : 33, this.requestedStopId);
       this.ScheduleDispatch(0.25);
       return;
     };
-    // ADE is intentionally told to stop 8m from the target for the MT28's
-    // long body. The arrival radius must encompass that commanded distance,
-    // otherwise the bus stops correctly but NCTC never opens its doors.
-    if !this.arrived && this.controller.IsNear(this.hasSurveyProfile ? this.surveyBerth : this.requestedStop, 10.00) {
-      this.controller.ArriveAtStop();
-      this.arrived = true;
-      this.dwellPolls = 0;
-      GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_service_bus_at_stop", 1);
-      this.PublishLoopDiagnostic(1, this.requestedStopId);
-      this.ScheduleDispatch(0.50);
+
+    if !this.driveCommandSent {
+      this.driveCommandSent = this.controller.DriveToTraffic(this.hasSurveyProfile ? this.surveyBerth : this.requestedStop, 8.00);
+      this.legPolls = 0;
+      this.PublishLoopDiagnostic(29, this.requestedStopId);
+      this.ScheduleDispatch(0.25);
       return;
     };
-    if !this.arrived { this.ScheduleDispatch(0.50); };
+    this.legPolls += 1;
+    // Deliberately no approach gate in this experiment. The commanded stopping
+    // allowance is 8m and the stop tolerance is 10m, hence an 18m arrival zone.
+    if this.controller.IsNear(this.hasSurveyProfile ? this.surveyBerth : this.requestedStop, 18.00) {
+      this.controller.ArriveAtStop();
+      this.arrived = true;
+      this.driveCommandSent = false;
+      this.dwellPolls = 0;
+      quests.SetFact(n"nctc_service_bus_at_stop", 1);
+      this.controller.KeepPassengerDoorOpen();
+      this.PublishLoopDiagnostic(30, this.requestedStopId);
+      this.ScheduleDispatch(0.25);
+      return;
+    };
+    if this.controller.IsRouteCommandFailed() {
+      this.PublishLoopDiagnostic(35, this.requestedStopId);
+    };
+    this.ScheduleDispatch(0.50);
   }
 
   private func AdvanceToNextStop() -> Bool {
@@ -382,6 +519,8 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.approachCommandSent = false;
     this.routeStarted = true;
     this.dwellPolls = 0;
+    this.boardingDoorWasOpen = false;
+    this.legPolls = 0;
     this.PublishLoopDiagnostic(6, nextStopId);
     return true;
   }

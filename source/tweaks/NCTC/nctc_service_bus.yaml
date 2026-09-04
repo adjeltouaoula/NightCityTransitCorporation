@@ -2,6 +2,11 @@
 # it is never a garage, summon, fuel, or maintenance vehicle for V.
 Vehicle.nctc_service_mahir_mt28_coach:
   $base: Vehicle.v_mahir_mt28_coach
+  # Auto Drive Enhanced exposes a dedicated passenger AutoDrive context for
+  # every eligible mounted vehicle. NCTC drives this record through ADE's AI
+  # command directly, so the player-facing AutoDrive action must stay disabled.
+  tags:
+    - !append n"NCTCServiceBus"
   # Keep the vanilla Mahir entity exactly as in the validated NCBN 0.0.13
   # passenger build. Seat/door behaviour is added at runtime; replacing the
   # entity reintroduces Mahir Coach driver state and custom body branding.
