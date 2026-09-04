@@ -128,7 +128,15 @@ public class NCTCTransitSystem extends ScriptableSystem {
   }
 
   public func RequestService(line: String, stop: Vector4) -> Bool {
-    if this.requestPending || EntityID.IsDefined(this.busEntityID) { return false; };
+    if this.requestPending { return false; };
+    // Dynamic entities can be invalidated by a load/streaming transition
+    // while their EntityID survives in this scriptable system. Treat that as
+    // no bus, rather than permanently rejecting every later terminal press.
+    if EntityID.IsDefined(this.busEntityID) {
+      if this.ResolveBus() { return false; };
+      this.busEntityID = new EntityID();
+      this.controller = null;
+    };
     this.requestedLine = line;
     this.requestedStop = stop;
     this.requestPending = true;
