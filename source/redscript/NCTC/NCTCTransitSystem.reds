@@ -71,13 +71,9 @@ public class NCTCServiceBusController extends IScriptable {
     };
   }
 
-  public func ArriveAndOpenDoor() -> Void {
-    let slot: MountingSlotId;
+  public func ArriveAtStop() -> Void {
     if !this.IsReady() { return; };
     this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
-    slot.id = n"seat_front_right";
-    VehicleComponent.OpenDoor(this.bus, slot);
-    this.QueuePassengerDoorOpen();
   }
 
   // The Mahir coach door is stateful. The old working prototype did not rely
@@ -116,6 +112,10 @@ public class NCTCServiceBusController extends IScriptable {
       event.forceScene = false;
       ps.QueuePSEvent(ps, event);
     };
+  }
+
+  public func IsPassengerDoorClosed() -> Bool {
+    return this.IsReady() && Equals(this.bus.GetVehiclePS().GetDoorState(EVehicleDoor.seat_front_right), VehicleDoorState.Closed);
   }
 }
 
@@ -236,6 +236,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.requestedStop = stop;
     this.requestPending = true;
     this.arrived = false;
+    GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_service_bus_at_stop", 0);
     this.driveCommandSent = false;
     this.approachCommandSent = false;
     this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), line, stopId, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);
@@ -276,6 +277,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.routeStarted = false;
     this.dwellPolls = 0;
     this.arrived = false;
+    GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_service_bus_at_stop", 0);
     this.hasSurveyProfile = false;
     this.routeStarted = false;
     this.dwellPolls = 0;
@@ -303,7 +305,6 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if !EntityID.IsDefined(this.busEntityID) { return; };
     if !this.ResolveBus() { this.ScheduleDispatch(0.25); return; };
     if this.arrived {
-      this.controller.KeepPassengerDoorOpen();
       if !this.controller.IsPlayerAboard() {
         if Equals(this.dwellPolls, 0) { this.PublishLoopDiagnostic(2, 0); };
         if this.controller.DistanceToPlayer() > 180.00 { this.DespawnServiceBus(); return; };
@@ -334,9 +335,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
     // long body. The arrival radius must encompass that commanded distance,
     // otherwise the bus stops correctly but NCTC never opens its doors.
     if !this.arrived && this.controller.IsNear(this.hasSurveyProfile ? this.surveyBerth : this.requestedStop, 10.00) {
-      this.controller.ArriveAndOpenDoor();
+      this.controller.ArriveAtStop();
       this.arrived = true;
       this.dwellPolls = 0;
+      GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_service_bus_at_stop", 1);
       this.PublishLoopDiagnostic(1, this.requestedStopId);
       this.ScheduleDispatch(0.50);
       return;
@@ -359,7 +361,11 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.PublishLoopDiagnostic(5, nextStopId);
       return false;
     };
+    // Revoke the stop-door permission before asking for closure. Otherwise
+    // the CET proximity controller reopens the door during this same phase.
+    GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_service_bus_at_stop", 0);
     this.controller.ClosePassengerDoor();
+    if !this.controller.IsPassengerDoorClosed() { return false; };
     this.requestedStopId = nextStopId;
     this.requestedStop = nextStop;
     this.surveySpawn = nextSpawn;

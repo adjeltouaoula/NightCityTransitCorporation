@@ -200,9 +200,17 @@ registerForEvent("onUpdate", function()
         return
     end
     local distance = Vector4.Distance(player:GetWorldPosition(), bus:GetWorldPosition())
-    setBoardingDoor(bus, bus:GetCurrentSpeed() <= 1.00 and distance < 10.00)
+    local quests = Game.GetQuestsSystem()
+    local isAtNCTCStop = quests and quests:GetFactStr("nctc_service_bus_at_stop") > 0
+    local isStopped = math.abs(bus:GetCurrentSpeed()) <= 1.00
+    local isMounted = player:GetMountedVehicle() ~= nil
+    local insideNow = playerIsInside(bus, player)
+    -- Doors are allowed only at a designated NCTC stop while stationary.
+    -- A seated passenger keeps them closed; after unmounting, the same
+    -- proximity/cabin rule opens them for the exit animation.
+    setBoardingDoor(bus, isAtNCTCStop and isStopped and not isMounted and (distance < 10.00 or insideNow))
 
-    if player:GetMountedVehicle() ~= nil then
+    if isMounted then
         local slot = bus:GetSlotIdForMountedObject(player)
         local slotName = slot and slot.value or "unknown"
         if slotName ~= NCBN.lastMountedSlot then
@@ -213,8 +221,7 @@ registerForEvent("onUpdate", function()
         return
     end
     NCBN.lastMountedSlot = nil
-    local inside = playerIsInside(bus, player)
-    local quests = Game.GetQuestsSystem()
+    local inside = insideNow
     if quests then quests:SetFactStr("nctc_player_in_service_bus", inside and 1 or 0) end
     if inside ~= NCBN.wasInside then
         NCBN.wasInside = inside
