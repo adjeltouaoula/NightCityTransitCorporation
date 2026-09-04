@@ -482,7 +482,6 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
   let selectedMappin: ref<IMappin>;
   let markers: ref<NCTCMapMarkerSystem>;
   let anchorPosition: Vector4;
-  let settings: ref<NCTCSettings>;
   let anchorLocKey: String;
   let desc: ref<inkText>;
   let parent: ref<inkCompoundWidget>;
@@ -495,15 +494,13 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
   if !IsDefined(Deref(data).mappin) { return; };
   selectedMappin = Deref(data).mappin;
   stopData = selectedMappin.GetScriptData() as NCTCStopMappinData;
-  // Native travel and NCART mappins stay entirely vanilla. This dev-only
-  // tooltip addition exposes their actual LocKey without introducing another
-  // mappin type, overlay, or map-filter interaction.
+  // Diagnostic build: do not gate this on a Mod Settings value or map variant.
+  // If a selected vanilla tooltip resolves to a travel anchor by position,
+  // force its title/description to name + LocKey. This proves the exact
+  // world-map tooltip route before the developer-only gate is restored.
   if !IsDefined(stopData) {
-    settings = IsDefined(menu.GetPlayerControlledObject()) ? NCTCSettings.Get(menu.GetPlayerControlledObject().GetGame()) : null;
     markers = IsDefined(menu.GetPlayerControlledObject()) ? NCTCMapMarkerSystem.GetInstance(menu.GetPlayerControlledObject().GetGame()) : null;
-    if IsDefined(settings) && settings.developerMode && settings.showTravelAnchorLocKeys && IsDefined(markers)
-      && (Equals(selectedMappin.GetVariant(), gamedataMappinVariant.FastTravelVariant) || Equals(selectedMappin.GetVariant(), gamedataMappinVariant.Zzz17_NCARTVariant))
-      && markers.GetNearestTravelAnchor(selectedMappin.GetWorldPosition(), anchorLocKey, anchorPosition) {
+    if IsDefined(markers) && markers.GetNearestTravelAnchor(selectedMappin.GetWorldPosition(), anchorLocKey, anchorPosition) {
       // Preserve the native stop/station name as title, and put the raw key
       // alone in the normal description slot for easy copying into JSON.
       inkTextRef.SetText(this.m_titleText, GetLocalizedText(anchorLocKey));
