@@ -74,13 +74,45 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
     slot.id = n"seat_front_right";
     VehicleComponent.OpenDoor(this.bus, slot);
+    this.QueuePassengerDoorOpen();
+  }
+
+  // The Mahir coach door is stateful. The old working prototype did not rely
+  // on VehicleComponent.OpenDoor alone: it sent VehicleDoorOpen directly to
+  // the VehiclePS and retried until that persistent state became Open.
+  public func KeepPassengerDoorOpen() -> Void {
+    if !this.IsReady() { return; };
+    if NotEquals(this.bus.GetVehiclePS().GetDoorState(EVehicleDoor.seat_front_right), VehicleDoorState.Open) {
+      this.QueuePassengerDoorOpen();
+    };
+  }
+
+  private func QueuePassengerDoorOpen() -> Void {
+    let event: ref<VehicleDoorOpen>;
+    let ps: ref<VehicleComponentPS>;
+    if !this.IsReady() { return; };
+    ps = this.bus.GetVehiclePS();
+    if !IsDefined(ps) { return; };
+    event = new VehicleDoorOpen();
+    event.slotID = n"seat_front_right";
+    event.forceScene = false;
+    ps.QueuePSEvent(ps, event);
   }
 
   public func ClosePassengerDoor() -> Void {
     let slot: MountingSlotId;
+    let event: ref<VehicleDoorClose>;
+    let ps: ref<VehicleComponentPS>;
     if !this.IsReady() { return; };
     slot.id = n"seat_front_right";
     VehicleComponent.CloseDoor(this.bus, slot);
+    ps = this.bus.GetVehiclePS();
+    if IsDefined(ps) {
+      event = new VehicleDoorClose();
+      event.slotID = n"seat_front_right";
+      event.forceScene = false;
+      ps.QueuePSEvent(ps, event);
+    };
   }
 }
 
@@ -268,6 +300,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if !EntityID.IsDefined(this.busEntityID) { return; };
     if !this.ResolveBus() { this.ScheduleDispatch(0.25); return; };
     if this.arrived {
+      this.controller.KeepPassengerDoorOpen();
       if !this.controller.IsPlayerAboard() {
         if Equals(this.dwellPolls, 0) { this.PublishLoopDiagnostic(2, 0); };
         if this.controller.DistanceToPlayer() > 180.00 { this.DespawnServiceBus(); return; };
