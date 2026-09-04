@@ -658,19 +658,16 @@ registerForEvent("onInit", function()
   LOG_FILE = OUTPUT_DIRECTORY .. "/nctc_survey.log"
   print("[NCTC Survey] Initialized; external path: " .. tostring(NETWORK_FILE))
   log("NCTC survey persistence loaded")
-  -- CET exposes registerInput only after the game reaches this lifecycle
-  -- stage. The bindings then appear in its Bindings tab for the session.
-  if type(registerInput) == "function" then
-    registerInput("nctc_survey_spawn", "NCTC Survey: record spawn", function(down)
-      if down then capture_directly("spawn") end
-    end)
-    registerInput("nctc_survey_approach", "NCTC Survey: record approach", function(down)
-      if down then capture_directly("approach") end
-    end)
-    registerInput("nctc_survey_berth", "NCTC Survey: record berth", function(down)
-      if down then capture_directly("berth") end
-    end)
-  else
-    log("direct survey bindings unavailable: CET registerInput not ready")
-  end
+end)
+
+-- CET bindings must be registered at Lua root level: neither inside onInit
+-- nor from onUpdate. CET discovers these declarations as it loads the mod.
+registerInput("nctc_survey_spawn", "NCTC Survey: record spawn", function(down)
+  if down then capture_directly("spawn") end
+end)
+registerInput("nctc_survey_approach", "NCTC Survey: record approach", function(down)
+  if down then capture_directly("approach") end
+end)
+registerInput("nctc_survey_berth", "NCTC Survey: record berth", function(down)
+  if down then capture_directly("berth") end
 end)
