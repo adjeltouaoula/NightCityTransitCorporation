@@ -17,6 +17,7 @@ local last_event_id = -1
 local next_sync_time = 0
 local survey_events_initialized = false
 local runtime_announced = false
+local runtime_session_id = 0
 
 
 local function load_settings()
@@ -329,7 +330,12 @@ end
 local function synchronize_external_survey(quests)
   local network = load_network()
   local revision = network.revision or 1
-  if fact(quests, "nctc_external_network_revision") ~= revision then publish_network(quests, network) end
+  -- Quest facts are part of a save and can be older than the external JSON.
+  -- Stamp every game session so the JSON is always republished on launch.
+  if fact(quests, "nctc_external_network_revision") ~= revision or fact(quests, "nctc_external_network_session") ~= runtime_session_id then
+    publish_network(quests, network)
+    set_fact(quests, "nctc_external_network_session", runtime_session_id)
+  end
   -- Every passage receives its own fact namespace. Future enabled routes can
   -- consume their capture directly; no information is thrown away when a
   -- different line is surveyed afterwards.
@@ -373,6 +379,7 @@ registerForEvent("onUpdate", function()
 end)
 
 registerForEvent("onInit", function()
+  runtime_session_id = os.time()
   load_settings()
   NETWORK_FILE = OUTPUT_DIRECTORY .. "/nctc_network.json"
   DEFAULT_NETWORK_FILE = OUTPUT_DIRECTORY .. "/nctc_network.default.json"

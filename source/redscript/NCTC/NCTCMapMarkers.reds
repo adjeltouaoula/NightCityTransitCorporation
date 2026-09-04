@@ -112,7 +112,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
   }
 
   // Roadside/manual stops may be deliberately offset from a terminal so they
-  // can sit on a valid bus lane. Search a full city block (300m); within that
+  // can sit on a valid bus lane. Search 100m; within that
   // radius, an NCART station wins over a fast-travel point.
   private func GetManualStopName(position: Vector4) -> String {
     let system: ref<MappinSystem> = GameInstance.GetMappinSystem(this.GetGameInstance());
@@ -120,8 +120,8 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     let index: Int32 = 0;
     let nearest: Int32 = -1;
     let nearestMetro: Int32 = -1;
-    let nearestDistance: Float = 300.00;
-    let nearestMetroDistance: Float = 300.00;
+    let nearestDistance: Float = 100.00;
+    let nearestMetroDistance: Float = 100.00;
     let distance: Float;
     if !IsDefined(system) { return "Survey stop"; };
     anchors = this.GetTravelAnchors(system);
