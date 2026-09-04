@@ -1,185 +1,235 @@
--- Passenger cabin interaction adapted from Drive a Bus 1.2.0 by tidusMD,
--- used with the author's explicit permission. See THIRD_PARTY_NOTICES.md.
-local NCTC = { tag = "NCTC.ServiceBus", ui = nil, hub = nil, visible = false,
-  selected = 0, locked = false, offered = {}, lastSlot = nil,
-  uiMissingLogged = false, wasInside = false }
+-- Interior passenger-seat interaction restored verbatim from the validated
+-- NCBN 0.0.13 port of Drive a Bus by tidusMD, then retargeted to NCTC.
+-- (MIT, used with permission). See THIRD_PARTY_NOTICES.md.
+-- NCBN uses the vanilla Mahir entity. Only its two validated rear passenger
+-- workspots are offered to V; neither front seat is ever proposed.
 
-local seats = {
-  { id = "seat_back_left", sideLocKey = "LocKey#40664" },
-  { id = "seat_back_right", sideLocKey = "LocKey#40665" }
+local NCBN = { tag = "NightCityBusNetwork.PrototypeBus", interactionUI = nil, choiceHub = nil,
+    choiceVisible = false, selectedSeat = 0, inputLocked = false, offeredSeats = {},
+    uiMissingLogged = false, wasInside = false, lastMountedSlot = nil }
+
+-- Local-space zone in the aisle beside the two validated rear passenger seats.
+local seatAreas = {
+    { id = "seat_back_left", label = "Sit — left rear seat", minX = -0.50, maxX = 0.50, minY = -1.20, maxY = -0.20, minZ = 0.00, maxZ = 1.80, facing = "rear" },
+    { id = "seat_back_right", label = "Sit — right rear seat", minX = -0.50, maxX = 0.50, minY = -1.20, maxY = -0.20, minZ = 0.00, maxZ = 1.80, facing = "rear" },
 }
 
-local function bus()
-  local dynamic = Game.GetDynamicEntitySystem()
-  if not dynamic then return nil end
-  local ids = dynamic:GetTaggedIDs(NCTC.tag)
-  return ids and #ids > 0 and Game.FindEntityByID(ids[1]) or nil
+local passengerSlots = { seat_back_left = true, seat_back_right = true }
+
+NCBN.tag = "NCTC.ServiceBus"
+
+local function findServiceBus()
+    local dynamic = Game.GetDynamicEntitySystem()
+    if not dynamic then return nil end
+    local ids = dynamic:GetTaggedIDs(NCBN.tag)
+    return ids and #ids > 0 and Game.FindEntityByID(ids[1]) or nil
 end
 
-local function localPosition(vehicle, player)
-  local origin, forward, right, up = vehicle:GetWorldPosition(), vehicle:GetWorldForward(), vehicle:GetWorldRight(), vehicle:GetWorldUp()
-  local world = player:GetWorldPosition()
-  local fp, rp, upoint = Vector4.new(origin.x+forward.x, origin.y+forward.y, origin.z+forward.z, origin.w), Vector4.new(origin.x+right.x, origin.y+right.y, origin.z+right.z, origin.w), Vector4.new(origin.x+up.x, origin.y+up.y, origin.z+up.z, origin.w)
-  local yz, xz, xy = Vector4.ProjectPointToPlane(origin, fp, upoint, world), Vector4.ProjectPointToPlane(origin, rp, upoint, world), Vector4.ProjectPointToPlane(origin, fp, rp, world)
-  local vx, vy, vz = Vector4.new(world.x-yz.x, world.y-yz.y, world.z-yz.z, 1), Vector4.new(world.x-xz.x, world.y-xz.y, world.z-xz.z, 1), Vector4.new(world.x-xy.x, world.y-xy.y, world.z-xy.z, 1)
-  local x, y, z = Vector4.Length(vx), Vector4.Length(vy), Vector4.Length(vz)
-  if Vector4.Dot(vx, right) < 0 then x = -x end
-  if Vector4.Dot(vy, forward) < 0 then y = -y end
-  if Vector4.Dot(vz, up) < 0 then z = -z end
-  return Vector4.new(x, y, z, 1)
+local function localPosition(bus, player)
+    local origin, forward, right, up = bus:GetWorldPosition(), bus:GetWorldForward(), bus:GetWorldRight(), bus:GetWorldUp()
+    local world = player:GetWorldPosition()
+    local fp = Vector4.new(origin.x + forward.x, origin.y + forward.y, origin.z + forward.z, origin.w)
+    local rp = Vector4.new(origin.x + right.x, origin.y + right.y, origin.z + right.z, origin.w)
+    local upoint = Vector4.new(origin.x + up.x, origin.y + up.y, origin.z + up.z, origin.w)
+    local yz, xz, xy = Vector4.ProjectPointToPlane(origin, fp, upoint, world), Vector4.ProjectPointToPlane(origin, rp, upoint, world), Vector4.ProjectPointToPlane(origin, fp, rp, world)
+    local vx, vy, vz = Vector4.new(world.x-yz.x, world.y-yz.y, world.z-yz.z, 1), Vector4.new(world.x-xz.x, world.y-xz.y, world.z-xz.z, 1), Vector4.new(world.x-xy.x, world.y-xy.y, world.z-xy.z, 1)
+    local x, y, z = Vector4.Length(vx), Vector4.Length(vy), Vector4.Length(vz)
+    if Vector4.Dot(vx, right) < 0 then x = -x end
+    if Vector4.Dot(vy, forward) < 0 then y = -y end
+    if Vector4.Dot(vz, up) < 0 then z = -z end
+    return Vector4.new(x, y, z, 1)
 end
 
-local function inside(vehicle, player)
-  local p = localPosition(vehicle, player)
-  return p.x > -1.20 and p.x < 1.20 and p.y > -3.00 and p.y < 5.00 and p.z > 0.00 and p.z < 1.80
+local function lookAngle(bus, player)
+    local angle = player:GetWorldOrientation():ToEulerAngles().yaw - bus:GetWorldOrientation():ToEulerAngles().yaw
+    return angle > 180 and angle - 360 or (angle < -180 and angle + 360 or angle)
 end
 
-local function free(vehicle, id)
-  local ps = vehicle:GetVehiclePS()
-  return ps and not ps:IsSlotOccupiedByNPC(CName.new(id))
+local function playerIsInside(bus, player)
+    local p = localPosition(bus, player)
+    return p.x > -1.20 and p.x < 1.20 and p.y > -3.00 and p.y < 5.00 and p.z > 0.00 and p.z < 1.80
 end
 
-local function setDoor(vehicle, open)
-  local ps = vehicle and vehicle:GetVehiclePS() or nil
-  if not ps then return end
-  local state = ps:GetDoorState(EVehicleDoor.seat_front_right)
-  if open and state ~= VehicleDoorState.Open then
-    local evt = VehicleDoorOpen.new(); evt.slotID = CName.new("seat_front_right"); evt.forceScene = false
-    ps:QueuePSEvent(ps, evt)
-  elseif not open and state ~= VehicleDoorState.Closed then
-    local evt = VehicleDoorClose.new(); evt.slotID = CName.new("seat_front_right"); evt.forceScene = false
-    ps:QueuePSEvent(ps, evt)
-  end
+local function isSeatFree(bus, seat)
+    local ps = bus:GetVehiclePS()
+    return ps and not ps:IsSlotOccupiedByNPC(CName.new(seat))
 end
 
-local function same(a, b)
-  if #a ~= #b then return false end
-  for i = 1, #a do if a[i].id ~= b[i].id then return false end end
-  return true
+local function isSameEntity(left, right)
+    return left and right and left:GetEntityID().hash == right:GetEntityID().hash
 end
 
-local function available(vehicle, player)
-  -- Exact rear-seat interaction area from Drive a Bus 1.2.0.  The player may
-  -- walk anywhere in the cabin, but the prompt is only presented from the
-  -- aisle immediately in front of the two validated rear workspots.
-  local p = localPosition(vehicle, player)
-  if not (p.x > -0.50 and p.x < 0.50 and p.y > -1.20 and p.y < -0.20 and p.z > 0.00 and p.z < 1.80) then return {} end
-  local angle = player:GetWorldOrientation():ToEulerAngles().yaw - vehicle:GetWorldOrientation():ToEulerAngles().yaw
-  if angle > 180 then angle = angle - 360 elseif angle < -180 then angle = angle + 360 end
-  local result = {}
-  if math.abs(angle) < 40 or math.abs(angle) > 140 then
-    for _, seat in ipairs(seats) do if free(vehicle, seat.id) then table.insert(result, seat) end end
-  elseif angle > 0 and free(vehicle, seats[1].id) then
-    table.insert(result, seats[1])
-  elseif angle < 0 and free(vehicle, seats[2].id) then
-    table.insert(result, seats[2])
-  end
-  return result
-end
-
-local function makeHub()
-  local hub = gameinteractionsvisListChoiceHubData.new()
-  -- Drive a Bus deliberately uses a fresh hub id. A fixed id can collide with
-  -- another native interaction and results in choices being built but never
-  -- rendered, which is exactly what the NCTC diagnostic log showed.
-  -- The hub is an implementation detail required by the interaction UI.  It
-  -- deliberately has no visible title: only the localized Sit rows matter.
-  hub.title, hub.activityState, hub.hubPriority, hub.id = "", gameinteractionsvisEVisualizerActivityState.Active, 1, 77777 + math.random(99999)
-  hub.choices = {}
-  for _, seat in ipairs(NCTC.offered) do
-    local caption, kind = gameinteractionsChoiceCaption.new(), gameinteractionsChoiceTypeWrapper.new()
-    caption:AddPartFromRecord(TweakDBInterface.GetChoiceCaptionIconPartRecord("ChoiceCaptionParts.SitIcon")); kind:SetType(gameinteractionsChoiceType.Selected)
-    local choice = gameinteractionsvisListChoiceData.new()
-    choice.localizedName = GetLocalizedText("LocKey#522") .. " [" .. GetLocalizedText(seat.sideLocKey) .. "]"
-    choice.inputActionName, choice.captionParts, choice.type = CName.new("None"), caption, kind
-    table.insert(hub.choices, choice)
-  end
-  return hub
-end
-
-local function hide()
-  if not NCTC.visible then return end
-  NCTC.visible, NCTC.hub = false, nil
-  if NCTC.ui then
-    local defs = GetAllBlackboardDefs().UIInteractions
-    NCTC.ui:OnDialogsData(Game.GetBlackboardSystem():Get(defs):GetVariant(defs.DialogChoiceHubs))
-  end
-end
-
-local function show()
-  if not NCTC.ui or #NCTC.offered == 0 then
-    if not NCTC.ui and not NCTC.uiMissingLogged then
-      print("[NCTC Passenger] Seat prompt waiting for InteractionUIBase")
-      NCTC.uiMissingLogged = true
+local function setBoardingDoor(bus, open)
+    local ps = bus and bus:GetVehiclePS() or nil
+    if not ps then return end
+    local current = ps:GetDoorState(EVehicleDoor.seat_front_right)
+    if open and current ~= VehicleDoorState.Open then
+        local event = VehicleDoorOpen.new()
+        event.slotID, event.forceScene = CName.new("seat_front_right"), false
+        ps:QueuePSEvent(ps, event)
+    elseif not open and current ~= VehicleDoorState.Closed then
+        local event = VehicleDoorClose.new()
+        event.slotID, event.forceScene = CName.new("seat_front_right"), false
+        ps:QueuePSEvent(ps, event)
     end
-    -- Do not latch the prompt in a fictitious visible state.  The HUD can be
-    -- initialized one or more frames after V enters the cabin; clearing this
-    -- flag makes onUpdate retry until InteractionUIBase actually exists.
-    NCTC.visible = false
-    return
-  end
-  NCTC.uiMissingLogged = false
-  NCTC.hub = makeHub()
-  local defs = GetAllBlackboardDefs().UIInteractions
-  local board = Game.GetBlackboardSystem():Get(defs)
-  board:SetInt(defs.ActiveChoiceHubID, NCTC.hub.id)
-  NCTC.ui:OnDialogsSelectIndex(NCTC.selected); NCTC.ui:OnDialogsData(board:GetVariant(defs.DialogChoiceHubs))
-  NCTC.ui:OnInteractionsChanged(); NCTC.ui:UpdateListBlackboard(); NCTC.ui:OnDialogsActivateHub(NCTC.hub.id)
 end
 
-local function mount(seat)
-  local player, vehicle = Game.GetPlayer(), bus()
-  if not player or not vehicle or player:GetMountedVehicle() or not seat or not free(vehicle, seat.id) then return end
-  local data, slot, info, request = MountEventData.new(), MountingSlotId.new(), MountingInfo.new(), MountingRequest.new()
-  data.isInstant, data.slotName, data.mountParentEntityId = false, seat.id, vehicle:GetEntityID(); slot.id = seat.id
-  info.childId, info.parentId, info.slotId = player:GetEntityID(), vehicle:GetEntityID(), slot
-  request.lowLevelMountingInfo, request.mountData = info, data
-  print("[NCTC Passenger] Mount requested: " .. seat.id)
-  Game.GetMountingFacility():Mount(request); hide()
+local function sameSeats(left, right)
+    if #left ~= #right then return false end
+    for i = 1, #left do if left[i].id ~= right[i].id then return false end end
+    return true
+end
+
+local function offeredSeats(bus, player)
+    if not playerIsInside(bus, player) then return {} end
+    local p, angle, result = localPosition(bus, player), lookAngle(bus, player), {}
+    for _, seat in ipairs(seatAreas) do
+        if p.x > seat.minX and p.x < seat.maxX and p.y > seat.minY and p.y < seat.maxY and p.z > seat.minZ and p.z < seat.maxZ and isSeatFree(bus, seat.id) then
+            -- The two rear seats share the same aisle zone. The vanilla Mahir
+            -- mirrors their physical slot names, so aim selection is reversed.
+            if seat.facing == "rear" then
+                if (seat.id == "seat_back_left" and not (angle < -40 and angle > -140)) or (seat.id == "seat_back_right" and not (angle > 40 and angle < 140)) then table.insert(result, seat) end
+            end
+        end
+    end
+    return result
+end
+
+local function makeChoiceHub()
+    local hub = gameinteractionsvisListChoiceHubData.new()
+    hub.title, hub.activityState, hub.hubPriority, hub.id = "Night City Bus Network", gameinteractionsvisEVisualizerActivityState.Active, 1, 77901
+    local choices = {}
+    for _, seat in ipairs(NCBN.offeredSeats) do
+        local caption, choiceType = gameinteractionsChoiceCaption.new(), gameinteractionsChoiceTypeWrapper.new()
+        caption:AddPartFromRecord(TweakDBInterface.GetChoiceCaptionIconPartRecord("ChoiceCaptionParts.SitIcon"))
+        choiceType:SetType(gameinteractionsChoiceType.Selected)
+        local choice = gameinteractionsvisListChoiceData.new()
+        choice.localizedName, choice.inputActionName, choice.captionParts, choice.type = seat.label, CName.new("None"), caption, choiceType
+        table.insert(choices, choice)
+    end
+    hub.choices = choices
+    return hub
+end
+
+local function hideChoice()
+    if not NCBN.choiceVisible then return end
+    NCBN.choiceVisible, NCBN.choiceHub = false, nil
+    if NCBN.interactionUI then
+        local defs = GetAllBlackboardDefs().UIInteractions
+        NCBN.interactionUI:OnDialogsData(Game.GetBlackboardSystem():Get(defs):GetVariant(defs.DialogChoiceHubs))
+    end
+end
+
+local function showChoice()
+    if not NCBN.interactionUI or #NCBN.offeredSeats == 0 then
+        if not NCBN.uiMissingLogged then print("[NCBN] Seat prompt waiting for InteractionUIBase."); NCBN.uiMissingLogged = true end
+        NCBN.choiceVisible = false
+        return
+    end
+    NCBN.uiMissingLogged = false
+    NCBN.choiceHub = makeChoiceHub()
+    local defs = GetAllBlackboardDefs().UIInteractions
+    local blackboard = Game.GetBlackboardSystem():Get(defs)
+    blackboard:SetInt(defs.ActiveChoiceHubID, NCBN.choiceHub.id)
+    local data = blackboard:GetVariant(defs.DialogChoiceHubs)
+    NCBN.interactionUI:OnDialogsSelectIndex(NCBN.selectedSeat)
+    NCBN.interactionUI:OnDialogsData(data)
+    NCBN.interactionUI:OnInteractionsChanged()
+    NCBN.interactionUI:UpdateListBlackboard()
+    NCBN.interactionUI:OnDialogsActivateHub(NCBN.choiceHub.id)
+end
+
+local function mountPassenger(seat)
+    local player, bus = Game.GetPlayer(), findServiceBus()
+    if not player or not bus or player:GetMountedVehicle() ~= nil or not seat or not isSeatFree(bus, seat.id) then return end
+    local data, slot, info, request = MountEventData.new(), MountingSlotId.new(), MountingInfo.new(), MountingRequest.new()
+    data.isInstant, data.slotName, data.mountParentEntityId = false, seat.id, bus:GetEntityID()
+    slot.id = seat.id
+    info.childId, info.parentId, info.slotId = player:GetEntityID(), bus:GetEntityID(), slot
+    request.lowLevelMountingInfo, request.mountData = info, data
+    Game.GetMountingFacility():Mount(request)
+    hideChoice()
 end
 
 registerForEvent("onInit", function()
-  Observe("InteractionUIBase", "OnInitialize", function(this) NCTC.ui = this end)
-  Observe("InteractionUIBase", "OnDialogsData", function(this) NCTC.ui = this end)
-  Observe("InteractionUIBase", "OnUninitialize", function(this) if NCTC.ui == this then NCTC.ui = nil end end)
-  Override("InteractionUIBase", "OnDialogsData", function(_, value, wrapped)
-    if NCTC.visible and NCTC.hub then local data=FromVariant(value); local hubs=data.choiceHubs; table.insert(hubs,NCTC.hub); data.choiceHubs=hubs; wrapped(ToVariant(data)) else wrapped(value) end
-  end)
-  Override("InteractionUIBase", "OnDialogsSelectIndex", function(_, index, wrapped) wrapped(NCTC.visible and NCTC.selected or index) end)
-  Override("dialogWidgetGameController", "OnDialogsActivateHub", function(_, id, wrapped) return wrapped(NCTC.visible and NCTC.hub and NCTC.hub.id or id) end)
-  Observe("PlayerPuppet", "OnAction", function(_, action, consumer)
-    if NCTC.locked or action:GetType(action).value ~= "BUTTON_PRESSED" or action:GetValue(action) <= 0 or not NCTC.visible then return end
-    local name=action:GetName(action).value
-    if name == "ChoiceApply" then NCTC.locked=true; consumer:Consume(); mount(NCTC.offered[NCTC.selected+1])
-    elseif name == "ChoiceScrollUp" or name == "ChoiceScrollDown" then NCTC.locked=true; consumer:Consume(); NCTC.selected=(NCTC.selected+(name=="ChoiceScrollUp" and 1 or -1)) % #NCTC.offered end
-  end)
-  print("[NCTC Passenger] Drive a Bus passenger interaction initialized")
+    Observe("InteractionUIBase", "OnInitialize", function(this) NCBN.interactionUI = this end)
+    Observe("InteractionUIBase", "OnDialogsData", function(this) NCBN.interactionUI = this end)
+    Observe("InteractionUIBase", "OnUninitialize", function(this) if NCBN.interactionUI == this then NCBN.interactionUI = nil end end)
+    Override("InteractionUIBase", "OnDialogsData", function(_, value, wrapped)
+        if NCBN.choiceVisible and NCBN.choiceHub then
+            local data = FromVariant(value)
+            -- FromVariant properties are copied. Reassigning the modified
+            -- array is required or the HUD never receives our seat choice.
+            local hubs = data.choiceHubs
+            table.insert(hubs, NCBN.choiceHub)
+            data.choiceHubs = hubs
+            wrapped(ToVariant(data))
+        else wrapped(value) end
+    end)
+    Override("InteractionUIBase", "OnDialogsSelectIndex", function(_, index, wrapped) wrapped(NCBN.choiceVisible and NCBN.selectedSeat or index) end)
+    Override("dialogWidgetGameController", "OnDialogsActivateHub", function(_, id, wrapped) return wrapped(NCBN.choiceVisible and NCBN.choiceHub and NCBN.choiceHub.id or id) end)
+    Observe("PlayerPuppet", "OnAction", function(_, action, consumer)
+        if NCBN.inputLocked or action:GetType(action).value ~= "BUTTON_PRESSED" or action:GetValue(action) <= 0 then return end
+        local name = action:GetName(action).value
+        if NCBN.choiceVisible and name == "ChoiceApply" then
+            NCBN.inputLocked = true; consumer:Consume(); mountPassenger(NCBN.offeredSeats[NCBN.selectedSeat + 1])
+        elseif NCBN.choiceVisible and (name == "ChoiceScrollUp" or name == "ChoiceScrollDown") then
+            NCBN.inputLocked = true; consumer:Consume()
+            NCBN.selectedSeat = (NCBN.selectedSeat + (name == "ChoiceScrollUp" and 1 or -1)) % #NCBN.offeredSeats
+        elseif name == "ChoiceApply" then
+            -- The cabin is entered simply by walking through its open door.
+            -- Consume the normal vehicle-enter choice when the service bus is
+            -- targeted so the engine cannot mount V into its control slot.
+            local player, bus = Game.GetPlayer(), findServiceBus()
+            local target = player and Game.GetTargetingSystem():GetLookAtObject(player) or nil
+            if player and bus and target and isSameEntity(target, bus) and not playerIsInside(bus, player) then
+                NCBN.inputLocked = true; consumer:Consume()
+            end
+        end
+    end)
+    print("[NCBN] Interior passenger-seat interaction initialized.")
 end)
 
 registerForEvent("onUpdate", function()
-  NCTC.locked=false
-  local player, vehicle = Game.GetPlayer(), bus()
-  if not player or not vehicle then
+    NCBN.inputLocked = false
+    local player, bus = Game.GetPlayer(), findServiceBus()
+    if not player or not bus then
+        local quests = Game.GetQuestsSystem()
+        if quests then quests:SetFactStr("nctc_player_in_service_bus", 0) end
+        hideChoice()
+        return
+    end
+    local distance = Vector4.Distance(player:GetWorldPosition(), bus:GetWorldPosition())
+    setBoardingDoor(bus, bus:GetCurrentSpeed() <= 1.00 and distance < 10.00)
+
+    if player:GetMountedVehicle() ~= nil then
+        local slot = bus:GetSlotIdForMountedObject(player)
+        local slotName = slot and slot.value or "unknown"
+        if slotName ~= NCBN.lastMountedSlot then
+            NCBN.lastMountedSlot = slotName
+            print("[NCBN] Player mounted slot: " .. slotName .. (passengerSlots[slotName] and " (passenger)" or " (forbidden)"))
+        end
+        hideChoice()
+        return
+    end
+    NCBN.lastMountedSlot = nil
+    local inside = playerIsInside(bus, player)
     local quests = Game.GetQuestsSystem()
-    if quests then quests:SetFactStr("nctc_player_in_service_bus", 0) end
-    hide(); return
-  end
-  local quests=Game.GetQuestsSystem(); local state=quests and quests:GetFact(CName.new("nctc_dev_loop_code")) or 0
-  setDoor(vehicle, state == 1 or state == 2 or state == 3)
-  if player:GetMountedVehicle() then hide(); return end
-  local offered=available(vehicle, player)
-  local isInside = inside(vehicle, player)
-  local quests = Game.GetQuestsSystem()
-  if quests then quests:SetFactStr("nctc_player_in_service_bus", isInside and 1 or 0) end
-  if isInside ~= NCTC.wasInside then
-    NCTC.wasInside = isInside
-    print(isInside and "[NCTC Passenger] Player entered walkable cabin" or "[NCTC Passenger] Player left walkable cabin")
-  end
-  if not same(NCTC.offered, offered) then
-    hide(); NCTC.offered, NCTC.selected=offered, 0
-    local names = {}
-    for _, seat in ipairs(offered) do table.insert(names, seat.id) end
-    print("[NCTC Passenger] Seat choices: " .. (#names > 0 and table.concat(names, ", ") or "none"))
-  end
-  if #offered > 0 and not NCTC.visible then NCTC.visible=true; show() elseif #offered == 0 then hide() end
+    if quests then quests:SetFactStr("nctc_player_in_service_bus", inside and 1 or 0) end
+    if inside ~= NCBN.wasInside then
+        NCBN.wasInside = inside
+        print(inside and "[NCBN] Player entered the walkable cabin." or "[NCBN] Player left the walkable cabin.")
+    end
+    local seats = offeredSeats(bus, player)
+    if not sameSeats(NCBN.offeredSeats, seats) then
+        hideChoice()
+        NCBN.offeredSeats, NCBN.selectedSeat = seats, 0
+        local names = {}
+        for _, seat in ipairs(seats) do table.insert(names, seat.id) end
+        print("[NCBN] Seat choices: " .. (#names > 0 and table.concat(names, ", ") or "none"))
+    end
+    if #seats > 0 and not NCBN.choiceVisible then
+        NCBN.choiceVisible = true
+        showChoice()
+    elseif #seats == 0 then hideChoice() end
 end)
