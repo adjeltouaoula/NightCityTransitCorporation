@@ -59,15 +59,8 @@ public class NCTCStopMappinData extends MappinScriptData {
   public let serviceColors: array<Int32>;
 }
 
-public class NCTCAnchorIDMappinData extends MappinScriptData {
-  public let displayName: String;
-  public let locKey: String;
-  public let isMetro: Bool;
-}
-
 public class NCTCMapMarkerSystem extends ScriptableSystem {
   private let m_registeredMappins: array<NewMappinID>;
-  private let m_registeredAnchorIDMappins: array<NewMappinID>;
   private let m_servicePositions: array<Vector4>;
   private let m_serviceLines: array<String>;
   private let m_serviceStopIndices: array<Int32>;
@@ -347,7 +340,6 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     if !IsDefined(system) { return; };
     stops = this.GetNetworkStops();
     anchors = this.GetTravelAnchors(system);
-    this.RegisterAnchorIDMarkers(system, anchors);
     while stopIndex < ArraySize(stops) {
       anchorIndex = this.FindAnchor(anchors, stops[stopIndex].locKey);
       if stops[stopIndex].isManual {
@@ -435,30 +427,10 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     this.m_serviceHubStops = hubServiceStops;
   }
 
-  private func RegisterAnchorIDMarkers(system: ref<MappinSystem>, anchors: array<NCTCTravelAnchor>) -> Void {
-    let data: MappinData;
-    let markerData: ref<NCTCAnchorIDMappinData>;
-    let index: Int32 = 0;
-    while index < ArraySize(anchors) {
-      markerData = new NCTCAnchorIDMappinData();
-      markerData.locKey = anchors[index].locKey;
-      markerData.displayName = GetLocalizedText(anchors[index].locKey);
-      markerData.isMetro = anchors[index].isMetro;
-      data.mappinType = t"Mappins.NCTCAnchorIDMappinDefinition";
-      data.variant = gamedataMappinVariant.CPO_PingLootVariant;
-      data.active = true;
-      data.scriptData = markerData;
-      ArrayPush(this.m_registeredAnchorIDMappins, system.RegisterMappin(data, anchors[index].position));
-      index += 1;
-    };
-  }
-
   public func UnregisterAllMarkers() -> Void {
     let system: ref<MappinSystem> = GameInstance.GetMappinSystem(this.GetGameInstance());
     if IsDefined(system) { for id in this.m_registeredMappins { system.UnregisterMappin(id); }; };
-    if IsDefined(system) { for id in this.m_registeredAnchorIDMappins { system.UnregisterMappin(id); }; };
     ArrayClear(this.m_registeredMappins);
-    ArrayClear(this.m_registeredAnchorIDMappins);
     ArrayClear(this.m_servicePositions);
     ArrayClear(this.m_serviceLines);
     ArrayClear(this.m_serviceStopIndices);
@@ -529,7 +501,7 @@ protected func UpdateIcon() -> Void {
 @wrapMethod(WorldMapTooltipController)
 public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<WorldMapMenuGameController>) -> Void {
   let stopData: ref<NCTCStopMappinData>;
-  let anchorData: ref<NCTCAnchorIDMappinData>;
+  let travel: ref<FastTravelMappin>;
   let desc: ref<inkText>;
   let parent: ref<inkCompoundWidget>;
   let panel: ref<inkVerticalPanel>;
@@ -541,10 +513,10 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
   if !IsDefined(Deref(data).mappin) { return; };
   stopData = Deref(data).mappin.GetScriptData() as NCTCStopMappinData;
   if !IsDefined(stopData) {
-    anchorData = Deref(data).mappin.GetScriptData() as NCTCAnchorIDMappinData;
-    if IsDefined(anchorData) {
-      inkTextRef.SetText(this.m_titleText, anchorData.displayName);
-      inkTextRef.SetText(this.m_descText, anchorData.locKey);
+    travel = Deref(data).mappin as FastTravelMappin;
+    if IsDefined(travel) {
+      if IsDefined(desc) { desc.SetVisible(true); };
+      inkTextRef.SetText(this.m_descText, "NCTC survey key: " + travel.GetPointData().GetPointDisplayName());
     };
     return;
   };

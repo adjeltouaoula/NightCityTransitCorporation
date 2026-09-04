@@ -2,10 +2,6 @@ Mappins.NCTCStopVariant:
   $type: gamedataMappinVariant_Record
   enumName: CPO_PingDoorVariant
 
-Mappins.NCTCAnchorIDVariant:
-  $type: gamedataMappinVariant_Record
-  enumName: CPO_PingLootVariant
-
 WorldMap.NCTCStopsFilter:
   $type: WorldMapFilter_Record
   enumName: Courier
@@ -18,41 +14,23 @@ WorldMap.NCTCStopsFilterGroup:
     - Mappins.NCTCStopVariant
   shouldCollectMappins: false
 
-WorldMap.NCTCAnchorIDsFilter:
-  $type: WorldMapFilter_Record
-  enumName: Tarot
-
-WorldMap.NCTCAnchorIDsFilterGroup:
-  $type: MappinUIFilterGroup_Record
-  filterName: UI-MappinTypes-NCTCAnchorIDs
-  filterType: WorldMap.NCTCAnchorIDsFilter
-  mappins:
-    - Mappins.NCTCAnchorIDVariant
-  shouldCollectMappins: false
-
 WorldMap.WorldMapCustomFiltersList.list:
   - !append-once WorldMap.NCTCStopsFilterGroup
-  - !append-once WorldMap.NCTCAnchorIDsFilterGroup
 
 WorldMap.WorldMapQuickFiltersList.list:
   - !append-once WorldMap.NCTCStopsFilterGroup
-  - !append-once WorldMap.NCTCAnchorIDsFilterGroup
 
 WorldMap.ZoomLevelImportant.mappinFilterGroups:
   - !append-once WorldMap.NCTCStopsFilterGroup
-  - !append-once WorldMap.NCTCAnchorIDsFilterGroup
 
 WorldMap.ZoomLevelAllMappins.mappinFilterGroups:
   - !append-once WorldMap.NCTCStopsFilterGroup
-  - !append-once WorldMap.NCTCAnchorIDsFilterGroup
 
 WorldMap.ZoomLevelExtraMappins.mappinFilterGroups:
   - !append-once WorldMap.NCTCStopsFilterGroup
-  - !append-once WorldMap.NCTCAnchorIDsFilterGroup
 
 WorldMap.ZoomLevelSubDistricts.mappinFilterGroups:
   - !append-once WorldMap.NCTCStopsFilterGroup
-  - !append-once WorldMap.NCTCAnchorIDsFilterGroup
 
 Mappins.NCTCStopMappinDefinition:
   $type: gamedataMappinDefinition_Record
@@ -64,16 +42,4 @@ Mappins.NCTCStopMappinDefinition:
     - Mappins.NCTCStopVariant
 
 WorldMappinUIProfile.NCTCStop:
-  $base: WorldMappinUIProfile.Quest
-
-Mappins.NCTCAnchorIDMappinDefinition:
-  $type: gamedataMappinDefinition_Record
-  showInWorld: false
-  showOnMap: true
-  showOnMinimap: false
-  visibilityRange: 0
-  possibleVariants:
-    - Mappins.NCTCAnchorIDVariant
-
-WorldMappinUIProfile.NCTCAnchorID:
   $base: WorldMappinUIProfile.Quest
