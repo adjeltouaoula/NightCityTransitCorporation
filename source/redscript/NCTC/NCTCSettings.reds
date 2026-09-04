@@ -144,6 +144,13 @@ public class NCTCSettings extends ScriptableSystem {
   public let developerMode: Bool = false;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Show metro / fast travel LocKeys")
+  @runtimeProperty("ModSettings.description", "On the world map, adds the LocKey identifier to vanilla metro and fast-travel tooltips. Developer mode only.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let showTravelAnchorLocKeys: Bool = false;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Developer terminal action")
   @runtimeProperty("ModSettings.description", "Choose whether F at a terminal calls the bus or records that terminal as the next draft stop.")
   @runtimeProperty("ModSettings.category", "Developer mode")

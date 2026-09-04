@@ -479,6 +479,9 @@ protected func UpdateIcon() -> Void {
 @wrapMethod(WorldMapTooltipController)
 public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<WorldMapMenuGameController>) -> Void {
   let stopData: ref<NCTCStopMappinData>;
+  let travelData: ref<FastTravelMappin>;
+  let player: ref<PlayerPuppet>;
+  let settings: ref<NCTCSettings>;
   let desc: ref<inkText>;
   let parent: ref<inkCompoundWidget>;
   let panel: ref<inkVerticalPanel>;
@@ -489,6 +492,19 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
   if IsDefined(this.nctcHubLines) { this.nctcHubLines.SetVisible(false); };
   if !IsDefined(Deref(data).mappin) { return; };
   stopData = Deref(data).mappin.GetScriptData() as NCTCStopMappinData;
+  // Native travel and NCART mappins stay entirely vanilla. This dev-only
+  // tooltip addition exposes their actual LocKey without introducing another
+  // mappin type, overlay, or map-filter interaction.
+  if !IsDefined(stopData) {
+    travelData = Deref(data).mappin as FastTravelMappin;
+    player = menu.GetPlayerControlledObject() as PlayerPuppet;
+    settings = IsDefined(player) ? NCTCSettings.Get(player.GetGame()) : null;
+    if IsDefined(travelData) && IsDefined(settings) && settings.developerMode && settings.showTravelAnchorLocKeys
+      && (Equals(Deref(data).mappin.GetVariant(), gamedataMappinVariant.FastTravelVariant) || Equals(Deref(data).mappin.GetVariant(), gamedataMappinVariant.Zzz17_NCARTVariant)) {
+      inkTextRef.SetText(this.m_descText, travelData.GetPointData().GetPointDisplayName());
+    };
+    return;
+  };
   if IsDefined(stopData) {
     if stopData.isHub { inkTextRef.SetText(this.m_titleText, "NCTC Transit Hub"); }
     else { inkTextRef.SetText(this.m_titleText, stopData.services); };
