@@ -267,6 +267,13 @@ public class NCTCSettings extends ScriptableSystem {
   public let deleteNearestStopKey: EInputKey = EInputKey.IK_NumPad5;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Despawn service bus")
+  @runtimeProperty("ModSettings.description", "Immediately removes the active NCTC bus and clears its pending route request. A new bus can then be called right away.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let despawnServiceBusKey: EInputKey = EInputKey.IK_NumPad6;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "New line number")
   @runtimeProperty("ModSettings.description", "Number for the draft line being created. Set it before recording its first stop.")
   @runtimeProperty("ModSettings.category", "Developer mode")
@@ -360,7 +367,10 @@ public class NCTCSettings extends ScriptableSystem {
     // Spawn / approach / berth are captured directly by CET in the devkit
     // branch. That prevents a save restore from replaying old coordinates.
     if Equals(event.GetKey(), this.addManualStopKey) { this.RecordManualStop(); return; };
-    if Equals(event.GetKey(), this.deleteNearestStopKey) { this.DeleteNearestStop(); };
+    if Equals(event.GetKey(), this.deleteNearestStopKey) { this.DeleteNearestStop(); return; };
+    if Equals(event.GetKey(), this.despawnServiceBusKey) {
+      if NCTCTransitSystem.Get(this.GetGameInstance()).DespawnServiceBus() { NCTCSettings.Notify(this.GetGameInstance(), "NCTC service bus despawned"); };
+    };
   }
 
   private func Record(kind: String) -> Void {

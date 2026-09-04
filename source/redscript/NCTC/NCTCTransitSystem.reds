@@ -151,6 +151,22 @@ public class NCTCTransitSystem extends ScriptableSystem {
     return "";
   }
 
+  // Developer tooling: release the dynamic entity and reset every state that
+  // could otherwise reject the next terminal request as an already-active bus.
+  public func DespawnServiceBus() -> Bool {
+    let entitySystem: ref<DynamicEntitySystem> = GameInstance.GetDynamicEntitySystem();
+    let hadBus: Bool = EntityID.IsDefined(this.busEntityID) || this.requestPending;
+    if EntityID.IsDefined(this.busEntityID) && IsDefined(entitySystem) { entitySystem.DeleteEntity(this.busEntityID); };
+    this.busEntityID = new EntityID();
+    this.controller = null;
+    this.requestPending = false;
+    this.driveCommandSent = false;
+    this.approachCommandSent = false;
+    this.arrived = false;
+    this.hasSurveyProfile = false;
+    return hadBus;
+  }
+
   private func ScheduleDispatch(delay: Float) -> Void {
     let callback: ref<NCTCServiceDispatchCallback> = new NCTCServiceDispatchCallback();
     callback.Configure(this);
