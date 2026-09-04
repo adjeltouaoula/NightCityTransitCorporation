@@ -16,13 +16,6 @@ local seatAreas = {
 
 local passengerSlots = { seat_back_left = true, seat_back_right = true }
 
-local function getFact(name)
-    local quests = Game.GetQuestsSystem()
-    if not quests then return 0 end
-    local ok, value = pcall(function() return quests:GetFact(CName.new(name)) end)
-    return ok and value or 0
-end
-
 local function setFact(name, value)
     local quests = Game.GetQuestsSystem()
     if not quests then return false end
@@ -212,14 +205,12 @@ registerForEvent("onUpdate", function()
         return
     end
     local distance = Vector4.Distance(player:GetWorldPosition(), bus:GetWorldPosition())
-    local isAtNCTCStop = getFact("nctc_service_bus_at_stop") > 0
-    local isStopped = math.abs(bus:GetCurrentSpeed()) <= 1.00
     local isMounted = player:GetMountedVehicle() ~= nil
     local insideNow = playerIsInside(bus, player)
-    -- Doors are allowed only at a designated NCTC stop while stationary.
-    -- A seated passenger keeps them closed; after unmounting, the same
-    -- proximity/cabin rule opens them for the exit animation.
-    setBoardingDoor(bus, isAtNCTCStop and isStopped and not isMounted and (distance < 10.00 or insideNow))
+    -- Validated NCBN 0.0.13 / Drive a Bus proximity behaviour: while the
+    -- Mahir is stationary, an unmounted V inside or within 10m opens the
+    -- boarding door. Mounting or leaving the area closes it.
+    setBoardingDoor(bus, math.abs(bus:GetCurrentSpeed()) <= 1.00 and not isMounted and distance < 10.00)
 
     if isMounted then
         setFact("nctc_player_in_service_bus", isSameEntity(player:GetMountedVehicle(), bus) and 1 or 0)
