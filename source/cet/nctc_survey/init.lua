@@ -648,15 +648,16 @@ registerForEvent("onInit", function()
   LOG_FILE = OUTPUT_DIRECTORY .. "/nctc_survey.log"
   print("[NCTC Survey] Initialized; external path: " .. tostring(NETWORK_FILE))
   log("NCTC survey persistence loaded")
-  -- These bindings appear in CET's Bindings tab. Defaults are assigned there
-  -- by the user; Numpad 1/2/3 remain the intended choices for the devkit.
-  registerInput("nctc_survey_spawn", "NCTC Survey: record spawn", function(down)
-    if down then capture_directly("spawn") end
-  end)
-  registerInput("nctc_survey_approach", "NCTC Survey: record approach", function(down)
-    if down then capture_directly("approach") end
-  end)
-  registerInput("nctc_survey_berth", "NCTC Survey: record berth", function(down)
-    if down then capture_directly("berth") end
-  end)
+end)
+
+-- Register while CET loads the mod, so the bindings are visible in its menu
+-- even before a save has reached the game's onInit state.
+registerInput("nctc_survey_spawn", "NCTC Survey: record spawn", function(down)
+  if down then capture_directly("spawn") end
+end)
+registerInput("nctc_survey_approach", "NCTC Survey: record approach", function(down)
+  if down then capture_directly("approach") end
+end)
+registerInput("nctc_survey_berth", "NCTC Survey: record berth", function(down)
+  if down then capture_directly("berth") end
 end)
