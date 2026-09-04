@@ -22,6 +22,7 @@ local survey_events_initialized = false
 local runtime_announced = false
 local runtime_session_id = 0
 local last_dispatch_log_id = 0
+local last_loop_log_id = 0
 local deduplicate_same_line_stops
 local normalize_captures
 local ensure_stop_ids
@@ -641,6 +642,26 @@ local function log_dispatch_attempt(quests)
     .. " spawn is " .. string.format("%.1f", metres) .. "m from V" .. note)
 end
 
+local function log_service_loop(quests)
+  local id = fact(quests, "nctc_dev_loop_id")
+  if id <= last_loop_log_id then return end
+  last_loop_log_id = id
+  local code = fact(quests, "nctc_dev_loop_code")
+  local line = fact(quests, "nctc_dev_loop_line")
+  local stop_id = fact(quests, "nctc_dev_loop_stop_id")
+  local next_stop_id = fact(quests, "nctc_dev_loop_next_stop_id")
+  local states = {
+    [1] = "arrived and opened doors",
+    [2] = "waiting: V is not mounted in this bus",
+    [3] = "V detected aboard; dwell timer started",
+    [4] = "blocked: current stop was not found in the line order",
+    [5] = "blocked: next stop has no complete spawn/berth profile",
+    [6] = "departing for next stop"
+  }
+  log("service loop " .. tostring(id) .. ": L" .. tostring(line) .. " stopId " .. tostring(stop_id)
+    .. " -> " .. tostring(next_stop_id) .. " " .. (states[code] or ("state " .. tostring(code))))
+end
+
 registerForEvent("onUpdate", function()
   local quests = Game.GetQuestsSystem()
   if not quests then return end
@@ -649,6 +670,7 @@ registerForEvent("onUpdate", function()
     print("[NCTC Survey] Runtime active; external path: " .. tostring(NETWORK_FILE))
   end
   log_dispatch_attempt(quests)
+  log_service_loop(quests)
   local event_id = fact(quests, "nctc_survey_event_id")
   -- A save load restores the old event counter. Treat that first observed
   -- value as a baseline, never as a brand-new capture that could overwrite

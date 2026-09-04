@@ -25,6 +25,7 @@ public class NCTCServiceBusController extends IScriptable {
     if !this.IsReady() { return false; };
     player = GetPlayer(this.bus.GetGame());
     if !IsDefined(player) { return false; };
+    if VehicleComponent.IsMountedToProvidedVehicle(this.bus.GetGame(), player.GetEntityID(), this.bus) { return true; };
     mounted = player.GetMountedVehicle();
     return IsDefined(mounted) && Equals(mounted.GetEntityID(), this.bus.GetEntityID());
   }
@@ -168,6 +169,16 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let routeStarted: Bool;
   private let dwellPolls: Int32;
 
+  private func PublishLoopDiagnostic(code: Int32, nextStopId: Int32) -> Void {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    if !IsDefined(quests) { return; };
+    quests.SetFact(n"nctc_dev_loop_code", code);
+    quests.SetFact(n"nctc_dev_loop_line", StringToInt(this.requestedLine, -1));
+    quests.SetFact(n"nctc_dev_loop_stop_id", this.requestedStopId);
+    quests.SetFact(n"nctc_dev_loop_next_stop_id", nextStopId);
+    quests.SetFact(n"nctc_dev_loop_id", quests.GetFact(n"nctc_dev_loop_id") + 1);
+  }
+
   public static func Get(game: GameInstance) -> ref<NCTCTransitSystem> {
     return GameInstance.GetScriptableSystemsContainer(game).Get(NameOf<NCTCTransitSystem>()) as NCTCTransitSystem;
   }
@@ -258,11 +269,13 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if !this.ResolveBus() { this.ScheduleDispatch(0.25); return; };
     if this.arrived {
       if !this.controller.IsPlayerAboard() {
+        if Equals(this.dwellPolls, 0) { this.PublishLoopDiagnostic(2, 0); };
         if this.controller.DistanceToPlayer() > 180.00 { this.DespawnServiceBus(); return; };
-        this.dwellPolls = 0;
+        this.dwellPolls = -1;
         this.ScheduleDispatch(0.50);
         return;
       };
+      if this.dwellPolls < 0 { this.dwellPolls = 0; this.PublishLoopDiagnostic(3, 0); };
       this.dwellPolls += 1;
       if this.dwellPolls < 6 {
         this.ScheduleDispatch(0.50);
@@ -281,10 +294,14 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.ScheduleDispatch(0.25);
       return;
     };
-    if !this.arrived && this.controller.IsNear(this.hasSurveyProfile ? this.surveyBerth : this.requestedStop, 4.00) {
+    // ADE is intentionally told to stop 8m from the target for the MT28's
+    // long body. The arrival radius must encompass that commanded distance,
+    // otherwise the bus stops correctly but NCTC never opens its doors.
+    if !this.arrived && this.controller.IsNear(this.hasSurveyProfile ? this.surveyBerth : this.requestedStop, 10.00) {
       this.controller.ArriveAndOpenDoor();
       this.arrived = true;
       this.dwellPolls = 0;
+      this.PublishLoopDiagnostic(1, this.requestedStopId);
       this.ScheduleDispatch(0.50);
       return;
     };
@@ -298,8 +315,14 @@ public class NCTCTransitSystem extends ScriptableSystem {
     let nextApproach: Vector4;
     let nextBerth: Vector4;
     let nextYaw: Float;
-    if !NCTCServiceProfiles.TryGetNextStop(this.GetGameInstance(), this.requestedLine, this.requestedStopId, nextStopId, nextStop) { return false; };
-    if !NCTCServiceProfiles.TryGet(this.GetGameInstance(), this.requestedLine, nextStopId, nextSpawn, nextApproach, nextBerth, nextYaw) { return false; };
+    if !NCTCServiceProfiles.TryGetNextStop(this.GetGameInstance(), this.requestedLine, this.requestedStopId, nextStopId, nextStop) {
+      this.PublishLoopDiagnostic(4, 0);
+      return false;
+    };
+    if !NCTCServiceProfiles.TryGet(this.GetGameInstance(), this.requestedLine, nextStopId, nextSpawn, nextApproach, nextBerth, nextYaw) {
+      this.PublishLoopDiagnostic(5, nextStopId);
+      return false;
+    };
     this.controller.ClosePassengerDoor();
     this.requestedStopId = nextStopId;
     this.requestedStop = nextStop;
@@ -313,6 +336,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.approachCommandSent = false;
     this.routeStarted = true;
     this.dwellPolls = 0;
+    this.PublishLoopDiagnostic(6, nextStopId);
     return true;
   }
 
