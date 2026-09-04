@@ -479,10 +479,7 @@ protected func UpdateIcon() -> Void {
 @wrapMethod(WorldMapTooltipController)
 public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<WorldMapMenuGameController>) -> Void {
   let stopData: ref<NCTCStopMappinData>;
-  let selectedMappin: ref<IMappin>;
-  let markers: ref<NCTCMapMarkerSystem>;
-  let anchorPosition: Vector4;
-  let anchorLocKey: String;
+  let travel: ref<FastTravelMappin>;
   let desc: ref<inkText>;
   let parent: ref<inkCompoundWidget>;
   let panel: ref<inkVerticalPanel>;
@@ -492,20 +489,12 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
   desc = inkTextRef.Get(this.m_descText) as inkText;
   if IsDefined(this.nctcHubLines) { this.nctcHubLines.SetVisible(false); };
   if !IsDefined(Deref(data).mappin) { return; };
-  selectedMappin = Deref(data).mappin;
-  stopData = selectedMappin.GetScriptData() as NCTCStopMappinData;
-  // Diagnostic build: do not gate this on a Mod Settings value or map variant.
-  // If a selected vanilla tooltip resolves to a travel anchor by position,
-  // force its title/description to name + LocKey. This proves the exact
-  // world-map tooltip route before the developer-only gate is restored.
+  stopData = Deref(data).mappin.GetScriptData() as NCTCStopMappinData;
+  // Same direct route as the proven 0.8.0 survey build: native fast-travel
+  // and NCART mappins expose their unlocalized identifier through point data.
   if !IsDefined(stopData) {
-    markers = IsDefined(menu.GetPlayerControlledObject()) ? NCTCMapMarkerSystem.GetInstance(menu.GetPlayerControlledObject().GetGame()) : null;
-    if IsDefined(markers) && markers.GetNearestTravelAnchor(selectedMappin.GetWorldPosition(), anchorLocKey, anchorPosition) {
-      // Preserve the native stop/station name as title, and put the raw key
-      // alone in the normal description slot for easy copying into JSON.
-      inkTextRef.SetText(this.m_titleText, GetLocalizedText(anchorLocKey));
-      inkTextRef.SetText(this.m_descText, anchorLocKey);
-    };
+    travel = Deref(data).mappin as FastTravelMappin;
+    if IsDefined(travel) { inkTextRef.SetText(this.m_descText, travel.GetPointData().GetPointDisplayName()); };
     return;
   };
   if IsDefined(stopData) {
