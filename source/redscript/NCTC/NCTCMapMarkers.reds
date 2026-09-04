@@ -34,6 +34,7 @@ public struct NCTCTravelAnchor {
 public class NCTCStopMappinData extends MappinScriptData {
   public let line: String;
   public let services: String;
+  public let anchorLocKey: String;
   public let serviceLines: array<String>;
   public let serviceStops: array<String>;
   public let isHub: Bool;
@@ -303,6 +304,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     let anchors: array<NCTCTravelAnchor>;
     let positions: array<Vector4>;
     let services: array<String>;
+    let anchorLocKeys: array<String>;
     let lines: array<String>;
     let hubServiceLines: array<array<String>>;
     let hubServiceStops: array<array<String>>;
@@ -330,6 +332,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
         if hubIndex < 0 {
           ArrayPush(positions, stops[stopIndex].position);
           ArrayPush(services, service);
+          ArrayPush(anchorLocKeys, "");
           ArrayPush(lines, stops[stopIndex].line);
           ArrayPush(hubServiceLines, [stops[stopIndex].line]);
           ArrayPush(hubServiceStops, [stops[stopIndex].stop]);
@@ -352,6 +355,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
         if hubIndex < 0 {
           ArrayPush(positions, anchors[anchorIndex].position);
           ArrayPush(services, service);
+          ArrayPush(anchorLocKeys, anchors[anchorIndex].locKey);
           ArrayPush(lines, stops[stopIndex].line);
           ArrayPush(hubServiceLines, [stops[stopIndex].line]);
           ArrayPush(hubServiceStops, [stops[stopIndex].stop]);
@@ -376,6 +380,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     while index < ArraySize(positions) {
       markerData = new NCTCStopMappinData();
       markerData.services = services[index];
+      markerData.anchorLocKey = anchorLocKeys[index];
       markerData.serviceLines = hubServiceLines[index];
       markerData.serviceStops = hubServiceStops[index];
       markerData.serviceColors = hubServiceColors[index];
@@ -501,6 +506,7 @@ public func SetData(const data: script_ref<WorldMapTooltipData>, menu: ref<World
     if stopData.isHub { inkTextRef.SetText(this.m_titleText, "NCTC Transit Hub"); }
     else { inkTextRef.SetText(this.m_titleText, stopData.services); };
     inkTextRef.SetText(this.m_descText, stopData.services);
+    if !stopData.isHub && !Equals(stopData.anchorLocKey, "") { inkTextRef.SetText(this.m_descText, stopData.anchorLocKey); };
     if stopData.isHub && IsDefined(desc) {
       parent = desc.GetParentWidget() as inkCompoundWidget;
       if IsDefined(parent) {
