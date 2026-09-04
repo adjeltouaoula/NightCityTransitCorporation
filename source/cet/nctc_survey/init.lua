@@ -23,6 +23,7 @@ local runtime_announced = false
 local runtime_session_id = 0
 local deduplicate_same_line_stops
 local normalize_captures
+local ensure_stop_ids
 
 
 local function load_settings()
@@ -101,6 +102,23 @@ local function load_network()
   network.captures = network.captures or {}
   network.hubs = network.hubs or {}
   network.lineColors = network.lineColors or {}
+  local stop_ids_assigned = ensure_stop_ids(network)
+  local capture_ids_assigned = false
+  for _, capture in ipairs(network.captures) do
+    if not capture.stopId or capture.stopId < 1 then
+      local ordinal = 0
+      for _, stop in ipairs(network.stops) do
+        if stop.line == capture.line then
+          ordinal = ordinal + 1
+          if ordinal == capture.stopIndex then
+            capture.stopId = stop.id
+            capture_ids_assigned = true
+            break
+          end
+        end
+      end
+    end
+  end
   local duplicates_merged = deduplicate_same_line_stops(network)
   local captures_normalized = normalize_captures(network)
   local colors_migrated = false
@@ -113,12 +131,14 @@ local function load_network()
     end
   end
   network.revision = network.revision or 1
-  if colors_migrated or duplicates_merged or captures_normalized then
+  if colors_migrated or duplicates_merged or captures_normalized or stop_ids_assigned or capture_ids_assigned then
     network.revision = network.revision + 1
     write_network(network)
     if colors_migrated then log("migrated legacy line colours into active network") end
     if duplicates_merged then log("normalized same-line duplicate stops in active network") end
     if captures_normalized then log("merged legacy duplicate survey captures") end
+    if stop_ids_assigned then log("assigned stable IDs to survey stops") end
+    if capture_ids_assigned then log("attached legacy survey captures to stable stop IDs") end
   end
   return network
 end
@@ -160,6 +180,22 @@ local function next_sequence(network, line)
   return highest + 1
 end
 
+ensure_stop_ids = function(network)
+  local next_id = network.nextStopId or 1
+  local changed = false
+  for _, stop in ipairs(network.stops or {}) do
+    if not stop.id or stop.id < 1 then
+      stop.id = next_id
+      next_id = next_id + 1
+      changed = true
+    elseif stop.id >= next_id then
+      next_id = stop.id + 1
+    end
+  end
+  if network.nextStopId ~= next_id then network.nextStopId = next_id; changed = true end
+  return changed
+end
+
 local function assign_hub(network, position, event_id)
   network.hubs = network.hubs or {}
   local radius_squared = HUB_RADIUS_METRES * HUB_RADIUS_METRES
@@ -172,6 +208,9 @@ local function assign_hub(network, position, event_id)
 end
 
 local function add_stop(network, stop, event_id)
+  network.nextStopId = network.nextStopId or 1
+  stop.id = network.nextStopId
+  network.nextStopId = network.nextStopId + 1
   stop.sequence = stop.sequence or next_sequence(network, stop.line)
   local duplicate_radius_squared = SAME_LINE_DUPLICATE_RADIUS_METRES * SAME_LINE_DUPLICATE_RADIUS_METRES
   for _, existing in ipairs(network.stops) do
@@ -340,10 +379,10 @@ local function selected_stop(network, line, stop_index)
   return matches[stop_index], #matches
 end
 
-local function find_capture(network, line, stop_index)
+local function find_capture(network, stop_id)
   for index = #(network.captures or {}), 1, -1 do
     local capture = network.captures[index]
-    if capture.line == line and capture.stopIndex == stop_index then return capture end
+    if capture.stopId == stop_id then return capture end
   end
   return nil
 end
@@ -418,10 +457,11 @@ local function persist_capture(quests, event_id)
     end
     -- A stop has one editable survey record. Re-recording a point updates
     -- only that point and retains the other two measurements.
-    local capture = find_capture(network, capture_line, capture_stop_index)
+    local capture = find_capture(network, target.id)
     if not capture then
       capture = {
         line = capture_line,
+        stopId = target.id,
         stopIndex = capture_stop_index,
         spawn = {}, approach = {}, berth = {}
       }
@@ -429,6 +469,7 @@ local function persist_capture(quests, event_id)
     end
     capture.eventId = event_id
     capture.stopSequence = target.sequence
+    capture.stopId = target.id
     capture.stopLocKey = target.locKey
     capture.stopName = target.name
     local point = fact(quests, "nctc_survey_capture_point")
@@ -451,6 +492,7 @@ local function publish_network(quests, network)
     local stop = network.stops[index]
     local prefix = "nctc_external_stop_" .. tostring(index - 1) .. "_"
     set_fact(quests, prefix .. "line", stop.line or 0)
+    set_fact(quests, prefix .. "id", stop.id or 0)
     set_fact(quests, prefix .. "loc_key", stop.locKey or 0)
     local position = stop.position or {}
     set_fact(quests, prefix .. "x", math.floor((position.x or 0) * 1000))
@@ -485,8 +527,7 @@ end
 
 local function publish_capture(quests, capture)
   local function publish_vector(kind, point)
-    local prefix = "nctc_external_capture_l" .. tostring(capture.line or 0)
-      .. "_s" .. tostring(capture.stopIndex or 0) .. "_" .. kind .. "_"
+    local prefix = "nctc_external_capture_id" .. tostring(capture.stopId or 0) .. "_" .. kind .. "_"
     if type(point) ~= "table" or not vector_has_position(point) then
       set_fact(quests, prefix .. "valid", 0)
       return

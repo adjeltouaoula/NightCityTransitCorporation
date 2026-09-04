@@ -22,6 +22,7 @@ public struct NCTCStopDefinition {
   // Ordinal inside its line in the external JSON. This is the stable identity
   // used by survey captures; it is not inferred again by the bus system.
   public let serviceStopIndex: Int32;
+  public let serviceStopId: Int32;
 }
 
 public struct NCTCTravelAnchor {
@@ -45,6 +46,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
   private let m_servicePositions: array<Vector4>;
   private let m_serviceLines: array<String>;
   private let m_serviceStopIndices: array<Int32>;
+  private let m_serviceStopIds: array<Int32>;
   private let m_serviceHubLines: array<array<String>>;
   private let m_serviceHubStopIndices: array<array<Int32>>;
   private let m_serviceHubStops: array<array<String>>;
@@ -62,6 +64,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     definition.isManual = false;
     definition.color = -1;
     definition.serviceStopIndex = 0;
+    definition.serviceStopId = 0;
     return definition;
   }
 
@@ -74,6 +77,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     definition.isManual = true;
     definition.color = -1;
     definition.serviceStopIndex = 0;
+    definition.serviceStopId = 0;
     return definition;
   }
 
@@ -143,7 +147,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     return "Survey stop";
   }
 
-  public func GetNearestService(position: Vector4, out line: String, out stop: Vector4, out stopIndex: Int32) -> Bool {
+  public func GetNearestService(position: Vector4, out line: String, out stop: Vector4, out stopIndex: Int32, out stopId: Int32) -> Bool {
     let index: Int32 = 0;
     let nearest: Int32 = -1;
     let nearestDistance: Float = 18.00;
@@ -160,6 +164,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     line = this.m_serviceLines[nearest];
     stop = this.m_servicePositions[nearest];
     stopIndex = this.m_serviceStopIndices[nearest];
+    stopId = this.m_serviceStopIds[nearest];
     return true;
   }
 
@@ -212,6 +217,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
       };
       definition.color = quests.GetFact(StringToName("nctc_external_line_" + ToString(line) + "_color"));
       definition.serviceStopIndex = ordinal;
+      definition.serviceStopId = quests.GetFact(StringToName(prefix + "id"));
       ArrayPush(stops, definition);
       index += 1;
     };
@@ -301,6 +307,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     let hubServiceLines: array<array<String>>;
     let hubServiceStops: array<array<String>>;
     let hubServiceStopIndices: array<array<Int32>>;
+    let hubServiceStopIds: array<array<Int32>>;
     let hubServiceColors: array<array<Int32>>;
     let counts: array<Int32>;
     let service: String;
@@ -327,6 +334,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
           ArrayPush(hubServiceLines, [stops[stopIndex].line]);
           ArrayPush(hubServiceStops, [stops[stopIndex].stop]);
           ArrayPush(hubServiceStopIndices, [stops[stopIndex].serviceStopIndex]);
+          ArrayPush(hubServiceStopIds, [stops[stopIndex].serviceStopId]);
           ArrayPush(hubServiceColors, [stops[stopIndex].color]);
           ArrayPush(counts, 1);
         } else if !StrContains(services[hubIndex], service) {
@@ -334,6 +342,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
           ArrayPush(hubServiceLines[hubIndex], stops[stopIndex].line);
           ArrayPush(hubServiceStops[hubIndex], stops[stopIndex].stop);
           ArrayPush(hubServiceStopIndices[hubIndex], stops[stopIndex].serviceStopIndex);
+          ArrayPush(hubServiceStopIds[hubIndex], stops[stopIndex].serviceStopId);
           ArrayPush(hubServiceColors[hubIndex], stops[stopIndex].color);
           counts[hubIndex] += 1;
         };
@@ -347,6 +356,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
           ArrayPush(hubServiceLines, [stops[stopIndex].line]);
           ArrayPush(hubServiceStops, [stops[stopIndex].stop]);
           ArrayPush(hubServiceStopIndices, [stops[stopIndex].serviceStopIndex]);
+          ArrayPush(hubServiceStopIds, [stops[stopIndex].serviceStopId]);
           ArrayPush(hubServiceColors, [stops[stopIndex].color]);
           ArrayPush(counts, 1);
         } else if !StrContains(services[hubIndex], service) {
@@ -354,6 +364,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
           ArrayPush(hubServiceLines[hubIndex], stops[stopIndex].line);
           ArrayPush(hubServiceStops[hubIndex], stops[stopIndex].stop);
           ArrayPush(hubServiceStopIndices[hubIndex], stops[stopIndex].serviceStopIndex);
+          ArrayPush(hubServiceStopIds[hubIndex], stops[stopIndex].serviceStopId);
           ArrayPush(hubServiceColors[hubIndex], stops[stopIndex].color);
           counts[hubIndex] += 1;
         };
@@ -382,9 +393,11 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     this.m_servicePositions = positions;
     this.m_serviceLines = lines;
     this.m_serviceStopIndices = [];
+    this.m_serviceStopIds = [];
     index = 0;
     while index < ArraySize(hubServiceStopIndices) {
       ArrayPush(this.m_serviceStopIndices, hubServiceStopIndices[index][0]);
+      ArrayPush(this.m_serviceStopIds, hubServiceStopIds[index][0]);
       index += 1;
     };
     this.m_serviceHubLines = hubServiceLines;
@@ -399,6 +412,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     ArrayClear(this.m_servicePositions);
     ArrayClear(this.m_serviceLines);
     ArrayClear(this.m_serviceStopIndices);
+    ArrayClear(this.m_serviceStopIds);
     ArrayClear(this.m_serviceHubLines);
     ArrayClear(this.m_serviceHubStopIndices);
     ArrayClear(this.m_serviceHubStops);

@@ -60,13 +60,13 @@ public class NCTCServiceBusController extends IScriptable {
 }
 
 public class NCTCServiceProfiles {
-  public static func TryGet(game: GameInstance, line: String, stopIndex: Int32, out spawn: Vector4, out approach: Vector4, out berth: Vector4, out yaw: Float) -> Bool {
+  public static func TryGet(game: GameInstance, line: String, stopId: Int32, out spawn: Vector4, out approach: Vector4, out berth: Vector4, out yaw: Float) -> Bool {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
     let requestedLine: Int32 = StringToInt(line, -1);
     let prefix: String;
     if !IsDefined(quests) || !Equals(quests.GetFact(n"nctc_external_network_ready"), 1) { return false; };
-    if stopIndex < 1 { return false; };
-    prefix = "nctc_external_capture_l" + ToString(requestedLine) + "_s" + ToString(stopIndex) + "_";
+    if stopId < 1 { return false; };
+    prefix = "nctc_external_capture_id" + ToString(stopId) + "_";
     if !Equals(quests.GetFact(StringToName(prefix + "spawn_valid")), 1) || !Equals(quests.GetFact(StringToName(prefix + "berth_valid")), 1) { return false; };
     spawn = NCTCServiceProfiles.ReadVector(quests, prefix + "spawn_");
     approach = NCTCServiceProfiles.ReadVector(quests, prefix + "approach_");
@@ -90,7 +90,7 @@ public class NCTCServiceDispatchCallback extends DelayCallback {
 public class NCTCTransitSystem extends ScriptableSystem {
   private let busEntityID: EntityID;
   private let requestedLine: String;
-  private let requestedStopIndex: Int32;
+  private let requestedStopId: Int32;
   private let requestedStop: Vector4;
   private let requestPending: Bool;
   private let controller: ref<NCTCServiceBusController>;
@@ -107,7 +107,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     return GameInstance.GetScriptableSystemsContainer(game).Get(NameOf<NCTCTransitSystem>()) as NCTCTransitSystem;
   }
 
-  public func RequestService(line: String, stopIndex: Int32, stop: Vector4) -> Bool {
+  public func RequestService(line: String, stopId: Int32, stop: Vector4) -> Bool {
     if this.requestPending { return false; };
     // Dynamic entities can be invalidated by a load/streaming transition
     // while their EntityID survives in this scriptable system. Treat that as
@@ -118,13 +118,13 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.controller = null;
     };
     this.requestedLine = line;
-    this.requestedStopIndex = stopIndex;
+    this.requestedStopId = stopId;
     this.requestedStop = stop;
     this.requestPending = true;
     this.arrived = false;
     this.driveCommandSent = false;
     this.approachCommandSent = false;
-    this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), line, stopIndex, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);
+    this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), line, stopId, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);
     this.ScheduleDispatch(0.50);
     return true;
   }
@@ -181,7 +181,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     // A save may restore before CET has republished the external JSON into
     // quest facts. Resolve again at actual entity creation, not only when the
     // player pressed the terminal, so the fresh persisted profile wins.
-    this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), this.requestedLine, this.requestedStopIndex, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);
+    this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), this.requestedLine, this.requestedStopId, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);
     entitySystem = GameInstance.GetDynamicEntitySystem();
     player = GetPlayer(this.GetGameInstance());
     record = TweakDBInterface.GetVehicleRecord(t"Vehicle.nctc_service_mahir_mt28_coach");
