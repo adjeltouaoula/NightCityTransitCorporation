@@ -82,7 +82,10 @@ local function makeHub()
   -- Drive a Bus deliberately uses a fresh hub id. A fixed id can collide with
   -- another native interaction and results in choices being built but never
   -- rendered, which is exactly what the NCTC diagnostic log showed.
-  hub.title, hub.activityState, hub.hubPriority, hub.id = GetLocalizedText("LocKey#77041"), gameinteractionsvisEVisualizerActivityState.Active, 1, 77777 + math.random(99999)
+  -- DAB uses LocKey#77041 here, which resolves to the vehicle model name
+  -- ("Mahir Coach"). NCTC presents the operator as the hub title instead;
+  -- the selectable rows below remain the localized vanilla Sit actions.
+  hub.title, hub.activityState, hub.hubPriority, hub.id = "NIGHT CITY TRANSIT CORPORATION", gameinteractionsvisEVisualizerActivityState.Active, 1, 77777 + math.random(99999)
   hub.choices = {}
   for _, seat in ipairs(NCTC.offered) do
     local caption, kind = gameinteractionsChoiceCaption.new(), gameinteractionsChoiceTypeWrapper.new()
