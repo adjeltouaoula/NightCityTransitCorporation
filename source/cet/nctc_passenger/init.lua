@@ -16,13 +16,6 @@ local seatAreas = {
 
 local passengerSlots = { seat_back_left = true, seat_back_right = true }
 
-local function getFact(name)
-    local quests = Game.GetQuestsSystem()
-    if not quests then return 0 end
-    local ok, value = pcall(function() return quests:GetFact(CName.new(name)) end)
-    return ok and value or 0
-end
-
 local function setFact(name, value)
     local quests = Game.GetQuestsSystem()
     if not quests then return false end
@@ -214,10 +207,8 @@ registerForEvent("onUpdate", function()
     local distance = Vector4.Distance(player:GetWorldPosition(), bus:GetWorldPosition())
     local isMounted = player:GetMountedVehicle() ~= nil
     local insideNow = playerIsInside(bus, player)
-    -- Keep the validated Drive a Bus proximity behaviour, narrowed to 5m and
-    -- authorized only while NCTC has the stationary bus at a scheduled stop.
-    local atStop = getFact("nctc_service_bus_at_stop") > 0
-    setBoardingDoor(bus, atStop and math.abs(bus:GetCurrentSpeed()) <= 1.00 and not isMounted and distance < 5.00)
+    -- Exact validated Drive a Bus / NCBN 0.0.13 door behaviour.
+    setBoardingDoor(bus, math.abs(bus:GetCurrentSpeed()) <= 1.00 and not isMounted and distance < 10.00)
 
     if isMounted then
         setFact("nctc_player_in_service_bus", isSameEntity(player:GetMountedVehicle(), bus) and 1 or 0)
