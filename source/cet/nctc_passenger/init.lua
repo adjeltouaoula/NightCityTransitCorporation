@@ -16,6 +16,19 @@ local seatAreas = {
 
 local passengerSlots = { seat_back_left = true, seat_back_right = true }
 
+local function getFact(name)
+    local quests = Game.GetQuestsSystem()
+    if not quests then return 0 end
+    local ok, value = pcall(function() return quests:GetFact(CName.new(name)) end)
+    return ok and value or 0
+end
+
+local function setFact(name, value)
+    local quests = Game.GetQuestsSystem()
+    if not quests then return false end
+    return pcall(function() quests:SetFact(CName.new(name), value) end)
+end
+
 NCBN.tag = "NCTC.ServiceBus"
 
 local function findServiceBus()
@@ -194,14 +207,12 @@ registerForEvent("onUpdate", function()
     NCBN.inputLocked = false
     local player, bus = Game.GetPlayer(), findServiceBus()
     if not player or not bus then
-        local quests = Game.GetQuestsSystem()
-        if quests then quests:SetFactStr("nctc_player_in_service_bus", 0) end
+        setFact("nctc_player_in_service_bus", 0)
         hideChoice()
         return
     end
     local distance = Vector4.Distance(player:GetWorldPosition(), bus:GetWorldPosition())
-    local quests = Game.GetQuestsSystem()
-    local isAtNCTCStop = quests and quests:GetFactStr("nctc_service_bus_at_stop") > 0
+    local isAtNCTCStop = getFact("nctc_service_bus_at_stop") > 0
     local isStopped = math.abs(bus:GetCurrentSpeed()) <= 1.00
     local isMounted = player:GetMountedVehicle() ~= nil
     local insideNow = playerIsInside(bus, player)
@@ -211,6 +222,7 @@ registerForEvent("onUpdate", function()
     setBoardingDoor(bus, isAtNCTCStop and isStopped and not isMounted and (distance < 10.00 or insideNow))
 
     if isMounted then
+        setFact("nctc_player_in_service_bus", isSameEntity(player:GetMountedVehicle(), bus) and 1 or 0)
         local slot = bus:GetSlotIdForMountedObject(player)
         local slotName = slot and slot.value or "unknown"
         if slotName ~= NCBN.lastMountedSlot then
@@ -222,7 +234,7 @@ registerForEvent("onUpdate", function()
     end
     NCBN.lastMountedSlot = nil
     local inside = insideNow
-    if quests then quests:SetFactStr("nctc_player_in_service_bus", inside and 1 or 0) end
+    setFact("nctc_player_in_service_bus", inside and 1 or 0)
     if inside ~= NCBN.wasInside then
         NCBN.wasInside = inside
         print(inside and "[NCBN] Player entered the walkable cabin." or "[NCBN] Player left the walkable cabin.")
