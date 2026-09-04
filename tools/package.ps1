@@ -27,7 +27,12 @@ if ($IncludeSurveyRuntime -and (Test-Path -LiteralPath (Join-Path $projectRoot "
     New-Item -ItemType Directory -Force (Join-Path $stageRoot "bin\x64\plugins\cyber_engine_tweaks\mods\nctc_survey") | Out-Null
     Copy-Item -Path (Join-Path $projectRoot "source\cet\nctc_survey\*") -Destination (Join-Path $stageRoot "bin\x64\plugins\cyber_engine_tweaks\mods\nctc_survey")
 }
+if ($IncludeSurveyRuntime -and (Test-Path -LiteralPath (Join-Path $projectRoot "source\cet\nctc_passenger\init.lua"))) {
+    New-Item -ItemType Directory -Force (Join-Path $stageRoot "bin\x64\plugins\cyber_engine_tweaks\mods\nctc_passenger") | Out-Null
+    Copy-Item -Path (Join-Path $projectRoot "source\cet\nctc_passenger\*") -Destination (Join-Path $stageRoot "bin\x64\plugins\cyber_engine_tweaks\mods\nctc_passenger")
+}
 Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination $stageRoot
+Copy-Item -LiteralPath (Join-Path $projectRoot "THIRD_PARTY_NOTICES.md") -Destination $stageRoot
 if (Test-Path -LiteralPath $archivePath) { Remove-Item -LiteralPath $archivePath -Force }
 Compress-Archive -Path (Join-Path $stageRoot "*") -DestinationPath $archivePath -CompressionLevel Optimal
 Write-Host "Package created: $archivePath"
