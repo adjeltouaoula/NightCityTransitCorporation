@@ -439,7 +439,10 @@ local function persist_capture(quests, event_id)
   end
   network.lastEventId = event_id
   network.revision = (network.revision or 0) + 1
-  if write_network(network) then log("saved " .. kind .. " event " .. tostring(event_id)) end
+  if write_network(network) then
+    set_fact(quests, "nctc_survey_write_ack_event_id", event_id)
+    log("saved " .. kind .. " event " .. tostring(event_id))
+  end
 end
 
 local function publish_network(quests, network)

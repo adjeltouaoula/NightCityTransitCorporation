@@ -12,6 +12,21 @@ public enum NCTCSurveyLine {
   Line72 = 5
 }
 
+public class NCTCSurveyWriteConfirmationCallback extends DelayCallback {
+  public let game: GameInstance;
+  public let eventId: Int32;
+  public let kind: String;
+
+  public func Call() -> Void {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.game);
+    if IsDefined(quests) && Equals(quests.GetFact(n"nctc_survey_write_ack_event_id"), this.eventId) {
+      NCTCSettings.Notify(this.game, "NCTC survey confirmed: " + this.kind);
+    } else {
+      NCTCSettings.Notify(this.game, "NCTC survey not confirmed: " + this.kind);
+    };
+  }
+}
+
 public enum NCTCSurveyPassage {
   L17_SkylineEst_QGDelamain_PetrelStreet = 0,
   L17_QGDelamain_PetrelStreet_Rocade = 1,
@@ -279,7 +294,7 @@ public class NCTCSettings extends ScriptableSystem {
     if !this.developerMode || !Equals(event.GetAction(), EInputAction.IACT_Press) { return; };
     if Equals(event.GetKey(), this.recordSpawnKey) { this.Record("spawn"); return; };
     if Equals(event.GetKey(), this.recordApproachKey) { this.Record("approach"); return; };
-    if Equals(event.GetKey(), this.recordBerthKey) { this.Record("berth"); };
+    if Equals(event.GetKey(), this.recordBerthKey) { this.Record("berth"); return; };
     if Equals(event.GetKey(), this.addManualStopKey) { this.RecordManualStop(); return; };
     if Equals(event.GetKey(), this.deleteNearestStopKey) { this.DeleteNearestStop(); };
   }
@@ -289,6 +304,8 @@ public class NCTCSettings extends ScriptableSystem {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
     let position: Vector4;
     let prefix: CName;
+    let eventId: Int32;
+    let confirmation: ref<NCTCSurveyWriteConfirmationCallback>;
     if !IsDefined(player) || !IsDefined(quests) { return; };
     position = player.GetWorldPosition();
     prefix = StringToName("nctc_survey_" + kind + "_");
@@ -311,8 +328,15 @@ public class NCTCSettings extends ScriptableSystem {
       };
     };
     quests.SetFact(n"nctc_survey_event_kind", 1);
-    quests.SetFact(n"nctc_survey_event_id", quests.GetFact(n"nctc_survey_event_id") + 1);
-    NCTCSettings.Notify(this.GetGameInstance(), "NCTC survey saved: " + kind);
+    eventId = quests.GetFact(n"nctc_survey_event_id") + 1;
+    // The immediate prompt only confirms the key was captured. CET writes the
+    // actual acknowledgement after the external JSON has been updated.
+    quests.SetFact(n"nctc_survey_write_ack_event_id", -1);
+    quests.SetFact(n"nctc_survey_event_id", eventId);
+    confirmation = new NCTCSurveyWriteConfirmationCallback();
+    confirmation.game = this.GetGameInstance(); confirmation.eventId = eventId; confirmation.kind = kind;
+    GameInstance.GetDelaySystem(this.GetGameInstance()).DelayCallback(confirmation, 0.75, false);
+    NCTCSettings.Notify(this.GetGameInstance(), "NCTC survey queued: " + kind);
   }
 
   // Manual stops are road-position anchors. They deliberately do not inherit a
