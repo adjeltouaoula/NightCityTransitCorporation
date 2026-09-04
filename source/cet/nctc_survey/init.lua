@@ -481,17 +481,19 @@ local function apply_capture(quests, capture)
 end
 
 local function publish_capture(quests, capture)
-  local passage = capture.passage or 0
   local function publish_vector(kind, point)
-    if type(point) ~= "table" then return end
-    local prefix = "nctc_external_capture_" .. tostring(passage) .. "_" .. kind .. "_"
+    local prefix = "nctc_external_capture_l" .. tostring(capture.line or 0)
+      .. "_s" .. tostring(capture.stopIndex or 0) .. "_" .. kind .. "_"
+    if type(point) ~= "table" or not vector_has_position(point) then
+      set_fact(quests, prefix .. "valid", 0)
+      return
+    end
     set_fact(quests, prefix .. "x", math.floor((point.x or 0) * 1000))
     set_fact(quests, prefix .. "y", math.floor((point.y or 0) * 1000))
     set_fact(quests, prefix .. "z", math.floor((point.z or 0) * 1000))
     set_fact(quests, prefix .. "yaw", math.floor((point.yaw or 0) * 1000))
     set_fact(quests, prefix .. "valid", 1)
   end
-  set_fact(quests, "nctc_external_capture_" .. tostring(passage) .. "_line", capture.line or 0)
   publish_vector("spawn", capture.spawn)
   publish_vector("approach", capture.approach)
   publish_vector("berth", capture.berth)

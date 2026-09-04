@@ -60,32 +60,44 @@ public class NCTCServiceBusController extends IScriptable {
 }
 
 public class NCTCServiceProfiles {
-  // First surveyed passage: L17, Skyline Est -> QG Delamain -> Petrel Street.
   public static func TryGet(game: GameInstance, line: String, stop: Vector4, out spawn: Vector4, out approach: Vector4, out berth: Vector4, out yaw: Float) -> Bool {
-    berth = new Vector4(-907.910, -81.144, 7.062, 1.000);
-    if !Equals(line, "17") || Vector4.Distance(stop, berth) > 35.00 { return false; };
-    spawn = new Vector4(-725.033, -214.182, 7.982, 1.000);
-    approach = new Vector4(-858.917, -117.867, 7.063, 1.000);
-    yaw = 53.138;
-    NCTCServiceProfiles.ApplyImportedSurvey(game, spawn, approach, berth, yaw);
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
+    let requestedLine: Int32 = StringToInt(line, -1);
+    let count: Int32;
+    let index: Int32 = 0;
+    let ordinal: Int32 = 0;
+    let selectedOrdinal: Int32 = 0;
+    let nearestDistance: Float = 999999.00;
+    let prefix: String;
+    let candidate: Vector4;
+    if !IsDefined(quests) || !Equals(quests.GetFact(n"nctc_external_network_ready"), 1) { return false; };
+    count = quests.GetFact(n"nctc_external_network_stop_count");
+    // The terminal provides a world position. Resolve it back to the ordinal
+    // used by the external JSON, then consume that stop's own survey record.
+    while index < count {
+      prefix = "nctc_external_stop_" + ToString(index) + "_";
+      if Equals(quests.GetFact(StringToName(prefix + "line")), requestedLine) {
+        ordinal += 1;
+        candidate = new Vector4(Cast<Float>(quests.GetFact(StringToName(prefix + "x"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "y"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "z"))) / 1000.00, 1.00);
+        if Vector4.Distance(stop, candidate) < nearestDistance {
+          nearestDistance = Vector4.Distance(stop, candidate);
+          selectedOrdinal = ordinal;
+        };
+      };
+      index += 1;
+    };
+    if selectedOrdinal < 1 || nearestDistance > 35.00 { return false; };
+    prefix = "nctc_external_capture_l" + ToString(requestedLine) + "_s" + ToString(selectedOrdinal) + "_";
+    if !Equals(quests.GetFact(StringToName(prefix + "spawn_valid")), 1) || !Equals(quests.GetFact(StringToName(prefix + "berth_valid")), 1) { return false; };
+    spawn = NCTCServiceProfiles.ReadVector(quests, prefix + "spawn_");
+    approach = NCTCServiceProfiles.ReadVector(quests, prefix + "approach_");
+    berth = NCTCServiceProfiles.ReadVector(quests, prefix + "berth_");
+    yaw = Cast<Float>(quests.GetFact(StringToName(prefix + "spawn_yaw"))) / 1000.00;
     return true;
   }
 
-  // CET writes values scaled by 1,000 as quest facts. This gives the dev
-  // survey a deliberate, save-scoped live import path with no disk access.
-  private static func ApplyImportedSurvey(game: GameInstance, out spawn: Vector4, out approach: Vector4, out berth: Vector4, out yaw: Float) -> Void {
-    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
-    if !IsDefined(quests) || !Equals(quests.GetFact(n"nctc_survey_imported_passage"), 0) { return; };
-    if Equals(quests.GetFact(n"nctc_survey_spawn_valid"), 1) {
-      spawn = new Vector4(Cast<Float>(quests.GetFact(n"nctc_survey_spawn_x")) / 1000.00, Cast<Float>(quests.GetFact(n"nctc_survey_spawn_y")) / 1000.00, Cast<Float>(quests.GetFact(n"nctc_survey_spawn_z")) / 1000.00, 1.00);
-      yaw = Cast<Float>(quests.GetFact(n"nctc_survey_spawn_yaw")) / 1000.00;
-    };
-    if Equals(quests.GetFact(n"nctc_survey_approach_valid"), 1) {
-      approach = new Vector4(Cast<Float>(quests.GetFact(n"nctc_survey_approach_x")) / 1000.00, Cast<Float>(quests.GetFact(n"nctc_survey_approach_y")) / 1000.00, Cast<Float>(quests.GetFact(n"nctc_survey_approach_z")) / 1000.00, 1.00);
-    };
-    if Equals(quests.GetFact(n"nctc_survey_berth_valid"), 1) {
-      berth = new Vector4(Cast<Float>(quests.GetFact(n"nctc_survey_berth_x")) / 1000.00, Cast<Float>(quests.GetFact(n"nctc_survey_berth_y")) / 1000.00, Cast<Float>(quests.GetFact(n"nctc_survey_berth_z")) / 1000.00, 1.00);
-    };
+  private static func ReadVector(quests: ref<QuestsSystem>, prefix: String) -> Vector4 {
+    return new Vector4(Cast<Float>(quests.GetFact(StringToName(prefix + "x"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "y"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "z"))) / 1000.00, 1.00);
   }
 }
 
