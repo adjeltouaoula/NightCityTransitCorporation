@@ -95,12 +95,21 @@ local function load_network()
   network.captures = network.captures or {}
   network.hubs = network.hubs or {}
   network.lineColors = network.lineColors or {}
+  local colors_migrated = false
   -- Migration for networks created before per-line colours existed.
   local legacy_colors = { ["17"] = 0, ["22"] = 1, ["23"] = 2, ["51"] = 3, ["68"] = 4, ["72"] = 5 }
   for line, color in pairs(legacy_colors) do
-    if network.lineColors[line] == nil then network.lineColors[line] = color end
+    if network.lineColors[line] == nil then
+      network.lineColors[line] = color
+      colors_migrated = true
+    end
   end
   network.revision = network.revision or 1
+  if colors_migrated then
+    network.revision = network.revision + 1
+    write_network(network)
+    log("migrated legacy line colours into active network")
+  end
   return network
 end
 
