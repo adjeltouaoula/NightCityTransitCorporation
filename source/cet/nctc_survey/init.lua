@@ -583,7 +583,14 @@ registerForEvent("onUpdate", function()
   if not survey_events_initialized then
     survey_events_initialized = true
     last_event_id = event_id
-  elseif event_id > 0 and event_id ~= last_event_id then
+  elseif event_id < last_event_id then
+    -- Loading a save restores older quest facts, including this counter and
+    -- the old survey vectors. It is not a new capture. Treat it as a new
+    -- baseline or it would overwrite the external JSON just saved moments
+    -- earlier with stale coordinates from the save.
+    last_event_id = event_id
+    log("ignored restored survey event counter " .. tostring(event_id))
+  elseif event_id > last_event_id then
     last_event_id = event_id
     persist_capture(quests, event_id)
   end
