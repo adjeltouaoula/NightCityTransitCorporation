@@ -209,6 +209,18 @@ local function delete_nearest_stop(network, line, position, loc_key)
   return true
 end
 
+local function selected_stop(network, line, stop_index)
+  local matches = {}
+  for _, stop in ipairs(network.stops or {}) do
+    if stop.line == line then table.insert(matches, stop) end
+  end
+  table.sort(matches, function(a, b)
+    if (a.sequence or 0) == (b.sequence or 0) then return (a.eventId or 0) < (b.eventId or 0) end
+    return (a.sequence or 0) < (b.sequence or 0)
+  end)
+  return matches[stop_index], #matches
+end
+
 local function persist_capture(quests, event_id)
   local network = load_network()
   network.lineColors = network.lineColors or {}
@@ -258,14 +270,25 @@ local function persist_capture(quests, event_id)
     local deleted = delete_nearest_stop(network, fact(quests, "nctc_delete_stop_line"), position, fact(quests, "nctc_delete_stop_loc_key"))
     kind = deleted and "deleted stop" or "no stop deleted"
   else
+    local capture_line = fact(quests, "nctc_survey_capture_line")
+    local capture_stop_index = fact(quests, "nctc_survey_capture_stop_index")
+    local target, count = selected_stop(network, capture_line, capture_stop_index)
+    if not target then
+      log("rejected survey event " .. tostring(event_id) .. ": line " .. tostring(capture_line) .. " stop " .. tostring(capture_stop_index) .. " unavailable")
+      return
+    end
     table.insert(network.captures, {
       eventId = event_id,
-      line = fact(quests, "nctc_survey_line"),
-      passage = fact(quests, "nctc_survey_imported_passage"),
+      line = capture_line,
+      stopIndex = capture_stop_index,
+      stopSequence = target.sequence,
+      stopLocKey = target.locKey,
+      stopName = target.name,
       spawn = vector_from_facts(quests, "nctc_survey_spawn_"),
       approach = vector_from_facts(quests, "nctc_survey_approach_"),
       berth = vector_from_facts(quests, "nctc_survey_berth_")
     })
+    kind = "survey L" .. tostring(capture_line) .. " stop " .. tostring(capture_stop_index) .. "/" .. tostring(count)
   end
   network.lastEventId = event_id
   network.revision = (network.revision or 0) + 1

@@ -105,6 +105,15 @@ public class NCTCSettings extends ScriptableSystem {
   public let surveyLine: NCTCSurveyLine = NCTCSurveyLine.Line17;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Survey stop")
+  @runtimeProperty("ModSettings.description", "Position of the stop in the currently selected line. 1 is the first stop currently present in nctc_network.json; removed stops are skipped.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.min", "1")
+  @runtimeProperty("ModSettings.max", "50")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let surveyStopIndex: Int32 = 1;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Survey passage")
   @runtimeProperty("ModSettings.description", "Direction being recorded. More passages are added as each line is surveyed.")
   @runtimeProperty("ModSettings.category", "Developer mode")
@@ -251,7 +260,8 @@ public class NCTCSettings extends ScriptableSystem {
     // A single category prevents empty developer headings leaking into the
     // normal configuration screen. Only the master switch stays visible.
     for variable in ModSettings.GetVars(n"Night City Transit Corporation", n"Developer mode") {
-      if !Equals(variable.GetName(), n"developerMode") { variable.SetVisible(this.developerMode); };
+      if Equals(variable.GetName(), n"surveyPassage") { variable.SetVisible(false); }
+      else if !Equals(variable.GetName(), n"developerMode") { variable.SetVisible(this.developerMode); };
     };
   }
   @if(!ModuleExists("ModSettingsModule"))
@@ -279,7 +289,10 @@ public class NCTCSettings extends ScriptableSystem {
     quests.SetFact(StringToName(NameToString(prefix) + "z"), Cast<Int32>(position.Z * 1000.00));
     quests.SetFact(StringToName(NameToString(prefix) + "yaw"), Cast<Int32>(player.GetWorldYaw() * 1000.00));
     quests.SetFact(StringToName(NameToString(prefix) + "valid"), 1);
-    quests.SetFact(n"nctc_survey_imported_passage", EnumInt(this.surveyPassage));
+    // Stop position is resolved against the live JSON by the CET survey
+    // writer. No hard-coded passage table participates in new captures.
+    quests.SetFact(n"nctc_survey_capture_line", this.GetSelectedLineNumber());
+    quests.SetFact(n"nctc_survey_capture_stop_index", this.surveyStopIndex);
     quests.SetFact(n"nctc_survey_event_kind", 1);
     quests.SetFact(n"nctc_survey_event_id", quests.GetFact(n"nctc_survey_event_id") + 1);
     NCTCSettings.Notify(this.GetGameInstance(), "NCTC survey saved: " + kind);
