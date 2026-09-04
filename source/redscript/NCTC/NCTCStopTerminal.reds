@@ -10,12 +10,12 @@ public class NCTCStopPrompt {
     return title;
   }
 
-  public static func IsNearStop(game: GameInstance, out line: String, out stop: Vector4) -> Bool {
+  public static func IsNearStop(game: GameInstance, out line: String, out stop: Vector4, out stopIndex: Int32) -> Bool {
     let player: ref<PlayerPuppet> = GetPlayer(game);
     let markers: ref<NCTCMapMarkerSystem>;
     if !IsDefined(player) { return false; };
     markers = NCTCMapMarkerSystem.GetInstance(game);
-    if !IsDefined(markers) || !markers.GetNearestService(player.GetWorldPosition(), line, stop) { return false; };
+    if !IsDefined(markers) || !markers.GetNearestService(player.GetWorldPosition(), line, stop, stopIndex) { return false; };
     return Vector4.Distance(player.GetWorldPosition(), stop) <= 6.00;
   }
 
@@ -76,8 +76,8 @@ public class NCTCStopPrompt {
   public static func Refresh(game: GameInstance) -> Void {
     let player: ref<PlayerPuppet> = GetPlayer(game);
     let settings: ref<NCTCSettings> = NCTCSettings.Get(game);
-    let line: String; let stop: Vector4;
-    let visible: Bool = IsDefined(settings) && settings.ShouldRecordTerminalStops() ? NCTCStopPrompt.IsNearTravelTerminal(game) : NCTCStopPrompt.IsNearStop(game, line, stop);
+    let line: String; let stop: Vector4; let stopIndex: Int32;
+    let visible: Bool = IsDefined(settings) && settings.ShouldRecordTerminalStops() ? NCTCStopPrompt.IsNearTravelTerminal(game) : NCTCStopPrompt.IsNearStop(game, line, stop, stopIndex);
     if !IsDefined(player) { return; };
     if visible || !Equals(player.m_nctcPromptVisible, visible) { NCTCStopPrompt.SetVisible(game, visible); };
     player.m_nctcPromptVisible = visible;
@@ -96,7 +96,7 @@ public class NCTCStopPromptCallback extends DelayCallback {
 public class NCTCStopPromptInputListener {
   public let game: GameInstance;
   protected cb func OnAction(action: ListenerAction, consumer: ListenerActionConsumer) -> Bool {
-    let player: ref<PlayerPuppet>; let settings: ref<NCTCSettings>; let markers: ref<NCTCMapMarkerSystem>; let line: String; let locKey: String; let stop: Vector4;
+    let player: ref<PlayerPuppet>; let settings: ref<NCTCSettings>; let markers: ref<NCTCMapMarkerSystem>; let line: String; let locKey: String; let stop: Vector4; let stopIndex: Int32;
     if !Equals(ListenerAction.GetName(action), n"one_click_confirm") || !ListenerAction.IsButtonJustReleased(action) { return false; };
     player = GetPlayer(this.game);
     if !IsDefined(player) || !player.m_nctcPromptVisible { return false; };
@@ -106,8 +106,8 @@ public class NCTCStopPromptInputListener {
       if IsDefined(markers) && markers.GetNearestTravelAnchor(player.GetWorldPosition(), locKey, stop) { settings.RecordTerminalStop(locKey, stop); return true; };
       return false;
     };
-    if !NCTCStopPrompt.IsNearStop(this.game, line, stop) { return false; };
-    if NCTCTransitSystem.Get(this.game).RequestService(line, stop) { NCTCStopPrompt.NotifyRequest(this.game, line); };
+    if !NCTCStopPrompt.IsNearStop(this.game, line, stop, stopIndex) { return false; };
+    if NCTCTransitSystem.Get(this.game).RequestService(line, stopIndex, stop) { NCTCStopPrompt.NotifyRequest(this.game, line); };
     return true;
   }
 }
@@ -131,12 +131,12 @@ protected cb func OnDetach() -> Bool {
 
 @wrapMethod(DataTermControllerPS)
 public const func GetActions(out actions: array<ref<DeviceAction>>, context: GetActionsContext) -> Bool {
-  let result: Bool = wrappedMethod(actions, context); let settings: ref<NCTCSettings> = NCTCSettings.Get(this.GetGameInstance()); let line: String; let stop: Vector4; let index: Int32; let mapAction: ref<OpenWorldMapDeviceAction>;
+  let result: Bool = wrappedMethod(actions, context); let settings: ref<NCTCSettings> = NCTCSettings.Get(this.GetGameInstance()); let line: String; let stop: Vector4; let stopIndex: Int32; let index: Int32; let mapAction: ref<OpenWorldMapDeviceAction>;
   if !result { return result; };
   if IsDefined(settings) && settings.ShouldRecordTerminalStops() {
     if !NCTCStopPrompt.IsNearTravelTerminal(this.GetGameInstance()) { return result; };
   } else {
-    if !NCTCStopPrompt.IsNearStop(this.GetGameInstance(), line, stop) { return result; };
+    if !NCTCStopPrompt.IsNearStop(this.GetGameInstance(), line, stop, stopIndex) { return result; };
   };
   index = ArraySize(actions) - 1;
   while index >= 0 { mapAction = actions[index] as OpenWorldMapDeviceAction; if IsDefined(mapAction) { ArrayErase(actions, index); }; index -= 1; };
