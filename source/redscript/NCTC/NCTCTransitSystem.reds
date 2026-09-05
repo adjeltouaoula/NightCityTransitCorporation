@@ -90,9 +90,12 @@ public class NCTCServiceBusController extends IScriptable {
   public func DriveToTraffic(target: Vector4, minimumDistance: Float) -> Bool {
     let callback: ref<NCTCDeferredDriveCommand>;
     if !this.IsReady() { return false; };
-    // ADE schedules NoDriver next-frame and DriverReady 0.1s later. Sending a
-    // drive command synchronously here lets those events cancel its start.
-    this.bus.WorkaroundForAutoDriveDontStart_ADE();
+    // An empty dynamic bus needs ADE's driver-state bootstrap. Never send its
+    // NoDriver/DriverReady pair while V is mounted: it can interrupt the rear
+    // passenger workspot and cancel the route command during PassengerEvents.
+    if !this.IsPlayerAboard() {
+      this.bus.WorkaroundForAutoDriveDontStart_ADE();
+    };
     callback = new NCTCDeferredDriveCommand();
     this.activeRouteCommand = null;
     callback.Configure(this.bus, this, target);
@@ -488,6 +491,12 @@ public class NCTCTransitSystem extends ScriptableSystem {
     };
     if this.controller.IsRouteCommandFailed() {
       this.PublishLoopDiagnostic(35, this.requestedStopId);
+      // Mounting can cancel the command once while PassengerEvents settles.
+      // Retry the same berth on the next tick; DriveToTraffic deliberately
+      // avoids the NoDriver reset whenever V is already aboard.
+      this.driveCommandSent = false;
+      this.ScheduleDispatch(0.50);
+      return;
     };
     this.ScheduleDispatch(0.50);
   }
