@@ -6,7 +6,8 @@
 
 local NCBN = { tag = "NightCityBusNetwork.PrototypeBus", interactionUI = nil, choiceHub = nil,
     choiceVisible = false, selectedSeat = 0, inputLocked = false, offeredSeats = {},
-    uiMissingLogged = false, wasInside = false, lastMountedSlot = nil }
+    uiMissingLogged = false, wasInside = false, lastMountedSlot = nil,
+    passengerMountRequested = false, mountRequestDeadline = 0, wasMounted = false }
 
 -- Local-space zone in the aisle beside the two validated rear passenger seats.
 local seatAreas = {
@@ -20,6 +21,26 @@ local function setFact(name, value)
     local quests = Game.GetQuestsSystem()
     if not quests then return false end
     return pcall(function() quests:SetFact(CName.new(name), value) end)
+end
+
+local function getFact(name)
+    local quests = Game.GetQuestsSystem()
+    if not quests then return 0 end
+    local ok, value = pcall(function() return quests:GetFact(CName.new(name)) end)
+    if ok and type(value) == "number" then return value end
+    ok, value = pcall(function() return quests:GetFact(name) end)
+    return ok and type(value) == "number" and value or 0
+end
+
+local function signalTransitSystem(value)
+    local container = Game.GetScriptableSystemsContainer()
+    if not container then return false end
+    local ok, system = pcall(function() return container:Get("NCTC.NCTCTransitSystem") end)
+    if not ok or not system then
+        ok, system = pcall(function() return container:Get(CName.new("NCTC.NCTCTransitSystem")) end)
+    end
+    if not ok or not system then return false end
+    return pcall(function() system:SetPlayerAboard(value) end)
 end
 
 NCBN.tag = "NCTC.ServiceBus"
@@ -153,11 +174,80 @@ local function mountPassenger(seat)
     slot.id = seat.id
     info.childId, info.parentId, info.slotId = player:GetEntityID(), bus:GetEntityID(), slot
     request.lowLevelMountingInfo, request.mountData = info, data
+    -- This interaction only ever targets the two rear passenger workspots.
+    -- Remember that provenance until the game confirms V is mounted; querying
+    -- the workspot back from the Mahir is unreliable in CET.
+    NCBN.passengerMountRequested = true
+    NCBN.mountRequestDeadline = os.clock() + 5.0
+    -- This is an edge-triggered service request, not a mirror of the game's
+    -- unreliable Mahir mounted-slot state. The transit loop acknowledges it
+    -- exactly once after allowing the seating animation to complete.
+    setFact("nctc_passenger_departure_requested", 1)
     Game.GetMountingFacility():Mount(request)
     hideChoice()
 end
 
 registerForEvent("onInit", function()
+    -- This is the actual vanilla entry point for a pedestrian struck by a car.
+    -- Crucially, OnCarHitPlayer still carries the real carId; the damage code
+    -- later replaces both source and instigator with the player itself.
+    ObserveBefore("PlayerPuppet", "OnCarHitPlayer", function(player, evt)
+        if not player or not evt then return end
+        local bus = findServiceBus()
+        local function idText(value)
+            local ok, valueText = pcall(function() return EntityID.ToDebugString(value) end)
+            return ok and tostring(valueText) or tostring(value)
+        end
+        local car = nil
+        pcall(function() car = Game.FindEntityByID(evt.carId) end)
+        local p = bus and localPosition(bus, player) or nil
+        local sameBus = false
+        if bus then
+            pcall(function() sameBus = bus:GetEntityID().hash == evt.carId.hash end)
+        end
+        print("[NCTC CarHit Pre]"
+            .. " carId=" .. idText(evt.carId)
+            .. " activeBus=" .. (bus and idText(bus:GetEntityID()) or "none")
+            .. " sameBus=" .. tostring(sameBus)
+            .. " resolvedCar=" .. tostring(car ~= nil)
+            .. " hitDirection=" .. tostring(evt.hitDirection)
+            .. " separationImpulse=" .. tostring(evt.seperationImpulse)
+            .. " localPosition=" .. (p and string.format("x=%.3f,y=%.3f,z=%.3f", p.x, p.y, p.z) or "none")
+            .. " insideGeometry=" .. tostring(bus ~= nil and playerIsInside(bus, player))
+            .. " insideFact=" .. tostring(getFact("nctc_player_in_service_bus")))
+    end)
+
+    -- Capture the native request before VehicleKnockdown is applied. This
+    -- preserves the source arguments that PlayerPuppet's later callback lacks.
+    ObserveBefore("StatusEffectSystem", "ApplyStatusEffect", function(_, targetID, statusEffectID, instigatorStaticDataID, instigatorEntityID)
+        local okStatus, statusText = pcall(function() return TweakDBID.ToStringDEBUG(statusEffectID) end)
+        statusText = okStatus and tostring(statusText) or tostring(statusEffectID)
+        if not string.find(statusText, "VehicleKnockdown", 1, true) then return end
+
+        local player, bus = Game.GetPlayer(), findServiceBus()
+        local function idText(value)
+            local ok, valueText = pcall(function() return EntityID.ToDebugString(value) end)
+            return ok and tostring(valueText) or tostring(value)
+        end
+        local function recordText(entity)
+            if not entity then return "none" end
+            local ok, value = pcall(function() return TweakDBID.ToStringDEBUG(entity:GetRecordID()) end)
+            return ok and tostring(value) or "unknown"
+        end
+        local instigator = nil
+        pcall(function() instigator = Game.FindEntityByID(instigatorEntityID) end)
+        print("[NCTC Collision PreApply] VehicleKnockdown"
+            .. " target=" .. idText(targetID)
+            .. " status=" .. statusText
+            .. " instigatorStaticData=" .. tostring(instigatorStaticDataID)
+            .. " instigator=" .. idText(instigatorEntityID)
+            .. " instigatorRecord=" .. recordText(instigator)
+            .. " player=" .. (player and idText(player:GetEntityID()) or "none")
+            .. " bus=" .. (bus and idText(bus:GetEntityID()) or "none")
+            .. " busRecord=" .. recordText(bus)
+            .. " insideFact=" .. tostring(getFact("nctc_player_in_service_bus")))
+    end)
+
     Observe("InteractionUIBase", "OnInitialize", function(this) NCBN.interactionUI = this end)
     Observe("InteractionUIBase", "OnDialogsData", function(this) NCBN.interactionUI = this end)
     Observe("InteractionUIBase", "OnUninitialize", function(this) if NCBN.interactionUI == this then NCBN.interactionUI = nil end end)
@@ -200,7 +290,11 @@ registerForEvent("onUpdate", function()
     NCBN.inputLocked = false
     local player, bus = Game.GetPlayer(), findServiceBus()
     if not player or not bus then
+        NCBN.passengerMountRequested = false
+        NCBN.mountRequestDeadline = 0
+        NCBN.wasMounted = false
         setFact("nctc_player_in_service_bus", 0)
+        signalTransitSystem(false)
         hideChoice()
         return
     end
@@ -208,12 +302,24 @@ registerForEvent("onUpdate", function()
     local isMounted = player:GetMountedVehicle() ~= nil
     local insideNow = playerIsInside(bus, player)
     -- Exact validated Drive a Bus / NCBN 0.0.13 door behaviour.
-    setBoardingDoor(bus, math.abs(bus:GetCurrentSpeed()) <= 1.00 and not isMounted and distance < 10.00)
+    -- Proximity may open the door only during an official NCTC stop. When the
+    -- route loop revokes this fact, CET must allow the door to stay closed so
+    -- the departure state can advance.
+    local boardingAllowed = getFact("nctc_service_bus_at_stop") == 1
+    -- At a scheduled stop the door stays open for boarding and alighting,
+    -- including while V is already mounted in a rear passenger workspot.
+    setBoardingDoor(bus, boardingAllowed and math.abs(bus:GetCurrentSpeed()) <= 1.00 and (isMounted or distance < 10.00))
 
     if isMounted then
-        setFact("nctc_player_in_service_bus", isSameEntity(player:GetMountedVehicle(), bus) and 1 or 0)
         local slot = bus:GetSlotIdForMountedObject(player)
         local slotName = slot and slot.value or "unknown"
+        -- The mounted vehicle wrapper is not stable for these passenger
+        -- workspots. The slot belongs to this exact bus and is the reliable
+        -- proof that V is seated in one of NCTC's rear passenger places.
+        local aboard = NCBN.passengerMountRequested or passengerSlots[slotName] == true
+        NCBN.wasMounted = true
+        setFact("nctc_player_in_service_bus", aboard and 1 or 0)
+        signalTransitSystem(aboard)
         if slotName ~= NCBN.lastMountedSlot then
             NCBN.lastMountedSlot = slotName
             print("[NCBN] Player mounted slot: " .. slotName .. (passengerSlots[slotName] and " (passenger)" or " (forbidden)"))
@@ -221,9 +327,20 @@ registerForEvent("onUpdate", function()
         hideChoice()
         return
     end
+    -- Mounting is asynchronous. Do not clear the provenance on the frame
+    -- between Mount(request) and GetMountedVehicle() becoming valid.
+    if NCBN.wasMounted then
+        NCBN.passengerMountRequested = false
+        NCBN.mountRequestDeadline = 0
+        NCBN.wasMounted = false
+    elseif NCBN.passengerMountRequested and os.clock() > NCBN.mountRequestDeadline then
+        NCBN.passengerMountRequested = false
+        NCBN.mountRequestDeadline = 0
+    end
     NCBN.lastMountedSlot = nil
     local inside = insideNow
     setFact("nctc_player_in_service_bus", inside and 1 or 0)
+    signalTransitSystem(inside)
     if inside ~= NCBN.wasInside then
         NCBN.wasInside = inside
         print(inside and "[NCBN] Player entered the walkable cabin." or "[NCBN] Player left the walkable cabin.")
