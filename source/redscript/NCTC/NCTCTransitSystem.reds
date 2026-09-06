@@ -312,6 +312,18 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let departureRequested: Bool;
   private let legPolls: Int32;
 
+  private func PublishRouteDisplay(nextStopId: Int32) -> Void {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    let lineNumber: Int32 = StringToInt(this.requestedLine, -1);
+    if !IsDefined(quests) { return; };
+    quests.SetFact(n"nctc_display_line", lineNumber);
+    quests.SetFact(n"nctc_display_next_stop_id", nextStopId);
+    // Reserved for the passenger-request visual state. The display remains
+    // focused on route information: line number and next stop only.
+    quests.SetFact(n"nctc_display_stop_requested", 0);
+    quests.SetFact(n"nctc_display_revision", quests.GetFact(n"nctc_display_revision") + 1);
+  }
+
   private func PublishLoopDiagnostic(code: Int32, nextStopId: Int32) -> Void {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
     let busPosition: Vector4;
@@ -361,6 +373,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.requestedLine = line;
     this.requestedStopId = stopId;
     this.requestedStop = stop;
+    // Until the bus is on its way to the following stop, its public display
+    // identifies the service being called and the boarding stop.
+    this.PublishRouteDisplay(stopId);
     this.requestPending = true;
     this.arrived = false;
     GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_service_bus_at_stop", 0);
@@ -558,6 +573,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.dwellPolls = 0;
     this.boardingDoorWasOpen = false;
     this.legPolls = 0;
+    this.PublishRouteDisplay(nextStopId);
     this.PublishLoopDiagnostic(6, nextStopId);
     return true;
   }
