@@ -21,6 +21,13 @@ local next_sync_time = 0
 local survey_events_initialized = false
 local runtime_announced = false
 local runtime_session_id = 0
+-- The previous session-token comparison could fail to round-trip through
+-- quest facts on some saves. That made the full external network publish on
+-- every second, temporarily clearing berth_valid while a bus was trying to
+-- depart. Keep an in-memory revision acknowledgement as well: a save load
+-- still has an older revision in its facts and therefore repopulates once,
+-- but an unchanged live session does not rewrite route data beneath the AI.
+local last_published_network_revision = -1
 local last_dispatch_log_id = 0
 local last_loop_log_id = 0
 local deduplicate_same_line_stops
@@ -601,9 +608,12 @@ local function synchronize_external_survey(quests)
   local network = load_network()
   local revision = network.revision or 1
   -- Quest facts are part of a save and can be older than the external JSON.
-  -- Stamp every game session so the JSON is always republished on launch.
+  -- Republish on launch/load or when the external authoring data changed.
+  -- Do not use the session token as a perpetual trigger: some game versions
+  -- do not retain that fact reliably and would rebuild the entire network
+  -- every second while a service is in motion.
   local needs_sync = fact(quests, "nctc_external_network_revision") ~= revision
-    or fact(quests, "nctc_external_network_session") ~= runtime_session_id
+    or last_published_network_revision ~= revision
   if not needs_sync then return end
 
   -- Transaction boundary: redscript must not consume capture facts while CET
@@ -635,6 +645,7 @@ local function synchronize_external_survey(quests)
   set_fact(quests, "nctc_external_network_revision", revision)
   set_fact(quests, "nctc_external_network_session", runtime_session_id)
   set_fact(quests, "nctc_external_network_ready", 1)
+  last_published_network_revision = revision
   log("published external network transaction revision " .. tostring(revision))
 end
 
@@ -642,6 +653,9 @@ end
 -- asks the engine to create the bus. It is intentionally file-log only.
 local function log_dispatch_attempt(quests)
   local id = fact(quests, "nctc_dev_dispatch_id")
+  -- Quest facts are restored by a save load, while this Lua runtime remains
+  -- alive. Re-arm the deduplicator when that restored counter moves back.
+  if id < last_dispatch_log_id then last_dispatch_log_id = id - 1 end
   if id <= last_dispatch_log_id then return end
   last_dispatch_log_id = id
   local line = fact(quests, "nctc_dev_dispatch_line")
@@ -658,6 +672,9 @@ end
 
 local function log_service_loop(quests)
   local id = fact(quests, "nctc_dev_loop_id")
+  -- Same rule for route telemetry: otherwise every event after a load can be
+  -- silently discarded as an already-seen event from the prior save state.
+  if id < last_loop_log_id then last_loop_log_id = id - 1 end
   if id <= last_loop_log_id then return end
   last_loop_log_id = id
   local code = fact(quests, "nctc_dev_loop_code")
@@ -688,16 +705,26 @@ local function log_service_loop(quests)
     [24] = "minimal loop: stopped-near fallback reached",
     [25] = "minimal loop: active AI command failed",
     [29] = "route loop: initial berth command sent",
-    [30] = "route loop: entered 18m berth zone; stop opened",
+    [30] = "route loop: entered 18m berth zone; service stop opened",
+    [31] = "route loop: entered 18m berth zone; passed through to next stop",
     [32] = "route loop: departed for next stopSequence",
     [33] = "route loop: next drive command rejected",
     [34] = "route loop: next stopSequence/profile unavailable",
-    [35] = "route loop: active drive command failed before 18m zone"
+    [35] = "route loop: active drive command failed before arrival",
+    [36] = "route loop: ADE command telemetry",
+    [37] = "route loop: bus manually despawned"
   }
-  log("service loop " .. tostring(id) .. ": L" .. tostring(line) .. " stopId " .. tostring(stop_id)
+  local command_extra = ""
+  if code == 36 then
+    local command_states = { [0] = "missing", [1] = "active", [2] = "success", [3] = "failed/cancelled" }
+    command_extra = " commandState=" .. (command_states[fact(quests, "nctc_dev_command_state")] or "unknown")
+      .. " speed=" .. string.format("%.2f", fact(quests, "nctc_dev_command_speed_mm") / 1000.0)
+  end
+  local session = fact(quests, "nctc_dev_service_session")
+  log("service #" .. tostring(session) .. " loop " .. tostring(id) .. ": L" .. tostring(line) .. " stopId " .. tostring(stop_id)
     .. " -> " .. tostring(next_stop_id) .. " " .. (states[code] or ("state " .. tostring(code)))
     .. string.format(" | bus=(%.3f, %.3f, %.3f) target=(%.3f, %.3f, %.3f) distance=%.1fm",
-      bus_x, bus_y, bus_z, target_x, target_y, target_z, target_distance))
+      bus_x, bus_y, bus_z, target_x, target_y, target_z, target_distance) .. command_extra)
 end
 
 registerForEvent("onUpdate", function()

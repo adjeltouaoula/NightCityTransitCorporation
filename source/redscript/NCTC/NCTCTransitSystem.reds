@@ -58,6 +58,10 @@ public class NCTCServiceBusController extends IScriptable {
     return this.IsReady() ? this.bus.GetWorldPosition() : new Vector4(0.00, 0.00, 0.00, 0.00);
   }
 
+  public func GetCurrentSpeed() -> Float {
+    return this.IsReady() ? this.bus.GetCurrentSpeed() : -1.00;
+  }
+
   public func IsNear(position: Vector4, radius: Float) -> Bool {
     return this.IsReady() && Vector4.Distance(this.bus.GetWorldPosition(), position) <= radius;
   }
@@ -113,6 +117,17 @@ public class NCTCServiceBusController extends IScriptable {
 
   public func IsRouteCommandSuccessful() -> Bool {
     return IsDefined(this.activeRouteCommand) && Equals(this.activeRouteCommand.state, AICommandState.Success);
+  }
+
+  // Telemetry only. The command state is exposed so the dev runtime can prove
+  // whether ADE completes, replaces, or leaves our submitted command active.
+  public func GetRouteCommandStatusCode() -> Int32 {
+    if !IsDefined(this.activeRouteCommand) { return 0; };
+    if Equals(this.activeRouteCommand.state, AICommandState.Success) { return 2; };
+    if Equals(this.activeRouteCommand.state, AICommandState.Failure)
+      || Equals(this.activeRouteCommand.state, AICommandState.Cancelled)
+      || Equals(this.activeRouteCommand.state, AICommandState.Interrupted) { return 3; };
+    return 1;
   }
 
   public func IsRouteCommandFailed() -> Bool {
@@ -294,6 +309,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let busEntityID: EntityID;
   private let requestedLine: String;
   private let requestedStopId: Int32;
+  // A route point is always visited in sequence. This separate value decides
+  // whether that visit becomes a passenger service stop (doors + dwell) or a
+  // pass-through point. Calling a bus reserves its current stop initially.
+  private let serviceStopId: Int32;
   private let requestedStop: Vector4;
   private let requestPending: Bool;
   private let controller: ref<NCTCServiceBusController>;
@@ -311,6 +330,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let routeWaypoint: NewMappinID;
   private let departureRequested: Bool;
   private let legPolls: Int32;
+  private let telemetryPolls: Int32;
 
   private func PublishRouteDisplay(nextStopId: Int32) -> Void {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
@@ -346,6 +366,14 @@ public class NCTCTransitSystem extends ScriptableSystem {
     quests.SetFact(n"nctc_dev_loop_id", quests.GetFact(n"nctc_dev_loop_id") + 1);
   }
 
+  private func PublishRouteCommandTelemetry() -> Void {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    if !IsDefined(quests) { return; };
+    quests.SetFact(n"nctc_dev_command_state", this.controller.GetRouteCommandStatusCode());
+    quests.SetFact(n"nctc_dev_command_speed_mm", Cast<Int32>(this.controller.GetCurrentSpeed() * 1000.00));
+    this.PublishLoopDiagnostic(36, this.requestedStopId);
+  }
+
   public static func Get(game: GameInstance) -> ref<NCTCTransitSystem> {
     return GameInstance.GetScriptableSystemsContainer(game).Get(NameOf<NCTCTransitSystem>()) as NCTCTransitSystem;
   }
@@ -372,6 +400,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     };
     this.requestedLine = line;
     this.requestedStopId = stopId;
+    this.serviceStopId = stopId;
     this.requestedStop = stop;
     // Until the bus is on its way to the following stop, its public display
     // identifies the service being called and the boarding stop.
@@ -391,6 +420,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     quests = GameInstance.GetQuestsSystem(this.GetGameInstance());
     player = GetPlayer(this.GetGameInstance());
     if IsDefined(quests) {
+      quests.SetFact(n"nctc_dev_service_session", quests.GetFact(n"nctc_dev_service_session") + 1);
       spawnDistance = this.hasSurveyProfile && IsDefined(player) ? Vector4.Distance(this.surveySpawn, player.GetWorldPosition()) : -1.00;
       quests.SetFact(n"nctc_dev_dispatch_line", StringToInt(line, -1));
       quests.SetFact(n"nctc_dev_dispatch_stop_id", stopId);
@@ -414,6 +444,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
   public func DespawnServiceBus() -> Bool {
     let entitySystem: ref<DynamicEntitySystem> = GameInstance.GetDynamicEntitySystem();
     let hadBus: Bool = EntityID.IsDefined(this.busEntityID) || this.requestPending;
+    if hadBus { this.PublishLoopDiagnostic(37, this.requestedStopId); };
     if EntityID.IsDefined(this.busEntityID) && IsDefined(entitySystem) { entitySystem.DeleteEntity(this.busEntityID); };
     this.busEntityID = new EntityID();
     this.controller = null;
@@ -497,6 +528,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
       quests.SetFact(n"nctc_passenger_departure_requested", 0);
       quests.SetFact(n"nctc_service_bus_at_stop", 0);
       this.controller.ClosePassengerDoor();
+      // The called stop has now been served. Future player stop requests will
+      // set serviceStopId again; until then the bus follows its route without
+      // opening its doors at intermediate points.
+      this.serviceStopId = 0;
       if !this.AdvanceToNextStop() {
         this.PublishLoopDiagnostic(34, 0);
         this.ScheduleDispatch(1.00);
@@ -514,21 +549,47 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if !this.driveCommandSent {
       this.driveCommandSent = this.controller.DriveToTraffic(this.hasSurveyProfile ? this.surveyBerth : this.requestedStop, 8.00);
       this.legPolls = 0;
+      this.telemetryPolls = 0;
       this.PublishLoopDiagnostic(29, this.requestedStopId);
       this.ScheduleDispatch(0.25);
       return;
     };
     this.legPolls += 1;
-    // Deliberately no approach gate in this experiment. The commanded stopping
-    // allowance is 8m and the stop tolerance is 10m, hence an 18m arrival zone.
+    // Every five seconds, log the exact state of the command object NCTC
+    // submitted to ADE. This is diagnostic-only and lets us distinguish a
+    // genuine ADE completion from a vehicle that merely stopped in traffic.
+    this.telemetryPolls += 1;
+    if this.telemetryPolls >= 10 {
+      this.telemetryPolls = 0;
+      this.PublishRouteCommandTelemetry();
+    };
+    // Baseline service hand-off. ADE's direct traffic command does not expose
+    // a terminal Success state to NCTC, so the authored berth envelope is the
+    // contract for this prototype: 8m native stopping allowance plus 10m
+    // hand-off margin.
     if this.controller.IsNear(this.hasSurveyProfile ? this.surveyBerth : this.requestedStop, 18.00) {
-      this.controller.ArriveAtStop();
-      this.arrived = true;
-      this.driveCommandSent = false;
-      this.dwellPolls = 0;
-      quests.SetFact(n"nctc_service_bus_at_stop", 1);
-      this.controller.KeepPassengerDoorOpen();
-      this.PublishLoopDiagnostic(30, this.requestedStopId);
+      if Equals(this.requestedStopId, this.serviceStopId) {
+        this.controller.ArriveAtStop();
+        this.arrived = true;
+        this.driveCommandSent = false;
+        this.dwellPolls = 0;
+        quests.SetFact(n"nctc_service_bus_at_stop", 1);
+        this.controller.KeepPassengerDoorOpen();
+        this.PublishLoopDiagnostic(30, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      // Intermediate route point: it has been reached in order, but no one
+      // requested service there. Replace the completed command immediately
+      // so the bus continues without doors or a dwell state.
+      if !this.AdvanceToNextStop() {
+        this.PublishLoopDiagnostic(34, 0);
+        this.ScheduleDispatch(1.00);
+        return;
+      };
+      this.legPolls = 0;
+      this.driveCommandSent = this.controller.DriveToTraffic(this.surveyBerth, 8.00);
+      this.PublishLoopDiagnostic(this.driveCommandSent ? 31 : 33, this.requestedStopId);
       this.ScheduleDispatch(0.25);
       return;
     };

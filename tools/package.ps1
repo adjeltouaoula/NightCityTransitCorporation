@@ -1,6 +1,7 @@
 param(
     [string]$Version = "0.2.0",
-    [switch]$IncludeSurveyRuntime
+    [switch]$IncludeSurveyRuntime,
+    [switch]$IncludeDisplayPrototype
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,6 +22,12 @@ Copy-Item -Path (Join-Path $projectRoot "source\redscript\NCTC\*.reds") -Destina
 Copy-Item -Path (Join-Path $projectRoot "source\tweaks\NCTC\*.yaml") -Destination (Join-Path $stageRoot "r6\tweaks\NCTC")
 # Experimental vehicle-physics archives remain excluded until their collision
 # setup is proven safe and useful.
+if ($IncludeDisplayPrototype) {
+    $displayArchive = Join-Path $projectRoot 'tmp\NCTCDisplayPrototype.archive'
+    if (!(Test-Path -LiteralPath $displayArchive)) { throw 'Generate the display widget and bus archive first.' }
+    New-Item -ItemType Directory -Force (Join-Path $stageRoot 'archive\pc\mod') | Out-Null
+    Copy-Item -LiteralPath $displayArchive -Destination (Join-Path $stageRoot 'archive\pc\mod\NCTCDisplayPrototype.archive')
+}
 if ($IncludeSurveyRuntime -and (Test-Path -LiteralPath (Join-Path $projectRoot "source\cet\nctc_survey\init.lua"))) {
     New-Item -ItemType Directory -Force (Join-Path $stageRoot "bin\x64\plugins\cyber_engine_tweaks\mods\nctc_survey") | Out-Null
     Copy-Item -Path (Join-Path $projectRoot "source\cet\nctc_survey\*") -Destination (Join-Path $stageRoot "bin\x64\plugins\cyber_engine_tweaks\mods\nctc_survey")

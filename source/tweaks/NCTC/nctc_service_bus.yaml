@@ -2,6 +2,10 @@
 # it is never a garage, summon, fuel, or maintenance vehicle for V.
 Vehicle.nctc_service_mahir_mt28_coach:
   $base: Vehicle.v_mahir_mt28_coach
+  # NCTO's Mahir entity is its traffic-ready variant.  NCTC keeps its own
+  # record and passenger runtime, while this experiment verifies whether the
+  # traffic entity resolves rear under-run collisions correctly.
+  entityTemplatePath: night_city_traffic_overhaul\entities\transport\v_mahir_mt28_coach_basic_01.ent
   # Auto Drive Enhanced exposes a dedicated passenger AutoDrive context for
   # every eligible mounted vehicle. NCTC drives this record through ADE's AI
   # command directly, so the player-facing AutoDrive action must stay disabled.
