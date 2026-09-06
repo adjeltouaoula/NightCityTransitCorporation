@@ -44,6 +44,10 @@ public class NCTCServiceBusController extends IScriptable {
   private let bus: wref<VehicleObject>;
   private let playerAboardSignal: Bool;
   private let activeRouteCommand: ref<AIVehicleDriveToPointCommand>;
+  // Diagnostic-only: retain the command that was active immediately before a
+  // route handoff, so the dev log can prove whether it was replaced or left
+  // alive alongside the command for the next stop.
+  private let previousRouteCommand: ref<AIVehicleDriveToPointCommand>;
 
   public func Bind(bus: ref<VehicleObject>) -> Bool {
     if !IsDefined(bus) || !IsDefined(bus.GetAIComponent()) { return false; };
@@ -105,6 +109,7 @@ public class NCTCServiceBusController extends IScriptable {
       this.bus.WorkaroundForAutoDriveDontStart_ADE();
     };
     callback = new NCTCDeferredDriveCommand();
+    this.previousRouteCommand = this.activeRouteCommand;
     this.activeRouteCommand = null;
     callback.Configure(this.bus, this, target);
     GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.25, false);
@@ -127,6 +132,15 @@ public class NCTCServiceBusController extends IScriptable {
     if Equals(this.activeRouteCommand.state, AICommandState.Failure)
       || Equals(this.activeRouteCommand.state, AICommandState.Cancelled)
       || Equals(this.activeRouteCommand.state, AICommandState.Interrupted) { return 3; };
+    return 1;
+  }
+
+  public func GetPreviousRouteCommandStatusCode() -> Int32 {
+    if !IsDefined(this.previousRouteCommand) { return 0; };
+    if Equals(this.previousRouteCommand.state, AICommandState.Success) { return 2; };
+    if Equals(this.previousRouteCommand.state, AICommandState.Failure)
+      || Equals(this.previousRouteCommand.state, AICommandState.Cancelled)
+      || Equals(this.previousRouteCommand.state, AICommandState.Interrupted) { return 3; };
     return 1;
   }
 
@@ -214,6 +228,38 @@ public class NCTCServiceBusController extends IScriptable {
 }
 
 public class NCTCServiceProfiles {
+  // Diagnostic-only bridge. It records how the sequence resolver interpreted
+  // the currently published network; it never participates in route control.
+  private static func PublishSequenceProbe(game: GameInstance, code: Int32, line: Int32, currentStopId: Int32, currentSequence: Int32, nextStopId: Int32, nextSequence: Int32, stopCount: Int32) -> Void {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
+    if !IsDefined(quests) { return; };
+    quests.SetFact(n"nctc_dev_sequence_probe_code", code);
+    quests.SetFact(n"nctc_dev_sequence_probe_line", line);
+    quests.SetFact(n"nctc_dev_sequence_probe_current_id", currentStopId);
+    quests.SetFact(n"nctc_dev_sequence_probe_current_sequence", currentSequence);
+    quests.SetFact(n"nctc_dev_sequence_probe_next_id", nextStopId);
+    quests.SetFact(n"nctc_dev_sequence_probe_next_sequence", nextSequence);
+    quests.SetFact(n"nctc_dev_sequence_probe_count", stopCount);
+    quests.SetFact(n"nctc_dev_sequence_probe_id", quests.GetFact(n"nctc_dev_sequence_probe_id") + 1);
+  }
+
+  // Same rule for capture profiles: expose the exact validity facts that
+  // decide whether the successor can receive a traffic command.
+  public static func PublishProfileProbe(game: GameInstance, stopId: Int32) -> Void {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
+    let prefix: String = "nctc_external_capture_id" + ToString(stopId) + "_";
+    if !IsDefined(quests) { return; };
+    quests.SetFact(n"nctc_dev_profile_probe_stop_id", stopId);
+    quests.SetFact(n"nctc_dev_profile_probe_spawn_valid", quests.GetFact(StringToName(prefix + "spawn_valid")));
+    quests.SetFact(n"nctc_dev_profile_probe_approach_valid", quests.GetFact(StringToName(prefix + "approach_valid")));
+    quests.SetFact(n"nctc_dev_profile_probe_berth_valid", quests.GetFact(StringToName(prefix + "berth_valid")));
+    quests.SetFact(n"nctc_dev_profile_probe_spawn_x_mm", quests.GetFact(StringToName(prefix + "spawn_x")));
+    quests.SetFact(n"nctc_dev_profile_probe_spawn_y_mm", quests.GetFact(StringToName(prefix + "spawn_y")));
+    quests.SetFact(n"nctc_dev_profile_probe_berth_x_mm", quests.GetFact(StringToName(prefix + "berth_x")));
+    quests.SetFact(n"nctc_dev_profile_probe_berth_y_mm", quests.GetFact(StringToName(prefix + "berth_y")));
+    quests.SetFact(n"nctc_dev_profile_probe_id", quests.GetFact(n"nctc_dev_profile_probe_id") + 1);
+  }
+
   public static func TryGet(game: GameInstance, line: String, stopId: Int32, out spawn: Vector4, out approach: Vector4, out berth: Vector4, out yaw: Float) -> Bool {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
     let requestedLine: Int32 = StringToInt(line, -1);
@@ -241,55 +287,50 @@ public class NCTCServiceProfiles {
     let index: Int32 = 0;
     let stopLine: Int32;
     let stopId: Int32;
-    let stopSequence: Int32;
-    let currentSequence: Int32 = -1;
-    let nextSequence: Int32 = 2147483647;
-    let firstSequence: Int32 = 2147483647;
+    let currentIndex: Int32 = -1;
+    let firstIndex: Int32 = -1;
     let firstId: Int32 = 0;
     let firstPosition: Vector4;
+    let currentFound: Bool = false;
     let prefix: String;
-    if !IsDefined(quests) || requestedLine < 1 || !Equals(quests.GetFact(n"nctc_external_network_ready"), 1) { return false; };
+    if !IsDefined(quests) || requestedLine < 1 || !Equals(quests.GetFact(n"nctc_external_network_ready"), 1) {
+      NCTCServiceProfiles.PublishSequenceProbe(game, 1, requestedLine, currentStopId, -1, 0, -1, 0);
+      return false;
+    };
     count = quests.GetFact(n"nctc_external_network_stop_count");
-    // IDs are persistent capture keys and are deliberately unrelated to route
-    // order. Resolve the current stop's explicit sequence first.
+    // The JSON stops array is the authored service order. IDs stay stable for
+    // survey captures, but must not decide where a line goes next: deleting
+    // or recreating a stop deliberately leaves its ID unrelated to its order.
     while index < count {
       prefix = "nctc_external_stop_" + ToString(index) + "_";
       stopLine = quests.GetFact(StringToName(prefix + "line"));
       stopId = quests.GetFact(StringToName(prefix + "id"));
-      if Equals(stopLine, requestedLine) && Equals(stopId, currentStopId) {
-        currentSequence = quests.GetFact(StringToName(prefix + "sequence"));
-        break;
-      };
-      index += 1;
-    };
-    if currentSequence < 0 { return false; };
-
-    index = 0;
-    while index < count {
-      prefix = "nctc_external_stop_" + ToString(index) + "_";
-      stopLine = quests.GetFact(StringToName(prefix + "line"));
       if Equals(stopLine, requestedLine) {
-        stopId = quests.GetFact(StringToName(prefix + "id"));
-        stopSequence = quests.GetFact(StringToName(prefix + "sequence"));
-        if stopSequence < firstSequence {
-          firstSequence = stopSequence;
+        if firstId < 1 {
           firstId = stopId;
           firstPosition = NCTCServiceProfiles.ReadVector(quests, prefix);
+          firstIndex = index;
         };
-        if stopSequence > currentSequence && stopSequence < nextSequence {
-          nextSequence = stopSequence;
+        if currentFound {
           nextStopId = stopId;
           nextStop = NCTCServiceProfiles.ReadVector(quests, prefix);
+          NCTCServiceProfiles.PublishSequenceProbe(game, nextStopId > 0 ? 3 : 4, requestedLine, currentStopId, currentIndex, nextStopId, index, count);
+          return nextStopId > 0;
+        };
+        if Equals(stopId, currentStopId) {
+          currentFound = true;
+          currentIndex = index;
         };
       };
       index += 1;
     };
-    if nextSequence < 2147483647 { return nextStopId > 0; };
-    if firstId > 0 {
+    if currentFound && firstId > 0 {
       nextStopId = firstId;
       nextStop = firstPosition;
+      NCTCServiceProfiles.PublishSequenceProbe(game, 5, requestedLine, currentStopId, currentIndex, nextStopId, firstIndex, count);
       return true;
     };
+    NCTCServiceProfiles.PublishSequenceProbe(game, currentFound ? 6 : 2, requestedLine, currentStopId, currentIndex, 0, -1, count);
     return false;
   }
 
@@ -370,6 +411,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
     if !IsDefined(quests) { return; };
     quests.SetFact(n"nctc_dev_command_state", this.controller.GetRouteCommandStatusCode());
+    quests.SetFact(n"nctc_dev_previous_command_state", this.controller.GetPreviousRouteCommandStatusCode());
     quests.SetFact(n"nctc_dev_command_speed_mm", Cast<Int32>(this.controller.GetCurrentSpeed() * 1000.00));
     this.PublishLoopDiagnostic(36, this.requestedStopId);
   }
@@ -581,7 +623,11 @@ public class NCTCTransitSystem extends ScriptableSystem {
       };
       // Intermediate route point: it has been reached in order, but no one
       // requested service there. Replace the completed command immediately
-      // so the bus continues without doors or a dwell state.
+      // so the bus continues without doors or a dwell state. SendCommand does
+      // not replace an in-flight AIVehicleDriveToPointCommand by itself: the
+      // old command remains active and can hold the bus at this stop. End it
+      // before the deferred command for the next berth is submitted.
+      this.controller.CancelTrafficRoute();
       if !this.AdvanceToNextStop() {
         this.PublishLoopDiagnostic(34, 0);
         this.ScheduleDispatch(1.00);
@@ -616,6 +662,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.PublishLoopDiagnostic(4, 0);
       return false;
     };
+    NCTCServiceProfiles.PublishProfileProbe(this.GetGameInstance(), nextStopId);
     if !NCTCServiceProfiles.TryGet(this.GetGameInstance(), this.requestedLine, nextStopId, nextSpawn, nextApproach, nextBerth, nextYaw) {
       this.PublishLoopDiagnostic(5, nextStopId);
       return false;

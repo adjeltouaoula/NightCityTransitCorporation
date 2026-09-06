@@ -30,6 +30,9 @@ local runtime_session_id = 0
 local last_published_network_revision = -1
 local last_dispatch_log_id = 0
 local last_loop_log_id = 0
+local last_sequence_probe_id = 0
+local last_profile_probe_id = 0
+local fact
 local deduplicate_same_line_stops
 local normalize_captures
 local ensure_stop_ids
@@ -47,12 +50,53 @@ local function load_settings()
 end
 
 local function log(message)
+  print("[NCTC Route] " .. message)
   if not LOG_FILE then return end
   local file = io.open(LOG_FILE, "a")
   if file then
     file:write(os.date("%Y-%m-%d %H:%M:%S") .. " " .. message .. "\n")
     file:close()
   end
+end
+
+local function log_sequence_probe(quests)
+  local id = fact(quests, "nctc_dev_sequence_probe_id")
+  if id < last_sequence_probe_id then last_sequence_probe_id = id - 1 end
+  if id <= last_sequence_probe_id then return end
+  last_sequence_probe_id = id
+  local states = {
+    [1] = "network not ready / invalid line",
+    [2] = "current stop ID absent from published line",
+    [3] = "successor selected by JSON array order",
+    [4] = "candidate array entry had no stop ID",
+    [5] = "wrapped to first line entry",
+    [6] = "no stops published for requested line"
+  }
+  log("sequence probe #" .. tostring(id)
+    .. ": " .. (states[fact(quests, "nctc_dev_sequence_probe_code")] or "unknown")
+    .. " | L" .. tostring(fact(quests, "nctc_dev_sequence_probe_line"))
+    .. " current=" .. tostring(fact(quests, "nctc_dev_sequence_probe_current_id"))
+    .. " index=" .. tostring(fact(quests, "nctc_dev_sequence_probe_current_sequence"))
+    .. " next=" .. tostring(fact(quests, "nctc_dev_sequence_probe_next_id"))
+    .. " index=" .. tostring(fact(quests, "nctc_dev_sequence_probe_next_sequence"))
+    .. " count=" .. tostring(fact(quests, "nctc_dev_sequence_probe_count")))
+end
+
+local function log_profile_probe(quests)
+  local id = fact(quests, "nctc_dev_profile_probe_id")
+  if id < last_profile_probe_id then last_profile_probe_id = id - 1 end
+  if id <= last_profile_probe_id then return end
+  last_profile_probe_id = id
+  log("profile probe #" .. tostring(id)
+    .. ": stopId=" .. tostring(fact(quests, "nctc_dev_profile_probe_stop_id"))
+    .. " spawnValid=" .. tostring(fact(quests, "nctc_dev_profile_probe_spawn_valid"))
+    .. " approachValid=" .. tostring(fact(quests, "nctc_dev_profile_probe_approach_valid"))
+    .. " berthValid=" .. tostring(fact(quests, "nctc_dev_profile_probe_berth_valid"))
+    .. string.format(" | spawn=(%.3f, %.3f) berth=(%.3f, %.3f)",
+      fact(quests, "nctc_dev_profile_probe_spawn_x_mm") / 1000.0,
+      fact(quests, "nctc_dev_profile_probe_spawn_y_mm") / 1000.0,
+      fact(quests, "nctc_dev_profile_probe_berth_x_mm") / 1000.0,
+      fact(quests, "nctc_dev_profile_probe_berth_y_mm") / 1000.0))
 end
 
 local function round3(value)
@@ -157,18 +201,47 @@ local function load_network()
   return network
 end
 
-local function fact(quests, name)
-  local ok, value = pcall(function() return quests:GetFact(CName.new(name)) end)
-  if ok and type(value) == "number" then return value end
+fact = function(quests, name)
+  -- Dynamic NCTC names (for example nctc_external_stop_12_sequence) must
+  -- use the String quest-fact API. The generic GetFact overload can return
+  -- a non-fact numeric value for those dynamic names without throwing.
+  local ok, value = pcall(function() return quests:GetFactStr(name) end)
+  value = tonumber(value)
+  if ok and value ~= nil then return math.floor(value) end
+  ok, value = pcall(function() return quests:GetFact(CName.new(name)) end)
+  value = tonumber(value)
+  if ok and value ~= nil then return math.floor(value) end
   ok, value = pcall(function() return quests:GetFact(name) end)
+  value = tonumber(value)
+  if ok and value ~= nil then return math.floor(value) end
+  return 0
+end
+
+-- CET exposes both String and CName overloads for quest facts. Keep this
+-- separate diagnostic read so we can prove which overload returns the value
+-- actually stored by the game before changing synchronization behavior.
+local function fact_as_string(quests, name)
+  local ok, value = pcall(function() return quests:GetFactStr(name) end)
+  value = tonumber(value)
+  if ok and value ~= nil then return math.floor(value) end
+  return 0
+end
+
+-- Separate from the quest-system object calls above: CET also exposes the
+-- engine's direct convenience getter. This is diagnostic-only. We need to
+-- establish whether it returns the stored integer or the same unexpected
+-- value before changing the synchronization contract.
+local function game_fact(name)
+  local ok, value = pcall(function() return Game.GetFact(name) end)
   if ok and type(value) == "number" then return value end
   return 0
 end
 
 local function set_fact(quests, name, value)
-  local ok = pcall(function() quests:SetFact(CName.new(name), value) end)
+  value = math.floor(tonumber(value) or 0)
+  local ok = pcall(function() quests:SetFactStr(name, value) end)
   if ok then return true end
-  ok = pcall(function() quests:SetFact(name, value) end)
+  ok = pcall(function() quests:SetFact(CName.new(name), value) end)
   return ok
 end
 
@@ -612,9 +685,17 @@ local function synchronize_external_survey(quests)
   -- Do not use the session token as a perpetual trigger: some game versions
   -- do not retain that fact reliably and would rebuild the entire network
   -- every second while a service is in motion.
-  local needs_sync = fact(quests, "nctc_external_network_revision") ~= revision
+  local quest_revision = fact(quests, "nctc_external_network_revision")
+  local string_quest_revision = fact_as_string(quests, "nctc_external_network_revision")
+  local direct_revision = game_fact("nctc_external_network_revision")
+  local needs_sync = quest_revision ~= revision
     or last_published_network_revision ~= revision
   if not needs_sync then return end
+  log("sync probe: jsonRevision=" .. tostring(revision)
+    .. " questRevision=" .. tostring(quest_revision)
+    .. " stringQuestRevision=" .. tostring(string_quest_revision)
+    .. " directRevision=" .. tostring(direct_revision)
+    .. " memoryRevision=" .. tostring(last_published_network_revision))
 
   -- Transaction boundary: redscript must not consume capture facts while CET
   -- is replacing them. Ready is restored only after every coordinate, valid
@@ -646,7 +727,9 @@ local function synchronize_external_survey(quests)
   set_fact(quests, "nctc_external_network_session", runtime_session_id)
   set_fact(quests, "nctc_external_network_ready", 1)
   last_published_network_revision = revision
-  log("published external network transaction revision " .. tostring(revision))
+  log("published external network transaction revision " .. tostring(revision)
+    .. " readbackDirect=" .. tostring(game_fact("nctc_external_network_revision"))
+    .. " readbackCName=" .. tostring(fact(quests, "nctc_external_network_revision")))
 end
 
 -- Dev-only dispatch telemetry, written by NCTCTransitSystem just before it
@@ -718,6 +801,7 @@ local function log_service_loop(quests)
   if code == 36 then
     local command_states = { [0] = "missing", [1] = "active", [2] = "success", [3] = "failed/cancelled" }
     command_extra = " commandState=" .. (command_states[fact(quests, "nctc_dev_command_state")] or "unknown")
+      .. " previousCommandState=" .. (command_states[fact(quests, "nctc_dev_previous_command_state")] or "unknown")
       .. " speed=" .. string.format("%.2f", fact(quests, "nctc_dev_command_speed_mm") / 1000.0)
   end
   local session = fact(quests, "nctc_dev_service_session")
@@ -736,6 +820,8 @@ registerForEvent("onUpdate", function()
   end
   log_dispatch_attempt(quests)
   log_service_loop(quests)
+  log_sequence_probe(quests)
+  log_profile_probe(quests)
   local event_id = fact(quests, "nctc_survey_event_id")
   -- A save load restores the old event counter. Treat that first observed
   -- value as a baseline, never as a brand-new capture that could overwrite
