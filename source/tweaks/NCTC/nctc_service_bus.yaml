@@ -8,8 +8,7 @@ Vehicle.nctc_service_mahir_mt28_coach:
   tags:
     - !append n"NCTCServiceBus"
   # Keep the vanilla Mahir entity exactly as in the validated NCBN 0.0.13
-  # passenger build. Seat/door behaviour is added at runtime; replacing the
-  # entity reintroduces Mahir Coach driver state and custom body branding.
+  # passenger build. Seat/door behaviour is added at runtime.
 
 NCTCRequestW01:
   $base: SellectDestination

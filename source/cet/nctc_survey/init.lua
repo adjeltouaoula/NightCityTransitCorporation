@@ -559,8 +559,6 @@ local function publish_network(quests, network)
     set_fact(quests, "nctc_external_line_" .. tostring(line) .. "_color", color)
   end
   set_fact(quests, "nctc_external_network_stop_count", count)
-  set_fact(quests, "nctc_external_network_ready", 1)
-  set_fact(quests, "nctc_external_network_revision", network.revision or 1)
 end
 
 -- Redscript deliberately cannot read files. CET restores the latest surveyed
@@ -604,9 +602,20 @@ local function synchronize_external_survey(quests)
   local revision = network.revision or 1
   -- Quest facts are part of a save and can be older than the external JSON.
   -- Stamp every game session so the JSON is always republished on launch.
-  if fact(quests, "nctc_external_network_revision") ~= revision or fact(quests, "nctc_external_network_session") ~= runtime_session_id then
-    publish_network(quests, network)
-    set_fact(quests, "nctc_external_network_session", runtime_session_id)
+  local needs_sync = fact(quests, "nctc_external_network_revision") ~= revision
+    or fact(quests, "nctc_external_network_session") ~= runtime_session_id
+  if not needs_sync then return end
+
+  -- Transaction boundary: redscript must not consume capture facts while CET
+  -- is replacing them. Ready is restored only after every coordinate, valid
+  -- flag and revision marker belongs to the same network snapshot.
+  set_fact(quests, "nctc_external_network_ready", 0)
+  publish_network(quests, network)
+  for _, stop in ipairs(network.stops or {}) do
+    local prefix = "nctc_external_capture_id" .. tostring(stop.id or 0) .. "_"
+    set_fact(quests, prefix .. "spawn_valid", 0)
+    set_fact(quests, prefix .. "approach_valid", 0)
+    set_fact(quests, prefix .. "berth_valid", 0)
   end
   -- Every passage receives its own fact namespace. Future enabled routes can
   -- consume their capture directly; no information is thrown away when a
@@ -623,6 +632,10 @@ local function synchronize_external_survey(quests)
     log("restored surveyed passage from external revision " .. tostring(revision))
   end
   set_fact(quests, "nctc_external_survey_revision", revision)
+  set_fact(quests, "nctc_external_network_revision", revision)
+  set_fact(quests, "nctc_external_network_session", runtime_session_id)
+  set_fact(quests, "nctc_external_network_ready", 1)
+  log("published external network transaction revision " .. tostring(revision))
 end
 
 -- Dev-only dispatch telemetry, written by NCTCTransitSystem just before it
@@ -651,6 +664,13 @@ local function log_service_loop(quests)
   local line = fact(quests, "nctc_dev_loop_line")
   local stop_id = fact(quests, "nctc_dev_loop_stop_id")
   local next_stop_id = fact(quests, "nctc_dev_loop_next_stop_id")
+  local target_x = fact(quests, "nctc_dev_loop_target_x_mm") / 1000.0
+  local target_y = fact(quests, "nctc_dev_loop_target_y_mm") / 1000.0
+  local target_z = fact(quests, "nctc_dev_loop_target_z_mm") / 1000.0
+  local bus_x = fact(quests, "nctc_dev_loop_bus_x_mm") / 1000.0
+  local bus_y = fact(quests, "nctc_dev_loop_bus_y_mm") / 1000.0
+  local bus_z = fact(quests, "nctc_dev_loop_bus_z_mm") / 1000.0
+  local target_distance = fact(quests, "nctc_dev_loop_target_distance_mm") / 1000.0
   local states = {
     [1] = "arrived and opened doors",
     [2] = "waiting: V is not mounted in this bus",
@@ -675,7 +695,9 @@ local function log_service_loop(quests)
     [35] = "route loop: active drive command failed before 18m zone"
   }
   log("service loop " .. tostring(id) .. ": L" .. tostring(line) .. " stopId " .. tostring(stop_id)
-    .. " -> " .. tostring(next_stop_id) .. " " .. (states[code] or ("state " .. tostring(code))))
+    .. " -> " .. tostring(next_stop_id) .. " " .. (states[code] or ("state " .. tostring(code)))
+    .. string.format(" | bus=(%.3f, %.3f, %.3f) target=(%.3f, %.3f, %.3f) distance=%.1fm",
+      bus_x, bus_y, bus_z, target_x, target_y, target_z, target_distance))
 end
 
 registerForEvent("onUpdate", function()

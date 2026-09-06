@@ -54,6 +54,10 @@ public class NCTCServiceBusController extends IScriptable {
 
   public func IsReady() -> Bool { return IsDefined(this.bus) && this.bus.IsAttached(); }
 
+  public func GetWorldPosition() -> Vector4 {
+    return this.IsReady() ? this.bus.GetWorldPosition() : new Vector4(0.00, 0.00, 0.00, 0.00);
+  }
+
   public func IsNear(position: Vector4, radius: Float) -> Bool {
     return this.IsReady() && Vector4.Distance(this.bus.GetWorldPosition(), position) <= radius;
   }
@@ -206,6 +210,11 @@ public class NCTCServiceProfiles {
     spawn = NCTCServiceProfiles.ReadVector(quests, prefix + "spawn_");
     approach = NCTCServiceProfiles.ReadVector(quests, prefix + "approach_");
     berth = NCTCServiceProfiles.ReadVector(quests, prefix + "berth_");
+    // A profile can be observed while CET is republishing its validity facts
+    // but before all coordinate facts are restored. Never route a vehicle to
+    // the world origin, which manifests in game as an unexplained U-turn.
+    if AbsF(spawn.X) < 1.00 && AbsF(spawn.Y) < 1.00 { return false; };
+    if AbsF(berth.X) < 1.00 && AbsF(berth.Y) < 1.00 { return false; };
     yaw = Cast<Float>(quests.GetFact(StringToName(prefix + "spawn_yaw"))) / 1000.00;
     return true;
   }
@@ -305,16 +314,35 @@ public class NCTCTransitSystem extends ScriptableSystem {
 
   private func PublishLoopDiagnostic(code: Int32, nextStopId: Int32) -> Void {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    let busPosition: Vector4;
+    let targetPosition: Vector4 = this.hasSurveyProfile ? this.surveyBerth : this.requestedStop;
     if !IsDefined(quests) { return; };
     quests.SetFact(n"nctc_dev_loop_code", code);
     quests.SetFact(n"nctc_dev_loop_line", StringToInt(this.requestedLine, -1));
     quests.SetFact(n"nctc_dev_loop_stop_id", this.requestedStopId);
     quests.SetFact(n"nctc_dev_loop_next_stop_id", nextStopId);
+    quests.SetFact(n"nctc_dev_loop_target_x_mm", Cast<Int32>(targetPosition.X * 1000.00));
+    quests.SetFact(n"nctc_dev_loop_target_y_mm", Cast<Int32>(targetPosition.Y * 1000.00));
+    quests.SetFact(n"nctc_dev_loop_target_z_mm", Cast<Int32>(targetPosition.Z * 1000.00));
+    if IsDefined(this.controller) && this.controller.IsReady() {
+      busPosition = this.controller.GetWorldPosition();
+      quests.SetFact(n"nctc_dev_loop_bus_x_mm", Cast<Int32>(busPosition.X * 1000.00));
+      quests.SetFact(n"nctc_dev_loop_bus_y_mm", Cast<Int32>(busPosition.Y * 1000.00));
+      quests.SetFact(n"nctc_dev_loop_bus_z_mm", Cast<Int32>(busPosition.Z * 1000.00));
+      quests.SetFact(n"nctc_dev_loop_target_distance_mm", Cast<Int32>(Vector4.Distance(busPosition, targetPosition) * 1000.00));
+    };
     quests.SetFact(n"nctc_dev_loop_id", quests.GetFact(n"nctc_dev_loop_id") + 1);
   }
 
   public static func Get(game: GameInstance) -> ref<NCTCTransitSystem> {
     return GameInstance.GetScriptableSystemsContainer(game).Get(NameOf<NCTCTransitSystem>()) as NCTCTransitSystem;
+  }
+
+  // The cabin runtime publishes a fact while V is standing in the service
+  // bus.  Collision hooks additionally verify this exact entity ID, so an
+  // unrelated traffic vehicle can never lose its normal impact behaviour.
+  public func IsActiveServiceBus(entityID: EntityID) -> Bool {
+    return EntityID.IsDefined(this.busEntityID) && Equals(this.busEntityID, entityID);
   }
 
   public func RequestService(line: String, stopId: Int32, stop: Vector4) -> Bool {

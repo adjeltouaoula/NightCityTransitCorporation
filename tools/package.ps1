@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "0.2.9-hub-markers",
+    [string]$Version = "0.2.0",
     [switch]$IncludeSurveyRuntime
 )
 
@@ -19,9 +19,8 @@ Get-ChildItem -LiteralPath $distRoot -Filter "NightCityTransitCorporation-*.zip"
 }
 Copy-Item -Path (Join-Path $projectRoot "source\redscript\NCTC\*.reds") -Destination (Join-Path $stageRoot "r6\scripts\NCTC")
 Copy-Item -Path (Join-Path $projectRoot "source\tweaks\NCTC\*.yaml") -Destination (Join-Path $stageRoot "r6\tweaks\NCTC")
-# NCTC deliberately ships no vehicle archive. The service bus inherits the
-# vanilla Mahir entity; the historical archive contains the rejected custom
-# coach entity that exposed driver state and body branding.
+# Experimental vehicle-physics archives remain excluded until their collision
+# setup is proven safe and useful.
 if ($IncludeSurveyRuntime -and (Test-Path -LiteralPath (Join-Path $projectRoot "source\cet\nctc_survey\init.lua"))) {
     New-Item -ItemType Directory -Force (Join-Path $stageRoot "bin\x64\plugins\cyber_engine_tweaks\mods\nctc_survey") | Out-Null
     Copy-Item -Path (Join-Path $projectRoot "source\cet\nctc_survey\*") -Destination (Join-Path $stageRoot "bin\x64\plugins\cyber_engine_tweaks\mods\nctc_survey")

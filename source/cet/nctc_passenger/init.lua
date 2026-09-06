@@ -188,6 +188,66 @@ local function mountPassenger(seat)
 end
 
 registerForEvent("onInit", function()
+    -- This is the actual vanilla entry point for a pedestrian struck by a car.
+    -- Crucially, OnCarHitPlayer still carries the real carId; the damage code
+    -- later replaces both source and instigator with the player itself.
+    ObserveBefore("PlayerPuppet", "OnCarHitPlayer", function(player, evt)
+        if not player or not evt then return end
+        local bus = findServiceBus()
+        local function idText(value)
+            local ok, valueText = pcall(function() return EntityID.ToDebugString(value) end)
+            return ok and tostring(valueText) or tostring(value)
+        end
+        local car = nil
+        pcall(function() car = Game.FindEntityByID(evt.carId) end)
+        local p = bus and localPosition(bus, player) or nil
+        local sameBus = false
+        if bus then
+            pcall(function() sameBus = bus:GetEntityID().hash == evt.carId.hash end)
+        end
+        print("[NCTC CarHit Pre]"
+            .. " carId=" .. idText(evt.carId)
+            .. " activeBus=" .. (bus and idText(bus:GetEntityID()) or "none")
+            .. " sameBus=" .. tostring(sameBus)
+            .. " resolvedCar=" .. tostring(car ~= nil)
+            .. " hitDirection=" .. tostring(evt.hitDirection)
+            .. " separationImpulse=" .. tostring(evt.seperationImpulse)
+            .. " localPosition=" .. (p and string.format("x=%.3f,y=%.3f,z=%.3f", p.x, p.y, p.z) or "none")
+            .. " insideGeometry=" .. tostring(bus ~= nil and playerIsInside(bus, player))
+            .. " insideFact=" .. tostring(getFact("nctc_player_in_service_bus")))
+    end)
+
+    -- Capture the native request before VehicleKnockdown is applied. This
+    -- preserves the source arguments that PlayerPuppet's later callback lacks.
+    ObserveBefore("StatusEffectSystem", "ApplyStatusEffect", function(_, targetID, statusEffectID, instigatorStaticDataID, instigatorEntityID)
+        local okStatus, statusText = pcall(function() return TweakDBID.ToStringDEBUG(statusEffectID) end)
+        statusText = okStatus and tostring(statusText) or tostring(statusEffectID)
+        if not string.find(statusText, "VehicleKnockdown", 1, true) then return end
+
+        local player, bus = Game.GetPlayer(), findServiceBus()
+        local function idText(value)
+            local ok, valueText = pcall(function() return EntityID.ToDebugString(value) end)
+            return ok and tostring(valueText) or tostring(value)
+        end
+        local function recordText(entity)
+            if not entity then return "none" end
+            local ok, value = pcall(function() return TweakDBID.ToStringDEBUG(entity:GetRecordID()) end)
+            return ok and tostring(value) or "unknown"
+        end
+        local instigator = nil
+        pcall(function() instigator = Game.FindEntityByID(instigatorEntityID) end)
+        print("[NCTC Collision PreApply] VehicleKnockdown"
+            .. " target=" .. idText(targetID)
+            .. " status=" .. statusText
+            .. " instigatorStaticData=" .. tostring(instigatorStaticDataID)
+            .. " instigator=" .. idText(instigatorEntityID)
+            .. " instigatorRecord=" .. recordText(instigator)
+            .. " player=" .. (player and idText(player:GetEntityID()) or "none")
+            .. " bus=" .. (bus and idText(bus:GetEntityID()) or "none")
+            .. " busRecord=" .. recordText(bus)
+            .. " insideFact=" .. tostring(getFact("nctc_player_in_service_bus")))
+    end)
+
     Observe("InteractionUIBase", "OnInitialize", function(this) NCBN.interactionUI = this end)
     Observe("InteractionUIBase", "OnDialogsData", function(this) NCBN.interactionUI = this end)
     Observe("InteractionUIBase", "OnUninitialize", function(this) if NCBN.interactionUI == this then NCBN.interactionUI = nil end end)
