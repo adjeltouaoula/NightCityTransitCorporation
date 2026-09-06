@@ -319,8 +319,14 @@ public class NCTCServiceProfiles {
 
 public class NCTCServiceDispatchCallback extends DelayCallback {
   private let system: wref<NCTCTransitSystem>;
-  public func Configure(system: ref<NCTCTransitSystem>) -> Void { this.system = system; }
-  public func Call() -> Void { if IsDefined(this.system) { this.system.UpdateRequestedService(); }; }
+  private let token: Int32;
+  public func Configure(system: ref<NCTCTransitSystem>, token: Int32) -> Void {
+    this.system = system;
+    this.token = token;
+  }
+  public func Call() -> Void {
+    if IsDefined(this.system) { this.system.UpdateRequestedServiceForToken(this.token); };
+  }
 }
 
 // Runtime owner for exactly one summoned service bus.
@@ -352,6 +358,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let telemetryPolls: Int32;
   private let adeRouteLeg: Bool;
   private let adeArrivalSignal: Bool;
+  // Only the most recently scheduled loop callback may mutate route state.
+  // This prevents a delayed retry from an older leg replacing a newer target.
+  private let dispatchToken: Int32;
 
   private func PublishRouteDisplay(nextStopId: Int32) -> Void {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
@@ -510,8 +519,14 @@ public class NCTCTransitSystem extends ScriptableSystem {
 
   private func ScheduleDispatch(delay: Float) -> Void {
     let callback: ref<NCTCServiceDispatchCallback> = new NCTCServiceDispatchCallback();
-    callback.Configure(this);
+    this.dispatchToken += 1;
+    callback.Configure(this, this.dispatchToken);
     GameInstance.GetDelaySystem(this.GetGameInstance()).DelayCallback(callback, delay, false);
+  }
+
+  public func UpdateRequestedServiceForToken(token: Int32) -> Void {
+    if NotEquals(token, this.dispatchToken) { return; };
+    this.UpdateRequestedService();
   }
 
   // Direct CET bridge used by the passenger-seat module. Passenger workspots
