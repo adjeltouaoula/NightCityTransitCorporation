@@ -19,6 +19,13 @@ Get-ChildItem -LiteralPath $distRoot -Filter "NightCityTransitCorporation-*.zip"
     Move-Item -LiteralPath $_.FullName -Destination $oldArchivePath
 }
 Copy-Item -Path (Join-Path $projectRoot "source\redscript\NCTC\*.reds") -Destination (Join-Path $stageRoot "r6\scripts\NCTC")
+# The ADE-owned experiment ships a narrowly patched driving_ai.reds so the
+# test can use a line-owned target rather than V's global waypoint.
+$nctcAdePatch = Join-Path $projectRoot "source\vendor\auto_drive_enhanced\driving_ai.reds"
+if (Test-Path -LiteralPath $nctcAdePatch) {
+    New-Item -ItemType Directory -Force (Join-Path $stageRoot "r6\scripts\auto_drive_enhanced") | Out-Null
+    Copy-Item -LiteralPath $nctcAdePatch -Destination (Join-Path $stageRoot "r6\scripts\auto_drive_enhanced\driving_ai.reds")
+}
 Copy-Item -Path (Join-Path $projectRoot "source\tweaks\NCTC\*.yaml") -Destination (Join-Path $stageRoot "r6\tweaks\NCTC")
 # Experimental vehicle-physics archives remain excluded until their collision
 # setup is proven safe and useful.

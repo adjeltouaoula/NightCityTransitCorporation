@@ -88,6 +88,11 @@ public class NCTCServiceBusController extends IScriptable {
     this.playerAboardSignal = value;
   }
 
+  public func IsPlayerSeated() -> Bool {
+    return this.IsReady()
+      && Equals(GameInstance.GetQuestsSystem(this.bus.GetGame()).GetFact(n"nctc_player_seated_in_service_bus"), 1);
+  }
+
   public func DistanceToPlayer() -> Float {
     let player: ref<PlayerPuppet>;
     if !this.IsReady() { return 0.00; };
@@ -109,6 +114,17 @@ public class NCTCServiceBusController extends IScriptable {
     callback.Configure(this.bus, this, target);
     GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.25, false);
     return true;
+  }
+
+  public func DriveWithEnhancedAutoDrive(target: Vector4) -> Bool {
+    let component: ref<AutoDriveComponent>;
+    let settings: ref<Settings>;
+    if !this.IsReady() || !this.IsPlayerSeated() || Vector4.IsXYZZero(target) { return false; };
+    component = this.bus.GetAutoDriveComponent_ADE();
+    settings = Settings.GetInstance(this.bus.GetGame());
+    if !IsDefined(component) || !IsDefined(settings) { return false; };
+    this.activeRouteCommand = null;
+    return component.StartAutoDriveToNCTC(target, Equals(settings.drivingAI, DrivingAIType.ModdedTraffic));
   }
 
   public func SetActiveRouteCommand(command: ref<AIVehicleDriveToPointCommand>) -> Void {
@@ -148,8 +164,11 @@ public class NCTCServiceBusController extends IScriptable {
   }
 
   public func ArriveAtStop() -> Void {
+    let component: ref<AutoDriveComponent>;
     if !this.IsReady() { return; };
     this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+    component = this.bus.GetAutoDriveComponent_ADE();
+    if IsDefined(component) && component.IsAutoDriving() { component.CancelAutoDrive(true); };
   }
 
   // The Mahir coach door is stateful. The old working prototype did not rely
@@ -331,6 +350,8 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let departureRequested: Bool;
   private let legPolls: Int32;
   private let telemetryPolls: Int32;
+  private let adeRouteLeg: Bool;
+  private let adeArrivalSignal: Bool;
 
   private func PublishRouteDisplay(nextStopId: Int32) -> Void {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
@@ -385,6 +406,21 @@ public class NCTCTransitSystem extends ScriptableSystem {
     return EntityID.IsDefined(this.busEntityID) && Equals(this.busEntityID, entityID);
   }
 
+  public func NotifyADEArrival(entityID: EntityID) -> Void {
+    if this.IsActiveServiceBus(entityID) {
+      this.adeArrivalSignal = true;
+    };
+  }
+
+  private func ConsumeADEArrivalSignal() -> Bool {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    if !IsDefined(quests) || !Equals(quests.GetFact(n"nctc_ade_destination_reached"), 1) || !this.controller.IsPlayerAboard() {
+      return false;
+    };
+    quests.SetFact(n"nctc_ade_destination_reached", 0);
+    return true;
+  }
+
   public func RequestService(line: String, stopId: Int32, stop: Vector4) -> Bool {
     let quests: ref<QuestsSystem>;
     let spawnDistance: Float;
@@ -413,6 +449,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.boardingDoorWasOpen = false;
     this.departureRequested = false;
     this.legPolls = 0;
+    this.adeRouteLeg = false;
+    this.adeArrivalSignal = false;
+    GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_ade_destination_reached", 0);
     GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_passenger_departure_requested", 0);
     this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), line, stopId, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);
     // Development-only diagnostic bridge. CET writes this to nctc_survey.log;
@@ -456,6 +495,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.boardingDoorWasOpen = false;
     this.departureRequested = false;
     this.legPolls = 0;
+    this.adeRouteLeg = false;
+    this.adeArrivalSignal = false;
+    GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_ade_destination_reached", 0);
     GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_passenger_departure_requested", 0);
     this.ClearRouteWaypoint();
     this.arrived = false;
@@ -540,7 +582,11 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.arrived = false;
       this.dwellPolls = 0;
       this.legPolls = 0;
-      this.driveCommandSent = this.controller.DriveToTraffic(this.surveyBerth, 8.00);
+      this.adeRouteLeg = this.controller.IsPlayerSeated();
+      this.adeArrivalSignal = false;
+      this.driveCommandSent = this.adeRouteLeg
+        ? this.controller.DriveWithEnhancedAutoDrive(this.surveyBerth)
+        : this.controller.DriveToTraffic(this.surveyBerth, 8.00);
       this.PublishLoopDiagnostic(this.driveCommandSent ? 32 : 33, this.requestedStopId);
       this.ScheduleDispatch(0.25);
       return;
@@ -550,6 +596,8 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.driveCommandSent = this.controller.DriveToTraffic(this.hasSurveyProfile ? this.surveyBerth : this.requestedStop, 8.00);
       this.legPolls = 0;
       this.telemetryPolls = 0;
+      this.adeRouteLeg = false;
+      this.adeArrivalSignal = false;
       this.PublishLoopDiagnostic(29, this.requestedStopId);
       this.ScheduleDispatch(0.25);
       return;
@@ -562,6 +610,29 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if this.telemetryPolls >= 10 {
       this.telemetryPolls = 0;
       this.PublishRouteCommandTelemetry();
+    };
+    // Passenger legs use ADE's own destination callback rather than NCTC's
+    // positional hand-off. The inbound, empty-bus leg remains traffic AI and
+    // therefore continues to use the baseline berth envelope below.
+    if this.adeRouteLeg {
+      if this.adeArrivalSignal || this.ConsumeADEArrivalSignal() {
+        this.adeArrivalSignal = false;
+        if !this.AdvanceToNextStop() {
+          this.PublishLoopDiagnostic(34, 0);
+          this.ScheduleDispatch(1.00);
+          return;
+        };
+        this.legPolls = 0;
+        this.adeRouteLeg = this.controller.IsPlayerSeated();
+        this.driveCommandSent = this.adeRouteLeg
+          ? this.controller.DriveWithEnhancedAutoDrive(this.surveyBerth)
+          : this.controller.DriveToTraffic(this.surveyBerth, 8.00);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 31 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      this.ScheduleDispatch(0.50);
+      return;
     };
     // Baseline service hand-off. ADE's direct traffic command does not expose
     // a terminal Success state to NCTC, so the authored berth envelope is the
