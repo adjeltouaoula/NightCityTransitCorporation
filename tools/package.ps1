@@ -6,7 +6,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$distRoot = Join-Path $projectRoot "dist"
+# Builds are kept in the canonical NCTC project distribution folder so every
+# development branch publishes to the same installable location.
+$distRoot = "C:\MyDocuments\NCBusNetwork\night-city-transit-corporation\dist"
 $oldDistRoot = Join-Path $distRoot "old"
 $stageRoot = Join-Path $projectRoot "tmp\package\NightCityTransitCorporation"
 $archivePath = Join-Path $distRoot "NightCityTransitCorporation-$Version.zip"
