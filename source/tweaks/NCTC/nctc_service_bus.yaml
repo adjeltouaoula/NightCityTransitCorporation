@@ -11,6 +11,9 @@ Vehicle.nctc_service_mahir_mt28_coach:
   # command directly, so the player-facing AutoDrive action must stay disabled.
   tags:
     - !append n"NCTCServiceBus"
+    # Auto Drive Enhanced reads this record tag before exposing its player
+    # AutoDrive action. NCTC still sends its own traffic commands directly.
+    - !append n"CannotAutoDrive"
   # Keep the vanilla Mahir entity exactly as in the validated NCBN 0.0.13
   # passenger build. Seat/door behaviour is added at runtime.
 
