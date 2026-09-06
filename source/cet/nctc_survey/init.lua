@@ -612,8 +612,12 @@ local function synchronize_external_survey(quests)
   -- Do not use the session token as a perpetual trigger: some game versions
   -- do not retain that fact reliably and would rebuild the entire network
   -- every second while a service is in motion.
-  local needs_sync = fact(quests, "nctc_external_network_revision") ~= revision
-    or last_published_network_revision ~= revision
+  -- The game may restore quest facts from the save while CET stays alive.
+  -- They are a transport channel, not an authoritative revision store: using
+  -- them here caused the entire network to be republished every second.
+  -- This Lua runtime starts fresh on game load, so its in-memory acknowledgement
+  -- safely gives us one initial publish and then only real JSON revisions.
+  local needs_sync = last_published_network_revision ~= revision
   if not needs_sync then return end
 
   -- Transaction boundary: redscript must not consume capture facts while CET
