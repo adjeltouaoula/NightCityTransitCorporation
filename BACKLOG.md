@@ -1,7 +1,7 @@
 # NCTC backlog
 
 - **Priority — called-stop service:** an "await bus" request must reserve that exact stop as a service stop. When the bus reaches it, it must stop, open its doors, wait for boarding, then continue the line. Only unrequested intermediate stops may be passed without stopping.
-- **Priority — uninterrupted pass-through:** passage points and unrequested intermediate stops must never visibly dwell, even for a fraction of a second. Hand the traffic command to the next route target early enough that the Mahir crosses the point continuously; this must not alter the separate service-stop behaviour.
+- **Uninterrupted pass-through:** passage points and unrequested intermediate stops must never visibly dwell, even for a fraction of a second. Hand the traffic command to the next route target early enough that the Mahir crosses the point continuously; this must not alter the separate service-stop behaviour.
 - **NCTC map navigation:** selecting an NCTC marker must keep it tracked after closing and reopening the world map. Its first-person waypoint icon is currently the broken red icon with a yellow outline; replace it with a valid NCTC/vanilla navigation visual.
 - Expand the developer line-colour picker from 7 to **15 highly distinguishable presets** for map icons and hub text. The renderer itself supports arbitrary RGB/HDR colours; this is an authoring/UI palette task.
 - Remove the AutoDrive interaction from the service bus; NCTC must never expose player AutoDrive controls.
