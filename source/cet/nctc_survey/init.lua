@@ -963,6 +963,9 @@ local function log_service_loop(quests)
   local berth_longitudinal = fact(quests, "nctc_dev_loop_berth_longitudinal_mm") / 1000.0
   local berth_lateral = fact(quests, "nctc_dev_loop_berth_lateral_mm") / 1000.0
   local berth_speed = fact(quests, "nctc_dev_loop_berth_speed_mm") / 1000.0
+  local dwell_polls = fact(quests, "nctc_dev_loop_dwell_polls")
+  local player_aboard = fact(quests, "nctc_dev_loop_player_aboard")
+  local mount_request = fact(quests, "nctc_dev_loop_mount_request")
   local states = {
     [1] = "arrived and opened doors",
     [2] = "waiting: V is not mounted in this bus",
@@ -994,6 +997,12 @@ local function log_service_loop(quests)
   if code == 29 or code == 31 or code == 32 then
     command_extra = " minDistance=" .. string.format("%.2fm", fact(quests, "nctc_dev_command_minimum_distance_mm") / 1000.0)
       .. string.format(" aiTarget=(%.3f, %.3f, %.3f)", ai_target_x, ai_target_y, ai_target_z)
+  end
+  if code == 30 or code == 32 then
+    command_extra = command_extra
+      .. " dwell=" .. tostring(dwell_polls)
+      .. " aboard=" .. tostring(player_aboard)
+      .. " mountRequest=" .. tostring(mount_request)
   end
   if code == 36 then
     local command_states = { [0] = "missing", [1] = "active", [2] = "success", [3] = "failed/cancelled" }

@@ -530,6 +530,11 @@ public class NCTCTransitSystem extends ScriptableSystem {
     quests.SetFact(n"nctc_dev_loop_berth_longitudinal_mm", 0);
     quests.SetFact(n"nctc_dev_loop_berth_lateral_mm", 0);
     quests.SetFact(n"nctc_dev_loop_berth_speed_mm", 0);
+    // Diagnostics only: record exactly why a service stop is about to leave.
+    // These facts do not participate in the route decision.
+    quests.SetFact(n"nctc_dev_loop_dwell_polls", this.dwellPolls);
+    quests.SetFact(n"nctc_dev_loop_player_aboard", IsDefined(this.controller) && this.controller.IsPlayerAboard() ? 1 : 0);
+    quests.SetFact(n"nctc_dev_loop_mount_request", quests.GetFact(n"nctc_passenger_departure_requested"));
     if IsDefined(this.controller) && this.controller.IsReady() {
       busPosition = this.controller.GetWorldPosition();
       quests.SetFact(n"nctc_dev_loop_bus_x_mm", Cast<Int32>(busPosition.X * 1000.00));

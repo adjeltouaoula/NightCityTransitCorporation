@@ -179,6 +179,9 @@ local function mountPassenger(seat)
     -- the workspot back from the Mahir is unreliable in CET.
     NCBN.passengerMountRequested = true
     NCBN.mountRequestDeadline = os.clock() + 5.0
+    print("[NCBN] Mount requested seat=" .. seat.id
+        .. " atStop=" .. tostring(getFact("nctc_service_bus_at_stop"))
+        .. " speed=" .. string.format("%.2f", bus:GetCurrentSpeed()))
     -- This is an edge-triggered service request, not a mirror of the game's
     -- unreliable Mahir mounted-slot state. The transit loop acknowledges it
     -- exactly once after allowing the seating animation to complete.
@@ -323,6 +326,9 @@ registerForEvent("onUpdate", function()
         if slotName ~= NCBN.lastMountedSlot then
             NCBN.lastMountedSlot = slotName
             print("[NCBN] Player mounted slot: " .. slotName .. (passengerSlots[slotName] and " (passenger)" or " (forbidden)"))
+            print("[NCBN] Mount confirmed atStop=" .. tostring(getFact("nctc_service_bus_at_stop"))
+                .. " speed=" .. string.format("%.2f", bus:GetCurrentSpeed())
+                .. " departureRequest=" .. tostring(getFact("nctc_passenger_departure_requested")))
         end
         hideChoice()
         return
@@ -330,6 +336,9 @@ registerForEvent("onUpdate", function()
     -- Mounting is asynchronous. Do not clear the provenance on the frame
     -- between Mount(request) and GetMountedVehicle() becoming valid.
     if NCBN.wasMounted then
+        print("[NCBN] Mount ended slot=" .. tostring(NCBN.lastMountedSlot)
+            .. " atStop=" .. tostring(getFact("nctc_service_bus_at_stop"))
+            .. " speed=" .. string.format("%.2f", bus:GetCurrentSpeed()))
         NCBN.passengerMountRequested = false
         NCBN.mountRequestDeadline = 0
         NCBN.wasMounted = false
@@ -343,7 +352,10 @@ registerForEvent("onUpdate", function()
     signalTransitSystem(inside)
     if inside ~= NCBN.wasInside then
         NCBN.wasInside = inside
-        print(inside and "[NCBN] Player entered the walkable cabin." or "[NCBN] Player left the walkable cabin.")
+        print((inside and "[NCBN] Player entered the walkable cabin." or "[NCBN] Player left the walkable cabin.")
+            .. " atStop=" .. tostring(getFact("nctc_service_bus_at_stop"))
+            .. " speed=" .. string.format("%.2f", bus:GetCurrentSpeed())
+            .. " departureRequest=" .. tostring(getFact("nctc_passenger_departure_requested")))
     end
     local seats = offeredSeats(bus, player)
     if not sameSeats(NCBN.offeredSeats, seats) then
