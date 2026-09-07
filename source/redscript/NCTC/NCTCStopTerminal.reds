@@ -110,6 +110,7 @@ public class NCTCStopPrompt {
   public static func Refresh(game: GameInstance) -> Void {
     let player: ref<PlayerPuppet> = GetPlayer(game);
     let settings: ref<NCTCSettings> = NCTCSettings.Get(game);
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
     let line: String; let stop: Vector4; let stopIndex: Int32; let stopId: Int32;
     let nearStop: Bool;
     let visible: Bool;
@@ -118,6 +119,13 @@ public class NCTCStopPrompt {
     let choicePosition: Vector4;
     let ordinaryHub: Bool;
     if !IsDefined(player) { return; };
+    // A multi-line choice is dispatched from CET, whereas the normal one-line
+    // prompt dispatches here.  Keep the confirmation visual identical for
+    // both paths by letting redscript render it in either case.
+    if IsDefined(quests) && quests.GetFact(n"nctc_hub_choice_notify_line") > 0 {
+      NCTCStopPrompt.NotifyRequest(game, ToString(quests.GetFact(n"nctc_hub_choice_notify_line")));
+      quests.SetFact(n"nctc_hub_choice_notify_line", 0);
+    };
     nearStop = IsDefined(settings) && settings.ShouldRecordTerminalStops() ? NCTCStopPrompt.IsNearTravelTerminal(game) : NCTCStopPrompt.IsNearStop(game, line, stop, stopIndex, stopId);
     // The line selector belongs to a physical stop. Leaving its interaction
     // radius is a cancellation, not a persistent menu state.

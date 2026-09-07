@@ -63,6 +63,9 @@ local function requestHubService(choice)
     local requestOk, accepted = pcall(function() return system:RequestService(tostring(choice.line), choice.stopId, pos) end)
     if requestOk and accepted then
         print("[NCBN] Hub choice selected: line " .. tostring(choice.line) .. ", stopId " .. tostring(choice.stopId))
+        -- Redscript owns the game's violet notification style. Signal it to
+        -- display the same confirmation used by a one-line stop.
+        setFact("nctc_hub_choice_notify_line", choice.line)
         setFact("nctc_hub_choice_open", 0)
     end
     return requestOk and accepted
