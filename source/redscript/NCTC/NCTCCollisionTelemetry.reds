@@ -5,16 +5,10 @@ import NCTC.*
 // available here.
 @wrapMethod(PlayerPuppet)
 protected cb func OnCarHitPlayer(evt: ref<OnCarHitPlayer>) -> Bool {
-  let transit: ref<NCTCTransitSystem>;
-
   if !IsDefined(evt) { return wrappedMethod(evt); };
-  transit = NCTCTransitSystem.Get(this.GetGame());
-  // V is standing inside this exact service bus, not being struck by it.
-  // All external impacts and all other vehicles remain untouched vanilla.
-  if Equals(GameInstance.GetQuestsSystem(this.GetGame()).GetFact(n"nctc_player_in_service_bus"), 1)
-    && IsDefined(transit) && transit.IsActiveServiceBus(evt.carId) {
-    return false;
-  };
+  // Diagnostic control: leave the vanilla collision response intact. This
+  // tests whether suppressing PlayerPuppet.OnCarHitPlayer caused the later
+  // standing-passenger ejection.
 
   return wrappedMethod(evt);
 }
