@@ -42,6 +42,32 @@ public class NCTCStopPrompt {
     return Vector4.Distance(player.GetWorldPosition(), position) <= 6.00;
   }
 
+  public static func IsHubChoiceOpen(game: GameInstance) -> Bool {
+    return Equals(GameInstance.GetQuestsSystem(game).GetFact(n"nctc_hub_choice_open"), 1);
+  }
+
+  private static func OpenHubChoice(game: GameInstance, position: Vector4) -> Bool {
+    let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(game);
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
+    let lines: array<String>;
+    let stopIds: array<Int32>;
+    let stop: Vector4;
+    let index: Int32 = 0;
+    if !IsDefined(markers) || !IsDefined(quests) || !markers.GetNearestServiceChoices(position, lines, stopIds, stop) || ArraySize(lines) < 2 { return false; };
+    quests.SetFact(n"nctc_hub_choice_count", ArraySize(lines));
+    quests.SetFact(n"nctc_hub_choice_x", Cast<Int32>(stop.X * 1000.00));
+    quests.SetFact(n"nctc_hub_choice_y", Cast<Int32>(stop.Y * 1000.00));
+    quests.SetFact(n"nctc_hub_choice_z", Cast<Int32>(stop.Z * 1000.00));
+    while index < ArraySize(lines) {
+      quests.SetFact(StringToName("nctc_hub_choice_" + ToString(index) + "_line"), StringToInt(lines[index], -1));
+      quests.SetFact(StringToName("nctc_hub_choice_" + ToString(index) + "_stop_id"), stopIds[index]);
+      index += 1;
+    };
+    quests.SetFact(n"nctc_hub_choice_open", 1);
+    quests.SetFact(n"nctc_hub_choice_revision", quests.GetFact(n"nctc_hub_choice_revision") + 1);
+    return true;
+  }
+
   public static func SetVisible(game: GameInstance, visible: Bool) -> Void {
     let hub: InteractionChoiceHubData;
     let choice: InteractionChoiceData;
@@ -77,7 +103,7 @@ public class NCTCStopPrompt {
     let player: ref<PlayerPuppet> = GetPlayer(game);
     let settings: ref<NCTCSettings> = NCTCSettings.Get(game);
     let line: String; let stop: Vector4; let stopIndex: Int32; let stopId: Int32;
-    let visible: Bool = IsDefined(settings) && settings.ShouldRecordTerminalStops() ? NCTCStopPrompt.IsNearTravelTerminal(game) : NCTCStopPrompt.IsNearStop(game, line, stop, stopIndex, stopId);
+    let visible: Bool = !NCTCStopPrompt.IsHubChoiceOpen(game) && (IsDefined(settings) && settings.ShouldRecordTerminalStops() ? NCTCStopPrompt.IsNearTravelTerminal(game) : NCTCStopPrompt.IsNearStop(game, line, stop, stopIndex, stopId));
     if !IsDefined(player) { return; };
     if visible || !Equals(player.m_nctcPromptVisible, visible) { NCTCStopPrompt.SetVisible(game, visible); };
     player.m_nctcPromptVisible = visible;
@@ -106,7 +132,13 @@ public class NCTCStopPromptInputListener {
       if IsDefined(markers) && markers.GetNearestTravelAnchor(player.GetWorldPosition(), locKey, stop) { settings.RecordTerminalStop(locKey, stop); return true; };
       return false;
     };
+    if NCTCStopPrompt.IsHubChoiceOpen(this.game) { return true; };
     if !NCTCStopPrompt.IsNearStop(this.game, line, stop, stopIndex, stopId) { return false; };
+    if NCTCStopPrompt.OpenHubChoice(this.game, player.GetWorldPosition()) {
+      NCTCStopPrompt.SetVisible(this.game, false);
+      player.m_nctcPromptVisible = false;
+      return true;
+    };
     if NCTCTransitSystem.Get(this.game).RequestService(line, stopId, stop) { NCTCStopPrompt.NotifyRequest(this.game, line); };
     return true;
   }
