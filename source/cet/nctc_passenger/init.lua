@@ -185,7 +185,15 @@ local function hideHubChoice()
     NCBN.hubChoiceVisible, NCBN.hubChoiceHub, NCBN.hubChoices = false, nil, {}
     if NCBN.interactionUI then
         local defs = GetAllBlackboardDefs().UIInteractions
-        NCBN.interactionUI:OnDialogsData(Game.GetBlackboardSystem():Get(defs):GetVariant(defs.DialogChoiceHubs))
+        local blackboard = Game.GetBlackboardSystem():Get(defs)
+        -- A line hub is injected by CET, so closing it also has to clear the
+        -- vanilla UI's active-hub selection.  Replacing only DialogChoiceHubs
+        -- leaves the list widget focused on the now removed hub.
+        blackboard:SetInt(defs.ActiveChoiceHubID, 0)
+        NCBN.interactionUI:OnDialogsData(blackboard:GetVariant(defs.DialogChoiceHubs))
+        NCBN.interactionUI:OnInteractionsChanged()
+        NCBN.interactionUI:UpdateListBlackboard()
+        NCBN.interactionUI:OnDialogsActivateHub(0)
     end
 end
 
