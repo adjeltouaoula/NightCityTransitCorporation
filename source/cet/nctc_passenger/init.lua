@@ -9,16 +9,7 @@ local NCBN = { tag = "NightCityBusNetwork.PrototypeBus", interactionUI = nil, ch
     uiMissingLogged = false, wasInside = false, lastMountedSlot = nil,
     passengerMountRequested = false, mountRequestDeadline = 0, wasMounted = false,
     hubChoiceVisible = false, hubChoiceHub = nil, hubChoices = {}, selectedHubLine = 0,
-    hubChoiceRevision = -1, lastInsideLocal = nil,
-    standingSupport = { entityId = nil, entity = nil, spawning = false, active = false, localPosition = nil } }
-
--- This is a short-lived, invisible standing workspot.  It exists solely to
--- make the engine carry V with the moving bus, just like the metro passenger
--- workspot.  The first test deliberately prioritises physics stability over
--- free walking; walking can only be added safely after this removes ejection.
-local STANDING_WORKSPOT_PATH = "base\\itm\\metro_workspot.ent"
-local STANDING_WORKSPOT_NAME = "metro_workspot"
-local STANDING_POSE = "sit_chair_lean0__2h_elbow_on_knees__01__to__stand__2h_on_sides__01__turn0__q005_01__01"
+    hubChoiceRevision = -1, lastInsideLocal = nil }
 
 -- Local-space zone in the aisle beside the two validated rear passenger seats.
 local seatAreas = {
@@ -102,65 +93,6 @@ local function localPosition(bus, player)
     if Vector4.Dot(vy, forward) < 0 then y = -y end
     if Vector4.Dot(vz, up) < 0 then z = -z end
     return Vector4.new(x, y, z, 1)
-end
-
-local function localToWorld(bus, localPos)
-    local origin, forward, right, up = bus:GetWorldPosition(), bus:GetWorldForward(), bus:GetWorldRight(), bus:GetWorldUp()
-    return Vector4.new(
-        origin.x + right.x * localPos.x + forward.x * localPos.y + up.x * localPos.z,
-        origin.y + right.y * localPos.x + forward.y * localPos.y + up.y * localPos.z,
-        origin.z + right.z * localPos.x + forward.z * localPos.y + up.z * localPos.z,
-        1)
-end
-
-local function clearStandingSupport(player, reason)
-    local support = NCBN.standingSupport
-    if support.active or support.spawning then print("[NCBN StandingSupport] released: " .. reason) end
-    if player and support.active then pcall(function() Game.GetWorkspotSystem():StopInDevice(player) end) end
-    if support.entity then pcall(function() exEntitySpawner.Despawn(support.entity) end) end
-    support.entityId, support.entity, support.spawning, support.active, support.localPosition = nil, nil, false, false, nil
-end
-
-local function beginStandingSupport(bus, player)
-    local support = NCBN.standingSupport
-    if support.active or support.spawning or not bus or not player or player:GetMountedVehicle() ~= nil then return end
-    support.localPosition, support.spawning = localPosition(bus, player), true
-    local transform = WorldTransform.new()
-    transform:SetPosition(localToWorld(bus, support.localPosition))
-    transform:SetOrientationEuler(bus:GetWorldOrientation():ToEulerAngles())
-    local ok, entityId = pcall(function() return exEntitySpawner.Spawn(STANDING_WORKSPOT_PATH, transform, '') end)
-    if not ok or not entityId then
-        support.spawning = false
-        print("[NCBN StandingSupport] spawn failed")
-        return
-    end
-    support.entityId = entityId
-    print("[NCBN StandingSupport] requested at " .. string.format("x=%.3f,y=%.3f,z=%.3f", support.localPosition.x, support.localPosition.y, support.localPosition.z))
-end
-
-local function updateStandingSupport(bus, player, inside)
-    local support = NCBN.standingSupport
-    if not bus or not player or not inside or player:GetMountedVehicle() ~= nil then
-        clearStandingSupport(player, "outside, seated, or bus unavailable")
-        return
-    end
-    if not support.active and not support.spawning then beginStandingSupport(bus, player) end
-    if support.spawning and not support.entity then
-        support.entity = Game.FindEntityByID(support.entityId)
-        if support.entity then
-            pcall(function()
-                Game.GetWorkspotSystem():StopInDevice(player)
-                Game.GetWorkspotSystem():PlayInDeviceSimple(support.entity, player, true, STANDING_WORKSPOT_NAME, nil, nil, 0, 1, nil)
-                Game.GetWorkspotSystem():SendJumpToAnimEnt(player, STANDING_POSE, true)
-            end)
-            support.spawning, support.active = false, true
-            print("[NCBN StandingSupport] active")
-        end
-    end
-    if support.active and support.entity and support.localPosition then
-        local world = localToWorld(bus, support.localPosition)
-        pcall(function() Game.GetTeleportationFacility():Teleport(support.entity, world, bus:GetWorldOrientation():ToEulerAngles()) end)
-    end
 end
 
 local function lookAngle(bus, player)
@@ -472,7 +404,6 @@ registerForEvent("onUpdate", function()
     updateHubChoice()
     local player, bus = Game.GetPlayer(), findServiceBus()
     if not player or not bus then
-        clearStandingSupport(player, "bus unavailable")
         NCBN.passengerMountRequested = false
         NCBN.mountRequestDeadline = 0
         NCBN.wasMounted = false
@@ -494,7 +425,6 @@ registerForEvent("onUpdate", function()
     setBoardingDoor(bus, boardingAllowed and math.abs(bus:GetCurrentSpeed()) <= 1.00 and (isMounted or distance < 10.00))
 
     if isMounted then
-        clearStandingSupport(player, "passenger seated")
         local slot = bus:GetSlotIdForMountedObject(player)
         local slotName = slot and slot.value or "unknown"
         -- The mounted vehicle wrapper is not stable for these passenger
@@ -530,7 +460,6 @@ registerForEvent("onUpdate", function()
     NCBN.lastMountedSlot = nil
     local inside = insideNow
     local currentLocal = localPosition(bus, player)
-    updateStandingSupport(bus, player, inside)
     setFact("nctc_player_in_service_bus", inside and 1 or 0)
     signalTransitSystem(inside)
     if inside ~= NCBN.wasInside then
