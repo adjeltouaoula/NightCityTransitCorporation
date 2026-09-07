@@ -560,7 +560,8 @@ local function add_passage_after_selected(network, line, after_index, position, 
     eventId = event_id,
     line = line,
     afterStopId = target.id,
-    position = copy_position(position)
+    position = copy_position(position),
+    yaw = fact(quests, "nctc_passage_yaw") / 1000.0
   })
   return true, count
 end
@@ -784,6 +785,12 @@ local function publish_network(quests, network)
     set_fact(quests, prefix .. "x", math.floor((position.x or 0) * 1000))
     set_fact(quests, prefix .. "y", math.floor((position.y or 0) * 1000))
     set_fact(quests, prefix .. "z", math.floor((position.z or 0) * 1000))
+    local radians = math.rad(passage.yaw or 0)
+    set_fact(quests, prefix .. "forward_x", math.floor(-math.sin(radians) * 1000000))
+    set_fact(quests, prefix .. "forward_y", math.floor(math.cos(radians) * 1000000))
+    -- Old passages authored before yaw support lack this flag and use the
+    -- safe compatibility handoff until they are re-recorded.
+    set_fact(quests, prefix .. "forward_valid", passage.yaw ~= nil and 1 or 0)
   end
   set_fact(quests, "nctc_external_network_passage_count", passage_count)
   set_fact(quests, "nctc_external_network_stop_count", count)

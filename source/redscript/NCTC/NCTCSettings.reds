@@ -527,6 +527,9 @@ public class NCTCSettings extends ScriptableSystem {
     quests.SetFact(n"nctc_passage_x", Cast<Int32>(position.X * 1000.00));
     quests.SetFact(n"nctc_passage_y", Cast<Int32>(position.Y * 1000.00));
     quests.SetFact(n"nctc_passage_z", Cast<Int32>(position.Z * 1000.00));
+    // Face the direction the bus must travel through this point. Like berth
+    // yaw, this compensates for the Mahir pivot stopping short of raw targets.
+    quests.SetFact(n"nctc_passage_yaw", Cast<Int32>(player.GetWorldYaw() * 1000.00));
     quests.SetFact(n"nctc_survey_event_kind", 7);
     eventId = quests.GetFact(n"nctc_survey_event_id") + 1;
     quests.SetFact(n"nctc_survey_write_ack_event_id", -1);
