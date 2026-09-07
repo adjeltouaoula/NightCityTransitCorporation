@@ -119,6 +119,11 @@ public class NCTCStopPrompt {
     let ordinaryHub: Bool;
     if !IsDefined(player) { return; };
     nearStop = IsDefined(settings) && settings.ShouldRecordTerminalStops() ? NCTCStopPrompt.IsNearTravelTerminal(game) : NCTCStopPrompt.IsNearStop(game, line, stop, stopIndex, stopId);
+    // The line selector belongs to a physical stop. Leaving its interaction
+    // radius is a cancellation, not a persistent menu state.
+    if !nearStop && NCTCStopPrompt.IsHubChoiceOpen(game) {
+      GameInstance.GetQuestsSystem(game).SetFact(n"nctc_hub_choice_open", 0);
+    };
     // Ordinary hubs open straight onto their line choices.  A metro hub keeps
     // a single parent action so vanilla Fast Travel / Metro actions remain
     // usable alongside it; that parent action alone opens the line picker.
