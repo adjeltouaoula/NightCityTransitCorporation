@@ -1,6 +1,8 @@
 # NCTC backlog
 
 - **Priority — called-stop service:** an "await bus" request must reserve that exact stop as a service stop. When the bus reaches it, it must stop, open its doors, wait for boarding, then continue the line. Only unrequested intermediate stops may be passed without stopping.
+- **NCTC map navigation:** selecting an NCTC marker must keep it tracked after closing and reopening the world map. Its first-person waypoint icon is currently the broken red icon with a yellow outline; replace it with a valid NCTC/vanilla navigation visual.
+- Expand the developer line-colour picker from 7 to **15 highly distinguishable presets** for map icons and hub text. The renderer itself supports arbitrary RGB/HDR colours; this is an authoring/UI palette task.
 - Remove the AutoDrive interaction from the service bus; NCTC must never expose player AutoDrive controls.
 - Fix passenger-door service state: doors must not repeatedly open/close during one stop, and when the bus is stopped at a service stop they must open if V, already inside, approaches the exit.
 - Add physical collision to the bus doors so V and traffic cannot pass through them.

@@ -548,6 +548,51 @@ local function replace_selected_stop(network, line, stop_index, position, loc_ke
   return true, count
 end
 
+-- Inserts without rewriting the existing stops or their capture vectors.
+-- Captures retain their stable stopId; only their display ordinal changes.
+local function insert_stop_after_selected(network, line, after_index, position, loc_key, event_id)
+  local target, count = selected_stop(network, line, after_index)
+  if not target then return false, count end
+  local duplicate_radius_squared = SAME_LINE_DUPLICATE_RADIUS_METRES * SAME_LINE_DUPLICATE_RADIUS_METRES
+  for _, existing in ipairs(network.stops or {}) do
+    if existing.line == line and existing.position and distance_squared(existing.position, position) <= duplicate_radius_squared then
+      log("ignored inserted duplicate stop on line " .. tostring(line))
+      return false, count
+    end
+  end
+  network.nextStopId = network.nextStopId or 1
+  local inserted = {
+    id = network.nextStopId,
+    eventId = event_id,
+    line = line,
+    sequence = after_index + 1,
+    anchorType = loc_key and loc_key > 0 and "travelAnchor" or "manual",
+    locKey = loc_key and loc_key > 0 and loc_key or nil,
+    position = copy_position(position)
+  }
+  network.nextStopId = network.nextStopId + 1
+  local global_index = nil
+  for index, stop in ipairs(network.stops or {}) do
+    if stop == target then global_index = index; break end
+  end
+  if not global_index then return false, count end
+  table.insert(network.stops, global_index + 1, inserted)
+  -- The current external representation and route resolver use array order.
+  -- Keep old sequence metadata legible too, without using it to route.
+  local ordinal = 0
+  for _, stop in ipairs(network.stops) do
+    if stop.line == line then ordinal = ordinal + 1; stop.sequence = ordinal end
+  end
+  for _, capture in ipairs(network.captures or {}) do
+    if capture.line == line then
+      if capture.stopId == inserted.id then capture.stopIndex = after_index + 1
+      elseif (capture.stopIndex or 0) > after_index then capture.stopIndex = capture.stopIndex + 1 end
+    end
+  end
+  join_or_create_hub(network, inserted, event_id)
+  return true, count + 1
+end
+
 local function find_capture(network, stop_id)
   for index = #(network.captures or {}), 1, -1 do
     local capture = network.captures[index]
@@ -644,6 +689,23 @@ local function persist_capture(quests, event_id)
       return
     end
     kind = "moved selected stop " .. tostring(fact(quests, "nctc_replace_stop_index")) .. "/" .. tostring(count)
+  elseif event_kind == 7 then
+    local position = {
+      x = fact(quests, "nctc_insert_stop_x") / 1000.0,
+      y = fact(quests, "nctc_insert_stop_y") / 1000.0,
+      z = fact(quests, "nctc_insert_stop_z") / 1000.0
+    }
+    local inserted, count = insert_stop_after_selected(network,
+      fact(quests, "nctc_insert_stop_line"),
+      fact(quests, "nctc_insert_stop_after_index"),
+      position,
+      fact(quests, "nctc_insert_stop_loc_key"),
+      event_id)
+    if not inserted then
+      log("rejected selected-stop insertion " .. tostring(event_id) .. ": selected stop unavailable or duplicate")
+      return
+    end
+    kind = "inserted stop after " .. tostring(fact(quests, "nctc_insert_stop_after_index")) .. "/" .. tostring(count)
   else
     local capture_line = fact(quests, "nctc_survey_capture_line")
     local capture_stop_index = fact(quests, "nctc_survey_capture_stop_index")
