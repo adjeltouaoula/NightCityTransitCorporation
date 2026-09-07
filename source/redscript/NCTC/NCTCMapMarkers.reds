@@ -349,6 +349,12 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     let service: String;
     let anchorIndex: Int32;
     let hubIndex: Int32;
+    let passageCount: Int32;
+    let passageIndex: Int32 = 0;
+    let passageLine: Int32;
+    let passageAfterStopId: Int32;
+    let passagePosition: Vector4;
+    let settings: ref<NCTCSettings>;
     let stopIndex: Int32 = 0;
     let index: Int32 = 0;
 
@@ -429,6 +435,28 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
       ArrayPush(this.m_registeredMappins, system.RegisterMappin(data, positions[index]));
       index += 1;
     };
+    // Passage points are dev-only route diagnostics. They are intentionally
+    // not added to servicePositions, so they cannot become bus-call stops.
+    settings = NCTCSettings.Get(this.GetGameInstance());
+    if IsDefined(settings) && settings.developerMode && settings.showPassagePoints {
+      passageCount = GameInstance.GetQuestsSystem(this.GetGameInstance()).GetFact(n"nctc_external_network_passage_count");
+      while passageIndex < passageCount {
+        passageLine = GameInstance.GetQuestsSystem(this.GetGameInstance()).GetFact(StringToName("nctc_external_passage_" + ToString(passageIndex) + "_line"));
+        passageAfterStopId = GameInstance.GetQuestsSystem(this.GetGameInstance()).GetFact(StringToName("nctc_external_passage_" + ToString(passageIndex) + "_after_stop_id"));
+        passagePosition = new Vector4(Cast<Float>(GameInstance.GetQuestsSystem(this.GetGameInstance()).GetFact(StringToName("nctc_external_passage_" + ToString(passageIndex) + "_x"))) / 1000.00, Cast<Float>(GameInstance.GetQuestsSystem(this.GetGameInstance()).GetFact(StringToName("nctc_external_passage_" + ToString(passageIndex) + "_y"))) / 1000.00, Cast<Float>(GameInstance.GetQuestsSystem(this.GetGameInstance()).GetFact(StringToName("nctc_external_passage_" + ToString(passageIndex) + "_z"))) / 1000.00, 1.00);
+        markerData = new NCTCStopMappinData();
+        markerData.line = "PASSAGE";
+        markerData.services = "NCTC DEV — Passage L" + ToString(passageLine) + " après arrêt #" + ToString(passageAfterStopId);
+        markerData.color = -1;
+        markerData.isHub = false;
+        data.mappinType = t"Mappins.NCTCStopMappinDefinition";
+        data.variant = gamedataMappinVariant.CPO_PingDoorVariant;
+        data.active = true;
+        data.scriptData = markerData;
+        ArrayPush(this.m_registeredMappins, system.RegisterMappin(data, passagePosition));
+        passageIndex += 1;
+      };
+    };
     this.m_servicePositions = positions;
     this.m_serviceLines = lines;
     this.m_serviceStopIndices = [];
@@ -504,6 +532,7 @@ protected final func ApplyNCTCStopIcon(line: String, lineColor: Int32) -> Void {
   if IsDefined(icon) {
     icon.UnbindProperty(n"tintColor");
     if customHub { icon.SetTintColor(new HDRColor(0.37, 0.96, 1.00, 1.00)); }
+    else if Equals(line, "PASSAGE") { icon.SetTintColor(new HDRColor(1.00, 0.95, 0.32, 1.00)); }
     else { icon.SetTintColor(NCTCLineColor(lineColor)); };
   };
 }

@@ -151,6 +151,13 @@ public class NCTCSettings extends ScriptableSystem {
   public let showTravelAnchorLocKeys: Bool = false;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Show passage points")
+  @runtimeProperty("ModSettings.description", "Shows invisible traffic-only passage points on the map. Developer mode only; they never appear in the public mod.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let showPassagePoints: Bool = false;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Developer terminal action")
   @runtimeProperty("ModSettings.description", "Choose whether F at a terminal calls the bus or records that terminal as the next draft stop.")
   @runtimeProperty("ModSettings.category", "Developer mode")
@@ -281,6 +288,13 @@ public class NCTCSettings extends ScriptableSystem {
   public let recordPassageAfterSelectedKey: EInputKey = EInputKey.IK_NumPad7;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Delete nearest passage point")
+  @runtimeProperty("ModSettings.description", "Deletes the nearest passage point for the selected line within 30 metres.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let deleteNearestPassageKey: EInputKey = EInputKey.IK_NumPad9;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Despawn service bus")
   @runtimeProperty("ModSettings.description", "Immediately removes the active NCTC bus and clears its pending route request. A new bus can then be called right away.")
   @runtimeProperty("ModSettings.category", "Developer mode")
@@ -324,6 +338,7 @@ public class NCTCSettings extends ScriptableSystem {
     this.RegisterSettings();
     this.PublishSurveySettings();
     this.UpdateDeveloperVisibility();
+    NCTCMapMarkerSystem.GetInstance(this.GetGameInstance()).RegisterAllMarkers();
     GameInstance.GetCallbackSystem().RegisterCallback(n"Input/Key", this, n"OnSurveyKeyInput");
     quests = GameInstance.GetQuestsSystem(this.GetGameInstance());
     callback = new NCTCDirectSurveyNoticeCallback();
@@ -384,6 +399,7 @@ public class NCTCSettings extends ScriptableSystem {
     if Equals(event.GetKey(), this.deleteNearestStopKey) { this.DeleteNearestStop(); return; };
     if Equals(event.GetKey(), this.moveSelectedStopKey) { this.MoveSelectedStop(); return; };
     if Equals(event.GetKey(), this.recordPassageAfterSelectedKey) { this.RecordPassageAfterSelected(); return; };
+    if Equals(event.GetKey(), this.deleteNearestPassageKey) { this.DeleteNearestPassage(); return; };
     if Equals(event.GetKey(), this.despawnServiceBusKey) {
       if NCTCTransitSystem.Get(this.GetGameInstance()).DespawnServiceBus() { NCTCSettings.Notify(this.GetGameInstance(), "NCTC service bus despawned"); };
     };
@@ -538,6 +554,29 @@ public class NCTCSettings extends ScriptableSystem {
     confirmation.game = this.GetGameInstance(); confirmation.eventId = eventId; confirmation.kind = "passage point";
     GameInstance.GetDelaySystem(this.GetGameInstance()).DelayCallback(confirmation, 0.75, false);
     NCTCSettings.Notify(this.GetGameInstance(), "NCTC: recording passage after stop " + ToString(this.surveyStopIndex) + " on line " + ToString(line));
+  }
+
+  private func DeleteNearestPassage() -> Void {
+    let player: ref<PlayerPuppet> = GetPlayer(this.GetGameInstance());
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    let position: Vector4;
+    let line: Int32 = this.GetSelectedLineNumber();
+    let eventId: Int32;
+    let confirmation: ref<NCTCSurveyWriteConfirmationCallback>;
+    if !IsDefined(player) || !IsDefined(quests) || line < 1 { return; };
+    position = player.GetWorldPosition();
+    quests.SetFact(n"nctc_delete_passage_line", line);
+    quests.SetFact(n"nctc_delete_passage_x", Cast<Int32>(position.X * 1000.00));
+    quests.SetFact(n"nctc_delete_passage_y", Cast<Int32>(position.Y * 1000.00));
+    quests.SetFact(n"nctc_delete_passage_z", Cast<Int32>(position.Z * 1000.00));
+    quests.SetFact(n"nctc_survey_event_kind", 8);
+    eventId = quests.GetFact(n"nctc_survey_event_id") + 1;
+    quests.SetFact(n"nctc_survey_write_ack_event_id", -1);
+    quests.SetFact(n"nctc_survey_event_id", eventId);
+    confirmation = new NCTCSurveyWriteConfirmationCallback();
+    confirmation.game = this.GetGameInstance(); confirmation.eventId = eventId; confirmation.kind = "deleted passage point";
+    GameInstance.GetDelaySystem(this.GetGameInstance()).DelayCallback(confirmation, 0.75, false);
+    NCTCSettings.Notify(this.GetGameInstance(), "NCTC: deleting nearest passage point on line " + ToString(line));
   }
 
   // The draft number is reserved for a genuinely new line. Editing an

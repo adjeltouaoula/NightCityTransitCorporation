@@ -566,6 +566,19 @@ local function add_passage_after_selected(network, line, after_index, position, 
   return true, count
 end
 
+local function delete_nearest_passage(network, line, position)
+  local nearest, nearest_distance_squared = nil, 30.0 * 30.0
+  for index, passage in ipairs(network.passages or {}) do
+    if passage.line == line and passage.position then
+      local distance = distance_squared(passage.position, position)
+      if distance <= nearest_distance_squared then nearest, nearest_distance_squared = index, distance end
+    end
+  end
+  if not nearest then return false end
+  table.remove(network.passages, nearest)
+  return true
+end
+
 local function find_capture(network, stop_id)
   for index = #(network.captures or {}), 1, -1 do
     local capture = network.captures[index]
@@ -678,6 +691,14 @@ local function persist_capture(quests, event_id)
       return
     end
     kind = "passage point after " .. tostring(fact(quests, "nctc_passage_after_index")) .. "/" .. tostring(count)
+  elseif event_kind == 8 then
+    local position = {
+      x = fact(quests, "nctc_delete_passage_x") / 1000.0,
+      y = fact(quests, "nctc_delete_passage_y") / 1000.0,
+      z = fact(quests, "nctc_delete_passage_z") / 1000.0
+    }
+    local deleted = delete_nearest_passage(network, fact(quests, "nctc_delete_passage_line"), position)
+    kind = deleted and "deleted passage point" or "no passage point deleted"
   else
     local capture_line = fact(quests, "nctc_survey_capture_line")
     local capture_stop_index = fact(quests, "nctc_survey_capture_stop_index")
