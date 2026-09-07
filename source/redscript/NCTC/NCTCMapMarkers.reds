@@ -264,6 +264,16 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     return this.GetExternalStops();
   }
 
+  private func GetExternalStopName(stopId: Int32) -> String {
+    let stops: array<NCTCStopDefinition> = this.GetNetworkStops();
+    let index: Int32 = 0;
+    while index < ArraySize(stops) {
+      if Equals(stops[index].serviceStopId, stopId) { return stops[index].stop; };
+      index += 1;
+    };
+    return "Unknown stop";
+  }
+
   // Used by the developer settings confirmation. Stop index is the current
   // ordinal within the selected line, not the JSON's possibly sparse sequence.
   public func GetSurveyStopName(line: Int32, stopIndex: Int32) -> String {
@@ -446,7 +456,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
         passagePosition = new Vector4(Cast<Float>(GameInstance.GetQuestsSystem(this.GetGameInstance()).GetFact(StringToName("nctc_external_passage_" + ToString(passageIndex) + "_x"))) / 1000.00, Cast<Float>(GameInstance.GetQuestsSystem(this.GetGameInstance()).GetFact(StringToName("nctc_external_passage_" + ToString(passageIndex) + "_y"))) / 1000.00, Cast<Float>(GameInstance.GetQuestsSystem(this.GetGameInstance()).GetFact(StringToName("nctc_external_passage_" + ToString(passageIndex) + "_z"))) / 1000.00, 1.00);
         markerData = new NCTCStopMappinData();
         markerData.line = "PASSAGE";
-        markerData.services = "NCTC DEV — Passage L" + ToString(passageLine) + " · après arrêt ID " + ToString(passageAfterStopId);
+        markerData.services = "NCTC DEV — Passage L" + ToString(passageLine) + " · après " + this.GetExternalStopName(passageAfterStopId);
         markerData.color = -1;
         markerData.isHub = false;
         data.mappinType = t"Mappins.NCTCStopMappinDefinition";
