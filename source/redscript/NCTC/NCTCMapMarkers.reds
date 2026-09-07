@@ -189,6 +189,22 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     return true;
   }
 
+  // A metro hub must preserve its native interaction stack (metro and, where
+  // present, fast travel).  NCTC therefore uses its second-level line picker
+  // only at a real metro anchor, never at an ordinary roadside transfer.
+  public func IsNearMetroAnchor(position: Vector4) -> Bool {
+    let system: ref<MappinSystem> = GameInstance.GetMappinSystem(this.GetGameInstance());
+    let anchors: array<NCTCTravelAnchor>;
+    let index: Int32 = 0;
+    if !IsDefined(system) { return false; };
+    anchors = this.GetTravelAnchors(system);
+    while index < ArraySize(anchors) {
+      if anchors[index].isMetro && Vector4.Distance(position, anchors[index].position) <= 12.00 { return true; };
+      index += 1;
+    };
+    return false;
+  }
+
   // A hub may represent several lines at one physical marker. Return one
   // callable stop per line so the interaction can let the passenger choose
   // instead of silently using the first cached service.

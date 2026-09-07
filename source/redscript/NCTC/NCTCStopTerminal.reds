@@ -77,9 +77,17 @@ public class NCTCStopPrompt {
     let blackboard: ref<IBlackboard>;
     hub.id = -12017; hub.active = visible; hub.flags = IntEnum<EVisualizerDefinitionFlags>(0);
     hub.title = NCTCStopPrompt.FormatTitle(game);
+    let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(game);
+    let lines: array<String>;
+    let stopIds: array<Int32>;
+    let stop: Vector4;
     if IsDefined(NCTCSettings.Get(game)) && NCTCSettings.Get(game).ShouldRecordTerminalStops() {
       hub.title = "NCTC DEV";
       choice.localizedName = "Enregistrer l arret";
+    } else if IsDefined(markers) && markers.GetNearestServiceChoices(GetPlayer(game).GetWorldPosition(), lines, stopIds, stop) {
+      // A single service is immediately callable. A metro transfer retains one
+      // parent action so it can coexist with the native metro/fast-travel UI.
+      choice.localizedName = ArraySize(lines) == 1 ? "Attendre le bus " + lines[0] : "Attendre un bus";
     } else { choice.localizedName = "Attendre le bus"; };
     choice.inputAction = n"UI_Apply";
     ChoiceTypeWrapper.SetType(choiceType, gameinteractionsChoiceType.Blueline);
@@ -103,8 +111,32 @@ public class NCTCStopPrompt {
     let player: ref<PlayerPuppet> = GetPlayer(game);
     let settings: ref<NCTCSettings> = NCTCSettings.Get(game);
     let line: String; let stop: Vector4; let stopIndex: Int32; let stopId: Int32;
-    let visible: Bool = !NCTCStopPrompt.IsHubChoiceOpen(game) && (IsDefined(settings) && settings.ShouldRecordTerminalStops() ? NCTCStopPrompt.IsNearTravelTerminal(game) : NCTCStopPrompt.IsNearStop(game, line, stop, stopIndex, stopId));
+    let nearStop: Bool;
+    let visible: Bool;
+    let choiceLines: array<String>;
+    let choiceStopIds: array<Int32>;
+    let choicePosition: Vector4;
+    let ordinaryHub: Bool;
     if !IsDefined(player) { return; };
+    nearStop = IsDefined(settings) && settings.ShouldRecordTerminalStops() ? NCTCStopPrompt.IsNearTravelTerminal(game) : NCTCStopPrompt.IsNearStop(game, line, stop, stopIndex, stopId);
+    // Ordinary hubs open straight onto their line choices.  A metro hub keeps
+    // a single parent action so vanilla Fast Travel / Metro actions remain
+    // usable alongside it; that parent action alone opens the line picker.
+    ordinaryHub = false;
+    if nearStop && !(IsDefined(settings) && settings.ShouldRecordTerminalStops()) {
+      let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(game);
+      if IsDefined(markers) && markers.GetNearestServiceChoices(player.GetWorldPosition(), choiceLines, choiceStopIds, choicePosition) {
+        ordinaryHub = ArraySize(choiceLines) > 1 && !markers.IsNearMetroAnchor(player.GetWorldPosition());
+      };
+    };
+    if ordinaryHub && !NCTCStopPrompt.IsHubChoiceOpen(game) {
+      if NCTCStopPrompt.OpenHubChoice(game, player.GetWorldPosition()) {
+        NCTCStopPrompt.SetVisible(game, false);
+        player.m_nctcPromptVisible = false;
+        return;
+      };
+    };
+    visible = nearStop && !NCTCStopPrompt.IsHubChoiceOpen(game);
     if visible || !Equals(player.m_nctcPromptVisible, visible) { NCTCStopPrompt.SetVisible(game, visible); };
     player.m_nctcPromptVisible = visible;
   }
@@ -132,9 +164,11 @@ public class NCTCStopPromptInputListener {
       if IsDefined(markers) && markers.GetNearestTravelAnchor(player.GetWorldPosition(), locKey, stop) { settings.RecordTerminalStop(locKey, stop); return true; };
       return false;
     };
-    if NCTCStopPrompt.IsHubChoiceOpen(this.game) { return true; };
     if !NCTCStopPrompt.IsNearStop(this.game, line, stop, stopIndex, stopId) { return false; };
-    if NCTCStopPrompt.OpenHubChoice(this.game, player.GetWorldPosition()) {
+    // Only metro hubs have a second level: the first action preserves room for
+    // vanilla Metro/Fast Travel actions, then presents the NCTC lines.
+    markers = NCTCMapMarkerSystem.GetInstance(this.game);
+    if IsDefined(markers) && markers.IsNearMetroAnchor(player.GetWorldPosition()) && NCTCStopPrompt.OpenHubChoice(this.game, player.GetWorldPosition()) {
       NCTCStopPrompt.SetVisible(this.game, false);
       player.m_nctcPromptVisible = false;
       return true;
@@ -146,6 +180,7 @@ public class NCTCStopPromptInputListener {
 
 @addField(PlayerPuppet) private let m_nctcPromptInputListener: ref<NCTCStopPromptInputListener>;
 @addField(PlayerPuppet) public let m_nctcPromptVisible: Bool;
+@addField(PlayerPuppet) public let m_nctcHubChoiceLatched: Bool;
 
 @wrapMethod(PlayerPuppet)
 protected cb func OnGameAttached() -> Bool {
@@ -169,6 +204,10 @@ public const func GetActions(out actions: array<ref<DeviceAction>>, context: Get
     if !NCTCStopPrompt.IsNearTravelTerminal(this.GetGameInstance()) { return result; };
   } else {
     if !NCTCStopPrompt.IsNearStop(this.GetGameInstance(), line, stop, stopIndex, stopId) { return result; };
+    // Do not remove the native fast-travel action at a metro interchange.
+    // It is part of the intended three-way interaction stack there.
+    let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(this.GetGameInstance());
+    if IsDefined(markers) && markers.IsNearMetroAnchor(GetPlayer(this.GetGameInstance()).GetWorldPosition()) { return result; };
   };
   index = ArraySize(actions) - 1;
   while index >= 0 { mapAction = actions[index] as OpenWorldMapDeviceAction; if IsDefined(mapAction) { ArrayErase(actions, index); }; index -= 1; };
