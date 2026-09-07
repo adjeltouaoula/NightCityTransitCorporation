@@ -70,6 +70,26 @@ public class NCTCServiceBusController extends IScriptable {
     return this.IsReady() && Vector4.Distance(this.bus.GetWorldPosition(), position) <= radius;
   }
 
+  // A berth is an oriented service line, not a large circular area. The bus
+  // pivot must reach that line, be aligned with it, and have almost stopped.
+  // This prevents a long Mahir from serving a stop while it is still many
+  // metres before the recorded position.
+  public func IsAtBerth(position: Vector4, out longitudinal: Float, out lateral: Float, out speed: Float) -> Bool {
+    let delta: Vector4;
+    let forward: Vector4;
+    let right: Vector4;
+    if !this.IsReady() { return false; };
+    delta = position - this.bus.GetWorldPosition();
+    forward = Vector4.Normalize2D(this.bus.GetWorldForward());
+    right = Vector4.Normalize2D(this.bus.GetWorldRight());
+    longitudinal = Vector4.Dot(delta, forward);
+    lateral = AbsF(Vector4.Dot(delta, right));
+    speed = AbsF(this.bus.GetCurrentSpeed());
+    // The pivot must be at the berth plane (with a deliberately small
+    // tolerance) rather than merely within the former 18m arrival circle.
+    return longitudinal <= 2.00 && longitudinal >= -2.00 && lateral <= 3.00 && speed <= 0.75;
+  }
+
   public func IsPlayerAboard() -> Bool {
     let player: ref<PlayerPuppet>;
     let mounted: ref<VehicleObject>;
@@ -401,6 +421,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
     quests.SetFact(n"nctc_dev_loop_target_x_mm", Cast<Int32>(targetPosition.X * 1000.00));
     quests.SetFact(n"nctc_dev_loop_target_y_mm", Cast<Int32>(targetPosition.Y * 1000.00));
     quests.SetFact(n"nctc_dev_loop_target_z_mm", Cast<Int32>(targetPosition.Z * 1000.00));
+    quests.SetFact(n"nctc_dev_loop_berth_longitudinal_mm", 0);
+    quests.SetFact(n"nctc_dev_loop_berth_lateral_mm", 0);
+    quests.SetFact(n"nctc_dev_loop_berth_speed_mm", 0);
     if IsDefined(this.controller) && this.controller.IsReady() {
       busPosition = this.controller.GetWorldPosition();
       quests.SetFact(n"nctc_dev_loop_bus_x_mm", Cast<Int32>(busPosition.X * 1000.00));
@@ -539,6 +562,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
   public func UpdateRequestedService() -> Void {
     let boarded: Bool;
     let quests: ref<QuestsSystem>;
+    let berthLongitudinal: Float;
+    let berthLateral: Float;
+    let berthSpeed: Float;
     if this.requestPending {
       // Right after loading a save the dynamic entity system can briefly be
       // unavailable. Do not silently abandon the request: retry until the
@@ -609,11 +635,13 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.telemetryPolls = 0;
       this.PublishRouteCommandTelemetry();
     };
-    // Baseline service hand-off. ADE's direct traffic command does not expose
-    // a terminal Success state to NCTC, so the authored berth envelope is the
-    // contract for this prototype: 8m native stopping allowance plus 10m
-    // hand-off margin.
-    if this.controller.IsNear(this.hasSurveyProfile ? this.surveyBerth : this.requestedStop, 18.00) {
+    // ADE does not provide a reliable berth-arrival callback. NCTC therefore
+    // evaluates a narrow, vehicle-aligned berth envelope rather than the old
+    // 18m circular approximation.
+    if this.controller.IsAtBerth(this.hasSurveyProfile ? this.surveyBerth : this.requestedStop, berthLongitudinal, berthLateral, berthSpeed) {
+      quests.SetFact(n"nctc_dev_loop_berth_longitudinal_mm", Cast<Int32>(berthLongitudinal * 1000.00));
+      quests.SetFact(n"nctc_dev_loop_berth_lateral_mm", Cast<Int32>(berthLateral * 1000.00));
+      quests.SetFact(n"nctc_dev_loop_berth_speed_mm", Cast<Int32>(berthSpeed * 1000.00));
       if Equals(this.requestedStopId, this.serviceStopId) {
         this.controller.ArriveAtStop();
         this.arrived = true;

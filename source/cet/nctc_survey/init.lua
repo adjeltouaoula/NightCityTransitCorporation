@@ -772,6 +772,9 @@ local function log_service_loop(quests)
   local bus_y = fact(quests, "nctc_dev_loop_bus_y_mm") / 1000.0
   local bus_z = fact(quests, "nctc_dev_loop_bus_z_mm") / 1000.0
   local target_distance = fact(quests, "nctc_dev_loop_target_distance_mm") / 1000.0
+  local berth_longitudinal = fact(quests, "nctc_dev_loop_berth_longitudinal_mm") / 1000.0
+  local berth_lateral = fact(quests, "nctc_dev_loop_berth_lateral_mm") / 1000.0
+  local berth_speed = fact(quests, "nctc_dev_loop_berth_speed_mm") / 1000.0
   local states = {
     [1] = "arrived and opened doors",
     [2] = "waiting: V is not mounted in this bus",
@@ -789,8 +792,8 @@ local function log_service_loop(quests)
     [24] = "minimal loop: stopped-near fallback reached",
     [25] = "minimal loop: active AI command failed",
     [29] = "route loop: initial berth command sent",
-    [30] = "route loop: entered 18m berth zone; service stop opened",
-    [31] = "route loop: entered 18m berth zone; passed through to next stop",
+    [30] = "route loop: berth envelope reached; service stop opened",
+    [31] = "route loop: berth envelope reached; passed through to next stop",
     [32] = "route loop: departed for next stopSequence",
     [33] = "route loop: next drive command rejected",
     [34] = "route loop: next stopSequence/profile unavailable",
@@ -809,8 +812,8 @@ local function log_service_loop(quests)
   log("service #" .. tostring(session) .. " loop " .. tostring(id) .. ": L" .. tostring(line) .. " currentStopId=" .. tostring(stop_id)
     .. " serviceStopId=" .. tostring(service_stop_id)
     .. " -> " .. tostring(next_stop_id) .. " " .. (states[code] or ("state " .. tostring(code)))
-    .. string.format(" | bus=(%.3f, %.3f, %.3f) target=(%.3f, %.3f, %.3f) distance=%.1fm",
-      bus_x, bus_y, bus_z, target_x, target_y, target_z, target_distance) .. command_extra)
+    .. string.format(" | bus=(%.3f, %.3f, %.3f) target=(%.3f, %.3f, %.3f) distance=%.1fm berth(long=%.2fm lat=%.2fm speed=%.2f)",
+      bus_x, bus_y, bus_z, target_x, target_y, target_z, target_distance, berth_longitudinal, berth_lateral, berth_speed) .. command_extra)
 end
 
 registerForEvent("onUpdate", function()
