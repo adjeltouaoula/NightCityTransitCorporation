@@ -471,6 +471,29 @@ public class NCTCTransitSystem extends ScriptableSystem {
     return target;
   }
 
+  // A passage is crossed rather than served. The direction must describe the
+  // route leaving this point, not the direction in which the player happened
+  // to face while recording it. Use the next passage on this leg, or the
+  // next stop's berth when this is the last passage.
+  private func ResolvePassageForward() -> Void {
+    let nextPassage: Vector4;
+    let ignoredRecordedForward: Vector4;
+    let onwardTarget: Vector4 = this.GetServiceBerth();
+    let onward: Vector4;
+    if !this.followingPassage { return; };
+    if NCTCServiceProfiles.TryGetPassageAfter(this.GetGameInstance(), this.requestedLine, this.passageAfterStopId, this.passageOrdinal + 1, nextPassage, ignoredRecordedForward) {
+      onwardTarget = nextPassage;
+    };
+    onward = onwardTarget - this.passageTarget;
+    onward.Z = 0.00;
+    onward.W = 0.00;
+    if AbsF(onward.X) > 0.01 || AbsF(onward.Y) > 0.01 {
+      this.passageForward = Vector4.Normalize2D(onward);
+    } else {
+      this.passageForward = new Vector4(0.00, 0.00, 0.00, 0.00);
+    };
+  }
+
 
   private func PublishRouteDisplay(nextStopId: Int32) -> Void {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
@@ -815,6 +838,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.followingPassage = NCTCServiceProfiles.TryGetPassageAfter(this.GetGameInstance(), this.requestedLine, previousStopId, 0, this.passageTarget, this.passageForward);
     this.passageAfterStopId = previousStopId;
     this.passageOrdinal = 0;
+    this.ResolvePassageForward();
     this.PublishRouteDisplay(nextStopId);
     this.PublishLoopDiagnostic(6, nextStopId);
     return true;
@@ -826,6 +850,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if NCTCServiceProfiles.TryGetPassageAfter(this.GetGameInstance(), this.requestedLine, this.passageAfterStopId, nextOrdinal, nextPassage, this.passageForward) {
       this.passageOrdinal = nextOrdinal;
       this.passageTarget = nextPassage;
+      this.ResolvePassageForward();
       return true;
     };
     this.followingPassage = false;
