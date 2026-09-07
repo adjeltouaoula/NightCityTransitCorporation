@@ -463,7 +463,7 @@ public class NCTCSettings extends ScriptableSystem {
     quests.SetFact(n"nctc_manual_stop_z", Cast<Int32>(position.Z * 1000.00));
     quests.SetFact(n"nctc_manual_stop_loc_key", 0);
     if IsDefined(markers) && markers.GetTravelAnchorWithin(position, 100.00, locKey, anchorPosition) {
-      quests.SetFact(n"nctc_manual_stop_loc_key", StringToInt(StrAfterFirst(locKey, "LocKey#"), 0));
+      quests.SetFact(n"nctc_manual_stop_loc_key", this.ParseTravelAnchorLocKey(locKey));
     };
     quests.SetFact(n"nctc_survey_event_kind", 3);
     quests.SetFact(n"nctc_survey_event_id", quests.GetFact(n"nctc_survey_event_id") + 1);
@@ -513,7 +513,7 @@ public class NCTCSettings extends ScriptableSystem {
     quests.SetFact(n"nctc_replace_stop_z", Cast<Int32>(position.Z * 1000.00));
     quests.SetFact(n"nctc_replace_stop_loc_key", 0);
     if IsDefined(markers) && markers.GetTravelAnchorWithin(position, 100.00, locKey, anchorPosition) {
-      quests.SetFact(n"nctc_replace_stop_loc_key", StringToInt(StrAfterFirst(locKey, "LocKey#"), 0));
+      quests.SetFact(n"nctc_replace_stop_loc_key", this.ParseTravelAnchorLocKey(locKey));
     };
     quests.SetFact(n"nctc_survey_event_kind", 6);
     eventId = quests.GetFact(n"nctc_survey_event_id") + 1;
@@ -598,7 +598,7 @@ public class NCTCSettings extends ScriptableSystem {
     let count: Int32;
     let line: Int32 = this.draftLineNumber;
     let prefix: String;
-    let locKeyID: Int32 = StringToInt(StrAfterFirst(locKey, "LocKey#"), -1);
+    let locKeyID: Int32 = this.ParseTravelAnchorLocKey(locKey);
     if !this.developerMode || !IsDefined(quests) || line < 1 || locKeyID < 0 { return false; };
     if this.beginDraftLine {
       quests.SetFact(n"nctc_draft_line_number", line);
@@ -626,6 +626,16 @@ public class NCTCSettings extends ScriptableSystem {
 
   public static func Get(game: GameInstance) -> ref<NCTCSettings> {
     return GameInstance.GetScriptableSystemsContainer(game).Get(NameOf<NCTCSettings>()) as NCTCSettings;
+  }
+
+  // Fast-travel points usually expose `LocKey#123`, while some metro points
+  // expose the raw numeric key.  Both forms identify the same localized name.
+  // Treating the raw form as zero silently turned a valid moved stop into a
+  // manual, unnamed stop.
+  private func ParseTravelAnchorLocKey(value: String) -> Int32 {
+    let parsed: Int32 = StringToInt(StrAfterFirst(value, "LocKey#"), 0);
+    if parsed > 0 { return parsed; };
+    return StringToInt(value, 0);
   }
 
   public func ShouldRecordTerminalStops() -> Bool {

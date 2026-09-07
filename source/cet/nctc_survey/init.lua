@@ -651,7 +651,9 @@ local function persist_capture(quests, event_id)
       log("rejected selected-stop move " .. tostring(event_id) .. ": selected stop unavailable")
       return
     end
+    local linked_loc_key = fact(quests, "nctc_replace_stop_loc_key")
     kind = "moved selected stop " .. tostring(fact(quests, "nctc_replace_stop_index")) .. "/" .. tostring(count)
+      .. " anchorLocKey=" .. tostring(linked_loc_key)
   elseif event_kind == 7 then
     local position = {
       x = fact(quests, "nctc_passage_x") / 1000.0,
