@@ -9,7 +9,7 @@ local NCBN = { tag = "NightCityBusNetwork.PrototypeBus", interactionUI = nil, ch
     uiMissingLogged = false, wasInside = false, lastMountedSlot = nil,
     passengerMountRequested = false, mountRequestDeadline = 0, wasMounted = false,
     hubChoiceVisible = false, hubChoiceHub = nil, hubChoices = {}, selectedHubLine = 0,
-    hubChoiceRevision = -1 }
+    hubChoiceRevision = -1, lastInsideLocal = nil }
 
 -- Local-space zone in the aisle beside the two validated rear passenger seats.
 local seatAreas = {
@@ -459,6 +459,7 @@ registerForEvent("onUpdate", function()
     end
     NCBN.lastMountedSlot = nil
     local inside = insideNow
+    local currentLocal = localPosition(bus, player)
     setFact("nctc_player_in_service_bus", inside and 1 or 0)
     signalTransitSystem(inside)
     if inside ~= NCBN.wasInside then
@@ -466,8 +467,13 @@ registerForEvent("onUpdate", function()
         print((inside and "[NCBN] Player entered the walkable cabin." or "[NCBN] Player left the walkable cabin.")
             .. " atStop=" .. tostring(getFact("nctc_service_bus_at_stop"))
             .. " speed=" .. string.format("%.2f", bus:GetCurrentSpeed())
-            .. " departureRequest=" .. tostring(getFact("nctc_passenger_departure_requested")))
+            .. " departureRequest=" .. tostring(getFact("nctc_passenger_departure_requested"))
+            .. " localNow=" .. string.format("x=%.3f,y=%.3f,z=%.3f", currentLocal.x, currentLocal.y, currentLocal.z)
+            .. " localPrevious=" .. (NCBN.lastInsideLocal
+                and string.format("x=%.3f,y=%.3f,z=%.3f", NCBN.lastInsideLocal.x, NCBN.lastInsideLocal.y, NCBN.lastInsideLocal.z)
+                or "none"))
     end
+    if inside then NCBN.lastInsideLocal = currentLocal end
     local seats = offeredSeats(bus, player)
     if not sameSeats(NCBN.offeredSeats, seats) then
         hideChoice()
