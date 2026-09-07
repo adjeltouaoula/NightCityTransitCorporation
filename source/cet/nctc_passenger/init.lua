@@ -7,7 +7,9 @@
 local NCBN = { tag = "NightCityBusNetwork.PrototypeBus", interactionUI = nil, choiceHub = nil,
     choiceVisible = false, selectedSeat = 0, inputLocked = false, offeredSeats = {},
     uiMissingLogged = false, wasInside = false, lastMountedSlot = nil,
-    passengerMountRequested = false, mountRequestDeadline = 0, wasMounted = false }
+    passengerMountRequested = false, mountRequestDeadline = 0, wasMounted = false,
+    hubChoiceVisible = false, hubChoiceHub = nil, hubChoices = {}, selectedHubLine = 0,
+    hubChoiceRevision = -1 }
 
 -- Local-space zone in the aisle beside the two validated rear passenger seats.
 local seatAreas = {
@@ -20,6 +22,9 @@ local passengerSlots = { seat_back_left = true, seat_back_right = true }
 local function setFact(name, value)
     local quests = Game.GetQuestsSystem()
     if not quests then return false end
+    -- Hub state is written by redscript through QuestsSystem.SetFact.  CET
+    -- must use this same fact store: SetFactStr is a separate string store
+    -- and made a stale choice list survive after V left the stop radius.
     return pcall(function() quests:SetFact(CName.new(name), value) end)
 end
 
@@ -29,7 +34,11 @@ local function getFact(name)
     local ok, value = pcall(function() return quests:GetFact(CName.new(name)) end)
     if ok and type(value) == "number" then return value end
     ok, value = pcall(function() return quests:GetFact(name) end)
-    return ok and type(value) == "number" and value or 0
+    if ok and type(value) == "number" then return value end
+    -- Compatibility only for legacy facts written by earlier dev-kit builds.
+    ok, value = pcall(function() return quests:GetFactStr(name) end)
+    value = tonumber(value)
+    return ok and value ~= nil and math.floor(value) or 0
 end
 
 local function signalTransitSystem(value)
@@ -41,6 +50,25 @@ local function signalTransitSystem(value)
     end
     if not ok or not system then return false end
     return pcall(function() system:SetPlayerAboard(value) end)
+end
+
+local function requestHubService(choice)
+    if not choice then return false end
+    local container = Game.GetScriptableSystemsContainer()
+    if not container then return false end
+    local ok, system = pcall(function() return container:Get("NCTC.NCTCTransitSystem") end)
+    if not ok or not system then ok, system = pcall(function() return container:Get(CName.new("NCTC.NCTCTransitSystem")) end) end
+    if not ok or not system then return false end
+    local pos = Vector4.new(choice.x, choice.y, choice.z, 1)
+    local requestOk, accepted = pcall(function() return system:RequestService(tostring(choice.line), choice.stopId, pos) end)
+    if requestOk and accepted then
+        print("[NCBN] Hub choice selected: line " .. tostring(choice.line) .. ", stopId " .. tostring(choice.stopId))
+        -- Redscript owns the game's violet notification style. Signal it to
+        -- display the same confirmation used by a one-line stop.
+        setFact("nctc_hub_choice_notify_line", choice.line)
+        setFact("nctc_hub_choice_open", 0)
+    end
+    return requestOk and accepted
 end
 
 NCBN.tag = "NCTC.ServiceBus"
@@ -138,12 +166,44 @@ local function makeChoiceHub()
     return hub
 end
 
+local function makeHubChoiceHub()
+    local hub = gameinteractionsvisListChoiceHubData.new()
+    hub.title, hub.activityState, hub.hubPriority, hub.id = "NCTC — Choose line", gameinteractionsvisEVisualizerActivityState.Active, 1, 77902
+    local choices = {}
+    for _, service in ipairs(NCBN.hubChoices) do
+        local choiceType = gameinteractionsChoiceTypeWrapper.new()
+        choiceType:SetType(gameinteractionsChoiceType.Selected)
+        local choice = gameinteractionsvisListChoiceData.new()
+        choice.localizedName, choice.inputActionName, choice.type = "Wait for line " .. tostring(service.line), CName.new("None"), choiceType
+        table.insert(choices, choice)
+    end
+    hub.choices = choices
+    return hub
+end
+
 local function hideChoice()
     if not NCBN.choiceVisible then return end
     NCBN.choiceVisible, NCBN.choiceHub = false, nil
     if NCBN.interactionUI then
         local defs = GetAllBlackboardDefs().UIInteractions
         NCBN.interactionUI:OnDialogsData(Game.GetBlackboardSystem():Get(defs):GetVariant(defs.DialogChoiceHubs))
+    end
+end
+
+local function hideHubChoice()
+    if not NCBN.hubChoiceVisible then return end
+    NCBN.hubChoiceVisible, NCBN.hubChoiceHub, NCBN.hubChoices = false, nil, {}
+    if NCBN.interactionUI then
+        local defs = GetAllBlackboardDefs().UIInteractions
+        local blackboard = Game.GetBlackboardSystem():Get(defs)
+        -- A line hub is injected by CET, so closing it also has to clear the
+        -- vanilla UI's active-hub selection.  Replacing only DialogChoiceHubs
+        -- leaves the list widget focused on the now removed hub.
+        blackboard:SetInt(defs.ActiveChoiceHubID, 0)
+        NCBN.interactionUI:OnDialogsData(blackboard:GetVariant(defs.DialogChoiceHubs))
+        NCBN.interactionUI:OnInteractionsChanged()
+        NCBN.interactionUI:UpdateListBlackboard()
+        NCBN.interactionUI:OnDialogsActivateHub(0)
     end
 end
 
@@ -164,6 +224,41 @@ local function showChoice()
     NCBN.interactionUI:OnInteractionsChanged()
     NCBN.interactionUI:UpdateListBlackboard()
     NCBN.interactionUI:OnDialogsActivateHub(NCBN.choiceHub.id)
+end
+
+local function showHubChoice()
+    if not NCBN.interactionUI or #NCBN.hubChoices == 0 then return end
+    NCBN.hubChoiceHub = makeHubChoiceHub()
+    NCBN.hubChoiceVisible = true
+    local defs = GetAllBlackboardDefs().UIInteractions
+    local blackboard = Game.GetBlackboardSystem():Get(defs)
+    blackboard:SetInt(defs.ActiveChoiceHubID, NCBN.hubChoiceHub.id)
+    local data = blackboard:GetVariant(defs.DialogChoiceHubs)
+    NCBN.interactionUI:OnDialogsSelectIndex(NCBN.selectedHubLine)
+    NCBN.interactionUI:OnDialogsData(data)
+    NCBN.interactionUI:OnInteractionsChanged()
+    NCBN.interactionUI:UpdateListBlackboard()
+    NCBN.interactionUI:OnDialogsActivateHub(NCBN.hubChoiceHub.id)
+end
+
+local function updateHubChoice()
+    if getFact("nctc_hub_choice_open") ~= 1 then
+        hideHubChoice()
+        return
+    end
+    local revision = getFact("nctc_hub_choice_revision")
+    if NCBN.hubChoiceVisible and revision == NCBN.hubChoiceRevision then return end
+    local choices, count = {}, getFact("nctc_hub_choice_count")
+    local x, y, z = getFact("nctc_hub_choice_x") / 1000.0, getFact("nctc_hub_choice_y") / 1000.0, getFact("nctc_hub_choice_z") / 1000.0
+    for index = 0, count - 1 do
+        local line = getFact("nctc_hub_choice_" .. tostring(index) .. "_line")
+        local stopId = getFact("nctc_hub_choice_" .. tostring(index) .. "_stop_id")
+        if line > 0 and stopId > 0 then table.insert(choices, { line = line, stopId = stopId, x = x, y = y, z = z }) end
+    end
+    hideChoice()
+    hideHubChoice()
+    NCBN.hubChoices, NCBN.selectedHubLine, NCBN.hubChoiceRevision = choices, 0, revision
+    showHubChoice()
 end
 
 local function mountPassenger(seat)
@@ -255,22 +350,37 @@ registerForEvent("onInit", function()
     Observe("InteractionUIBase", "OnDialogsData", function(this) NCBN.interactionUI = this end)
     Observe("InteractionUIBase", "OnUninitialize", function(this) if NCBN.interactionUI == this then NCBN.interactionUI = nil end end)
     Override("InteractionUIBase", "OnDialogsData", function(_, value, wrapped)
-        if NCBN.choiceVisible and NCBN.choiceHub then
+        if (NCBN.choiceVisible and NCBN.choiceHub) or (NCBN.hubChoiceVisible and NCBN.hubChoiceHub) then
             local data = FromVariant(value)
             -- FromVariant properties are copied. Reassigning the modified
             -- array is required or the HUD never receives our seat choice.
             local hubs = data.choiceHubs
-            table.insert(hubs, NCBN.choiceHub)
+            if NCBN.choiceVisible and NCBN.choiceHub then table.insert(hubs, NCBN.choiceHub) end
+            if NCBN.hubChoiceVisible and NCBN.hubChoiceHub then table.insert(hubs, NCBN.hubChoiceHub) end
             data.choiceHubs = hubs
             wrapped(ToVariant(data))
         else wrapped(value) end
     end)
-    Override("InteractionUIBase", "OnDialogsSelectIndex", function(_, index, wrapped) wrapped(NCBN.choiceVisible and NCBN.selectedSeat or index) end)
-    Override("dialogWidgetGameController", "OnDialogsActivateHub", function(_, id, wrapped) return wrapped(NCBN.choiceVisible and NCBN.choiceHub and NCBN.choiceHub.id or id) end)
+    Override("InteractionUIBase", "OnDialogsSelectIndex", function(_, index, wrapped)
+        if NCBN.hubChoiceVisible then return wrapped(NCBN.selectedHubLine) end
+        wrapped(NCBN.choiceVisible and NCBN.selectedSeat or index)
+    end)
+    Override("dialogWidgetGameController", "OnDialogsActivateHub", function(_, id, wrapped)
+        if NCBN.hubChoiceVisible and NCBN.hubChoiceHub then return wrapped(NCBN.hubChoiceHub.id) end
+        return wrapped(NCBN.choiceVisible and NCBN.choiceHub and NCBN.choiceHub.id or id)
+    end)
     Observe("PlayerPuppet", "OnAction", function(_, action, consumer)
         if NCBN.inputLocked or action:GetType(action).value ~= "BUTTON_PRESSED" or action:GetValue(action) <= 0 then return end
         local name = action:GetName(action).value
-        if NCBN.choiceVisible and name == "ChoiceApply" then
+        if NCBN.hubChoiceVisible and name == "ChoiceApply" then
+            NCBN.inputLocked = true; consumer:Consume()
+            requestHubService(NCBN.hubChoices[NCBN.selectedHubLine + 1])
+            hideHubChoice()
+        elseif NCBN.hubChoiceVisible and (name == "ChoiceScrollUp" or name == "ChoiceScrollDown") then
+            NCBN.inputLocked = true; consumer:Consume()
+            NCBN.selectedHubLine = (NCBN.selectedHubLine + (name == "ChoiceScrollUp" and 1 or -1)) % #NCBN.hubChoices
+            showHubChoice()
+        elseif NCBN.choiceVisible and name == "ChoiceApply" then
             NCBN.inputLocked = true; consumer:Consume(); mountPassenger(NCBN.offeredSeats[NCBN.selectedSeat + 1])
         elseif NCBN.choiceVisible and (name == "ChoiceScrollUp" or name == "ChoiceScrollDown") then
             NCBN.inputLocked = true; consumer:Consume()
@@ -291,6 +401,7 @@ end)
 
 registerForEvent("onUpdate", function()
     NCBN.inputLocked = false
+    updateHubChoice()
     local player, bus = Game.GetPlayer(), findServiceBus()
     if not player or not bus then
         NCBN.passengerMountRequested = false

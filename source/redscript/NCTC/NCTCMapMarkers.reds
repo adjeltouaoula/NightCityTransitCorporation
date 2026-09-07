@@ -50,6 +50,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
   private let m_serviceStopIds: array<Int32>;
   private let m_serviceHubLines: array<array<String>>;
   private let m_serviceHubStopIndices: array<array<Int32>>;
+  private let m_serviceHubStopIds: array<array<Int32>>;
   private let m_serviceHubStops: array<array<String>>;
 
   public static func GetInstance(game: GameInstance) -> ref<NCTCMapMarkerSystem> {
@@ -186,6 +187,53 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     if nearest < 0 { return false; };
     locKey = anchors[nearest].locKey; anchorPosition = anchors[nearest].position;
     return true;
+  }
+
+  // A metro hub must preserve its native interaction stack (metro and, where
+  // present, fast travel).  NCTC therefore uses its second-level line picker
+  // only at a real metro anchor, never at an ordinary roadside transfer.
+  public func IsNearMetroAnchor(position: Vector4) -> Bool {
+    let system: ref<MappinSystem> = GameInstance.GetMappinSystem(this.GetGameInstance());
+    let anchors: array<NCTCTravelAnchor>;
+    let index: Int32 = 0;
+    if !IsDefined(system) { return false; };
+    anchors = this.GetTravelAnchors(system);
+    while index < ArraySize(anchors) {
+      if anchors[index].isMetro && Vector4.Distance(position, anchors[index].position) <= 12.00 { return true; };
+      index += 1;
+    };
+    return false;
+  }
+
+  // A hub may represent several lines at one physical marker. Return one
+  // callable stop per line so the interaction can let the passenger choose
+  // instead of silently using the first cached service.
+  public func GetNearestServiceChoices(position: Vector4, out lines: array<String>, out stopIds: array<Int32>, out stop: Vector4) -> Bool {
+    let index: Int32 = 0;
+    let serviceIndex: Int32 = 0;
+    let nearest: Int32 = -1;
+    let nearestDistance: Float = 18.00;
+    let distance: Float;
+    let knownLines: String = "|";
+    while index < ArraySize(this.m_servicePositions) {
+      distance = Vector4.Distance(position, this.m_servicePositions[index]);
+      if distance < nearestDistance {
+        nearestDistance = distance;
+        nearest = index;
+      };
+      index += 1;
+    };
+    if nearest < 0 { return false; };
+    stop = this.m_servicePositions[nearest];
+    while serviceIndex < ArraySize(this.m_serviceHubLines[nearest]) {
+      if !StrContains(knownLines, "|" + this.m_serviceHubLines[nearest][serviceIndex] + "|") {
+        ArrayPush(lines, this.m_serviceHubLines[nearest][serviceIndex]);
+        ArrayPush(stopIds, this.m_serviceHubStopIds[nearest][serviceIndex]);
+        knownLines += this.m_serviceHubLines[nearest][serviceIndex] + "|";
+      };
+      serviceIndex += 1;
+    };
+    return ArraySize(lines) > 0;
   }
 
   // Authoring uses a broader association radius than interaction/deletion:
@@ -479,6 +527,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     };
     this.m_serviceHubLines = hubServiceLines;
     this.m_serviceHubStopIndices = hubServiceStopIndices;
+    this.m_serviceHubStopIds = hubServiceStopIds;
     this.m_serviceHubStops = hubServiceStops;
   }
 
@@ -492,6 +541,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     ArrayClear(this.m_serviceStopIds);
     ArrayClear(this.m_serviceHubLines);
     ArrayClear(this.m_serviceHubStopIndices);
+    ArrayClear(this.m_serviceHubStopIds);
     ArrayClear(this.m_serviceHubStops);
   }
 }
