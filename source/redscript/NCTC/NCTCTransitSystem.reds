@@ -393,6 +393,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
     quests.SetFact(n"nctc_dev_loop_code", code);
     quests.SetFact(n"nctc_dev_loop_line", StringToInt(this.requestedLine, -1));
     quests.SetFact(n"nctc_dev_loop_stop_id", this.requestedStopId);
+    // The reserved passenger-service stop is intentionally separate from the
+    // route's current stop. Publish both so a pass-through can be diagnosed
+    // without guessing which ID was lost.
+    quests.SetFact(n"nctc_dev_loop_service_stop_id", this.serviceStopId);
     quests.SetFact(n"nctc_dev_loop_next_stop_id", nextStopId);
     quests.SetFact(n"nctc_dev_loop_target_x_mm", Cast<Int32>(targetPosition.X * 1000.00));
     quests.SetFact(n"nctc_dev_loop_target_y_mm", Cast<Int32>(targetPosition.Y * 1000.00));

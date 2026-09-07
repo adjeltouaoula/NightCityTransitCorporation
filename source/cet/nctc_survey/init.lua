@@ -763,6 +763,7 @@ local function log_service_loop(quests)
   local code = fact(quests, "nctc_dev_loop_code")
   local line = fact(quests, "nctc_dev_loop_line")
   local stop_id = fact(quests, "nctc_dev_loop_stop_id")
+  local service_stop_id = fact(quests, "nctc_dev_loop_service_stop_id")
   local next_stop_id = fact(quests, "nctc_dev_loop_next_stop_id")
   local target_x = fact(quests, "nctc_dev_loop_target_x_mm") / 1000.0
   local target_y = fact(quests, "nctc_dev_loop_target_y_mm") / 1000.0
@@ -805,7 +806,8 @@ local function log_service_loop(quests)
       .. " speed=" .. string.format("%.2f", fact(quests, "nctc_dev_command_speed_mm") / 1000.0)
   end
   local session = fact(quests, "nctc_dev_service_session")
-  log("service #" .. tostring(session) .. " loop " .. tostring(id) .. ": L" .. tostring(line) .. " stopId " .. tostring(stop_id)
+  log("service #" .. tostring(session) .. " loop " .. tostring(id) .. ": L" .. tostring(line) .. " currentStopId=" .. tostring(stop_id)
+    .. " serviceStopId=" .. tostring(service_stop_id)
     .. " -> " .. tostring(next_stop_id) .. " " .. (states[code] or ("state " .. tostring(code)))
     .. string.format(" | bus=(%.3f, %.3f, %.3f) target=(%.3f, %.3f, %.3f) distance=%.1fm",
       bus_x, bus_y, bus_z, target_x, target_y, target_z, target_distance) .. command_extra)
