@@ -267,11 +267,18 @@ public class NCTCSettings extends ScriptableSystem {
   public let deleteNearestStopKey: EInputKey = EInputKey.IK_NumPad5;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Move selected stop")
+  @runtimeProperty("ModSettings.description", "Moves the selected stop to V's exact position without changing its spawn, approach, or berth. A metro or fast-travel anchor within 100 m supplies only its name and LocKey.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let moveSelectedStopKey: EInputKey = EInputKey.IK_NumPad6;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Despawn service bus")
   @runtimeProperty("ModSettings.description", "Immediately removes the active NCTC bus and clears its pending route request. A new bus can then be called right away.")
   @runtimeProperty("ModSettings.category", "Developer mode")
   @runtimeProperty("ModSettings.dependency", "developerMode")
-  public let despawnServiceBusKey: EInputKey = EInputKey.IK_NumPad6;
+  public let despawnServiceBusKey: EInputKey = EInputKey.IK_NumPad8;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "New line number")
@@ -368,6 +375,7 @@ public class NCTCSettings extends ScriptableSystem {
     // branch. That prevents a save restore from replaying old coordinates.
     if Equals(event.GetKey(), this.addManualStopKey) { this.RecordManualStop(); return; };
     if Equals(event.GetKey(), this.deleteNearestStopKey) { this.DeleteNearestStop(); return; };
+    if Equals(event.GetKey(), this.moveSelectedStopKey) { this.MoveSelectedStop(); return; };
     if Equals(event.GetKey(), this.despawnServiceBusKey) {
       if NCTCTransitSystem.Get(this.GetGameInstance()).DespawnServiceBus() { NCTCSettings.Notify(this.GetGameInstance(), "NCTC service bus despawned"); };
     };
@@ -418,7 +426,10 @@ public class NCTCSettings extends ScriptableSystem {
   private func RecordManualStop() -> Void {
     let player: ref<PlayerPuppet> = GetPlayer(this.GetGameInstance());
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(this.GetGameInstance());
     let position: Vector4;
+    let anchorPosition: Vector4;
+    let locKey: String;
     let line: Int32 = this.GetSelectedLineNumber();
     if !IsDefined(player) || !IsDefined(quests) || line < 1 { return; };
     position = player.GetWorldPosition();
@@ -426,6 +437,10 @@ public class NCTCSettings extends ScriptableSystem {
     quests.SetFact(n"nctc_manual_stop_x", Cast<Int32>(position.X * 1000.00));
     quests.SetFact(n"nctc_manual_stop_y", Cast<Int32>(position.Y * 1000.00));
     quests.SetFact(n"nctc_manual_stop_z", Cast<Int32>(position.Z * 1000.00));
+    quests.SetFact(n"nctc_manual_stop_loc_key", 0);
+    if IsDefined(markers) && markers.GetTravelAnchorWithin(position, 100.00, locKey, anchorPosition) {
+      quests.SetFact(n"nctc_manual_stop_loc_key", StringToInt(StrAfterFirst(locKey, "LocKey#"), 0));
+    };
     quests.SetFact(n"nctc_survey_event_kind", 3);
     quests.SetFact(n"nctc_survey_event_id", quests.GetFact(n"nctc_survey_event_id") + 1);
     NCTCSettings.Notify(this.GetGameInstance(), "NCTC: manual stop saved for line " + ToString(line));
@@ -452,6 +467,40 @@ public class NCTCSettings extends ScriptableSystem {
     quests.SetFact(n"nctc_survey_event_kind", 4);
     quests.SetFact(n"nctc_survey_event_id", quests.GetFact(n"nctc_survey_event_id") + 1);
     NCTCSettings.Notify(this.GetGameInstance(), "NCTC: deleting nearest stop for line " + ToString(line));
+  }
+
+  // This action edits only the selected stop's map/call anchor. Surveyed
+  // driving data is keyed by the stable stop ID and is intentionally absent
+  // from this event, so spawn/approach/berth cannot be overwritten.
+  private func MoveSelectedStop() -> Void {
+    let player: ref<PlayerPuppet> = GetPlayer(this.GetGameInstance());
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(this.GetGameInstance());
+    let position: Vector4;
+    let anchorPosition: Vector4;
+    let locKey: String;
+    let line: Int32 = this.GetSelectedLineNumber();
+    let eventId: Int32;
+    let confirmation: ref<NCTCSurveyWriteConfirmationCallback>;
+    if !IsDefined(player) || !IsDefined(quests) || line < 1 { return; };
+    position = player.GetWorldPosition();
+    quests.SetFact(n"nctc_replace_stop_line", line);
+    quests.SetFact(n"nctc_replace_stop_index", this.surveyStopIndex);
+    quests.SetFact(n"nctc_replace_stop_x", Cast<Int32>(position.X * 1000.00));
+    quests.SetFact(n"nctc_replace_stop_y", Cast<Int32>(position.Y * 1000.00));
+    quests.SetFact(n"nctc_replace_stop_z", Cast<Int32>(position.Z * 1000.00));
+    quests.SetFact(n"nctc_replace_stop_loc_key", 0);
+    if IsDefined(markers) && markers.GetTravelAnchorWithin(position, 100.00, locKey, anchorPosition) {
+      quests.SetFact(n"nctc_replace_stop_loc_key", StringToInt(StrAfterFirst(locKey, "LocKey#"), 0));
+    };
+    quests.SetFact(n"nctc_survey_event_kind", 6);
+    eventId = quests.GetFact(n"nctc_survey_event_id") + 1;
+    quests.SetFact(n"nctc_survey_write_ack_event_id", -1);
+    quests.SetFact(n"nctc_survey_event_id", eventId);
+    confirmation = new NCTCSurveyWriteConfirmationCallback();
+    confirmation.game = this.GetGameInstance(); confirmation.eventId = eventId; confirmation.kind = "selected stop move";
+    GameInstance.GetDelaySystem(this.GetGameInstance()).DelayCallback(confirmation, 0.75, false);
+    NCTCSettings.Notify(this.GetGameInstance(), "NCTC: moving selected stop " + ToString(this.surveyStopIndex) + " on line " + ToString(line));
   }
 
   // The draft number is reserved for a genuinely new line. Editing an

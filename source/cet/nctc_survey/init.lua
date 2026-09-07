@@ -37,6 +37,7 @@ local fact
 local deduplicate_same_line_stops
 local normalize_captures
 local ensure_stop_ids
+local join_or_create_hub
 
 
 local function load_settings()
@@ -308,8 +309,8 @@ local function add_stop(network, stop, event_id)
       return false
     end
   end
-  stop.hubId = assign_hub(network, stop.position, event_id)
   table.insert(network.stops, stop)
+  join_or_create_hub(network, stop, event_id)
   return true
 end
 
@@ -467,6 +468,86 @@ local function selected_stop(network, line, stop_index)
   return matches[stop_index], #matches
 end
 
+local function copy_position(position)
+  return { x = position.x, y = position.y, z = position.z }
+end
+
+local function find_hub(network, hub_id)
+  for _, hub in ipairs(network.hubs or {}) do
+    if hub.id == hub_id then return hub end
+  end
+  return nil
+end
+
+-- Hubs are created only by a second stop from a different line. The first
+-- existing stop is the immutable reference; joining stops inherit its map and
+-- call position, never its driving captures.
+join_or_create_hub = function(network, stop, event_id)
+  if not stop.position then return end
+  local radius_squared = HUB_RADIUS_METRES * HUB_RADIUS_METRES
+  for _, existing in ipairs(network.stops or {}) do
+    if existing ~= stop and existing.line ~= stop.line and existing.position
+      and distance_squared(existing.position, stop.position) <= radius_squared then
+      local hub = existing.hubId and find_hub(network, existing.hubId) or nil
+      if not hub then
+        hub = { id = "hub-" .. tostring(event_id), position = copy_position(existing.position), referenceStopId = existing.id }
+        network.hubs = network.hubs or {}
+        table.insert(network.hubs, hub)
+        existing.hubId = hub.id
+      end
+      stop.hubId = hub.id
+      stop.position = copy_position(hub.position)
+      for _, member in ipairs(network.stops or {}) do
+        if member.hubId == hub.id then member.position = copy_position(hub.position) end
+      end
+      return
+    end
+  end
+  stop.hubId = nil
+end
+
+-- Replacement preserves identity, array order, and every driving capture.
+-- Only the stop's map/call position and optional display anchor change.
+local function replace_selected_stop(network, line, stop_index, position, loc_key, event_id)
+  local target, count = selected_stop(network, line, stop_index)
+  if not target then return false, count end
+  target.position = position
+  if loc_key and loc_key > 0 then
+    target.locKey = loc_key
+    target.anchorType = "travelAnchor"
+  else
+    target.locKey = nil
+    target.anchorType = "manual"
+  end
+  local old_hub = target.hubId and find_hub(network, target.hubId) or nil
+  if old_hub and old_hub.referenceStopId == target.id then
+    -- The original creator remains the reference forever. Moving it moves the
+    -- whole hub, while retaining every member's independent driving profile.
+    old_hub.position = copy_position(position)
+    for _, member in ipairs(network.stops or {}) do
+      if member.hubId == old_hub.id then member.position = copy_position(old_hub.position) end
+    end
+  elseif old_hub then
+    target.hubId = nil
+    local members = 0
+    for _, member in ipairs(network.stops or {}) do
+      if member.hubId == old_hub.id then members = members + 1 end
+    end
+    if members < 2 then
+      for _, member in ipairs(network.stops or {}) do
+        if member.hubId == old_hub.id then member.hubId = nil end
+      end
+      for index, hub in ipairs(network.hubs or {}) do
+        if hub.id == old_hub.id then table.remove(network.hubs, index); break end
+      end
+    end
+    join_or_create_hub(network, target, event_id)
+  else
+    join_or_create_hub(network, target, event_id)
+  end
+  return true, count
+end
+
 local function find_capture(network, stop_id)
   for index = #(network.captures or {}), 1, -1 do
     local capture = network.captures[index]
@@ -527,10 +608,14 @@ local function persist_capture(quests, event_id)
       y = fact(quests, "nctc_manual_stop_y") / 1000.0,
       z = fact(quests, "nctc_manual_stop_z") / 1000.0
     }
+    local loc_key = fact(quests, "nctc_manual_stop_loc_key")
     add_stop(network, {
       eventId = event_id,
       line = fact(quests, "nctc_manual_stop_line"),
-      anchorType = "manual",
+      -- The coordinate remains manual/roadside even when an anchor lends its
+      -- name. The type only documents that the display LocKey was linked.
+      anchorType = loc_key > 0 and "travelAnchor" or "manual",
+      locKey = loc_key > 0 and loc_key or nil,
       position = position
     }, event_id)
     kind = "manual stop"
@@ -542,6 +627,23 @@ local function persist_capture(quests, event_id)
     }
     local deleted = delete_nearest_stop(network, fact(quests, "nctc_delete_stop_line"), position, fact(quests, "nctc_delete_stop_loc_key"))
     kind = deleted and "deleted stop" or "no stop deleted"
+  elseif event_kind == 6 then
+    local position = {
+      x = fact(quests, "nctc_replace_stop_x") / 1000.0,
+      y = fact(quests, "nctc_replace_stop_y") / 1000.0,
+      z = fact(quests, "nctc_replace_stop_z") / 1000.0
+    }
+    local replaced, count = replace_selected_stop(network,
+      fact(quests, "nctc_replace_stop_line"),
+      fact(quests, "nctc_replace_stop_index"),
+      position,
+      fact(quests, "nctc_replace_stop_loc_key"),
+      event_id)
+    if not replaced then
+      log("rejected selected-stop move " .. tostring(event_id) .. ": selected stop unavailable")
+      return
+    end
+    kind = "moved selected stop " .. tostring(fact(quests, "nctc_replace_stop_index")) .. "/" .. tostring(count)
   else
     local capture_line = fact(quests, "nctc_survey_capture_line")
     local capture_stop_index = fact(quests, "nctc_survey_capture_stop_index")

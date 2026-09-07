@@ -188,6 +188,32 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     return true;
   }
 
+  // Authoring uses a broader association radius than interaction/deletion:
+  // roadside bus positions may deliberately sit up to 100 m from a usable
+  // metro or fast-travel marker, while retaining their exact road position.
+  public func GetTravelAnchorWithin(position: Vector4, radius: Float, out locKey: String, out anchorPosition: Vector4) -> Bool {
+    let system: ref<MappinSystem> = GameInstance.GetMappinSystem(this.GetGameInstance());
+    let anchors: array<NCTCTravelAnchor>;
+    let index: Int32 = 0;
+    let nearest: Int32 = -1;
+    let nearestMetro: Int32 = -1;
+    let nearestDistance: Float = radius;
+    let nearestMetroDistance: Float = radius;
+    let distance: Float;
+    if !IsDefined(system) { return false; };
+    anchors = this.GetTravelAnchors(system);
+    while index < ArraySize(anchors) {
+      distance = Vector4.Distance(position, anchors[index].position);
+      if distance < nearestDistance { nearestDistance = distance; nearest = index; };
+      if anchors[index].isMetro && distance < nearestMetroDistance { nearestMetroDistance = distance; nearestMetro = index; };
+      index += 1;
+    };
+    if nearestMetro >= 0 && nearestMetroDistance <= nearestDistance + 5.00 { nearest = nearestMetro; };
+    if nearest < 0 { return false; };
+    locKey = anchors[nearest].locKey; anchorPosition = anchors[nearest].position;
+    return true;
+  }
+
   private func GetExternalStops() -> array<NCTCStopDefinition> {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
     let stops: array<NCTCStopDefinition>;
@@ -196,6 +222,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     let prefix: String;
     let line: Int32;
     let locKey: Int32;
+    let position: Vector4;
     let definition: NCTCStopDefinition;
     let ordinal: Int32;
     let preceding: Int32;
@@ -211,10 +238,17 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
         preceding += 1;
       };
       locKey = quests.GetFact(StringToName(prefix + "loc_key"));
+      position = new Vector4(Cast<Float>(quests.GetFact(StringToName(prefix + "x"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "y"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "z"))) / 1000.00, 1.00);
       if locKey > 0 {
         definition = this.Stop(ToString(line), "LocKey#" + ToString(locKey), GetLocalizedText("LocKey#" + ToString(locKey)));
+        // A linked roadside stop uses the anchor only for its label. Its map
+        // and call position remain the position authored by the developer.
+        if AbsF(position.X) > 1.00 || AbsF(position.Y) > 1.00 {
+          definition.position = position;
+          definition.isManual = true;
+        };
       } else {
-        definition = this.ManualStop(ToString(line), new Vector4(Cast<Float>(quests.GetFact(StringToName(prefix + "x"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "y"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "z"))) / 1000.00, 1.00), this.GetManualStopName(new Vector4(Cast<Float>(quests.GetFact(StringToName(prefix + "x"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "y"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "z"))) / 1000.00, 1.00)));
+        definition = this.ManualStop(ToString(line), position, this.GetManualStopName(position));
       };
       definition.color = quests.GetFact(StringToName("nctc_external_line_" + ToString(line) + "_color"));
       definition.serviceStopIndex = ordinal;
