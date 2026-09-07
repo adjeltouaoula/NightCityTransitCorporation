@@ -179,10 +179,10 @@ local function mountPassenger(seat)
     -- the workspot back from the Mahir is unreliable in CET.
     NCBN.passengerMountRequested = true
     NCBN.mountRequestDeadline = os.clock() + 5.0
-    -- Do not signal departure yet. Mounting is asynchronous; allowing the bus
-    -- to leave while this animation is still resolving can eject V from the
-    -- rear workspot. The signal is sent only after the mount is confirmed.
-    print("[NCBN] Passenger seat mount requested: " .. seat.id)
+    -- This is an edge-triggered service request, not a mirror of the game's
+    -- unreliable Mahir mounted-slot state. The transit loop acknowledges it
+    -- exactly once after allowing the seating animation to complete.
+    setFact("nctc_passenger_departure_requested", 1)
     Game.GetMountingFacility():Mount(request)
     hideChoice()
 end
@@ -319,11 +319,10 @@ registerForEvent("onUpdate", function()
         local aboard = NCBN.passengerMountRequested or passengerSlots[slotName] == true
         NCBN.wasMounted = true
         setFact("nctc_player_in_service_bus", aboard and 1 or 0)
-        if aboard then setFact("nctc_passenger_departure_requested", 1) end
         signalTransitSystem(aboard)
         if slotName ~= NCBN.lastMountedSlot then
             NCBN.lastMountedSlot = slotName
-            print("[NCBN] Passenger seat mount confirmed: " .. slotName .. (passengerSlots[slotName] and " (passenger)" or " (forbidden)"))
+            print("[NCBN] Player mounted slot: " .. slotName .. (passengerSlots[slotName] and " (passenger)" or " (forbidden)"))
         end
         hideChoice()
         return
@@ -331,7 +330,6 @@ registerForEvent("onUpdate", function()
     -- Mounting is asynchronous. Do not clear the provenance on the frame
     -- between Mount(request) and GetMountedVehicle() becoming valid.
     if NCBN.wasMounted then
-        print("[NCBN] Passenger seat mount ended: " .. tostring(NCBN.lastMountedSlot))
         NCBN.passengerMountRequested = false
         NCBN.mountRequestDeadline = 0
         NCBN.wasMounted = false
@@ -341,10 +339,8 @@ registerForEvent("onUpdate", function()
     end
     NCBN.lastMountedSlot = nil
     local inside = insideNow
-    -- Walking through the open door is not a confirmed passenger mount. Keep
-    -- the bus at the stop until V has completed a rear-seat workspot mount.
-    setFact("nctc_player_in_service_bus", 0)
-    signalTransitSystem(false)
+    setFact("nctc_player_in_service_bus", inside and 1 or 0)
+    signalTransitSystem(inside)
     if inside ~= NCBN.wasInside then
         NCBN.wasInside = inside
         print(inside and "[NCBN] Player entered the walkable cabin." or "[NCBN] Player left the walkable cabin.")
