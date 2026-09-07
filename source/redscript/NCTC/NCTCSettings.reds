@@ -274,11 +274,11 @@ public class NCTCSettings extends ScriptableSystem {
   public let moveSelectedStopKey: EInputKey = EInputKey.IK_NumPad6;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
-  @runtimeProperty("ModSettings.displayName", "Insert stop after selected")
-  @runtimeProperty("ModSettings.description", "Creates a new roadside stop at V's position immediately after the selected stop. Existing spawn, approach, berth, and route order are preserved.")
+  @runtimeProperty("ModSettings.displayName", "Record passage point after selected stop")
+  @runtimeProperty("ModSettings.description", "Adds an invisible traffic waypoint after the selected stop and before the following stop. It is not a map stop and has no spawn, approach, or berth.")
   @runtimeProperty("ModSettings.category", "Developer mode")
   @runtimeProperty("ModSettings.dependency", "developerMode")
-  public let insertStopAfterSelectedKey: EInputKey = EInputKey.IK_NumPad7;
+  public let recordPassageAfterSelectedKey: EInputKey = EInputKey.IK_NumPad7;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Despawn service bus")
@@ -383,7 +383,7 @@ public class NCTCSettings extends ScriptableSystem {
     if Equals(event.GetKey(), this.addManualStopKey) { this.RecordManualStop(); return; };
     if Equals(event.GetKey(), this.deleteNearestStopKey) { this.DeleteNearestStop(); return; };
     if Equals(event.GetKey(), this.moveSelectedStopKey) { this.MoveSelectedStop(); return; };
-    if Equals(event.GetKey(), this.insertStopAfterSelectedKey) { this.InsertStopAfterSelected(); return; };
+    if Equals(event.GetKey(), this.recordPassageAfterSelectedKey) { this.RecordPassageAfterSelected(); return; };
     if Equals(event.GetKey(), this.despawnServiceBusKey) {
       if NCTCTransitSystem.Get(this.GetGameInstance()).DespawnServiceBus() { NCTCSettings.Notify(this.GetGameInstance(), "NCTC service bus despawned"); };
     };
@@ -511,37 +511,30 @@ public class NCTCSettings extends ScriptableSystem {
     NCTCSettings.Notify(this.GetGameInstance(), "NCTC: moving selected stop " + ToString(this.surveyStopIndex) + " on line " + ToString(line));
   }
 
-  // Insertion is intentionally separate from normal manual-stop creation:
-  // it uses the selected stop as the unambiguous route insertion point.
-  private func InsertStopAfterSelected() -> Void {
+  // A passage belongs to the route leg after the selected stop. It is never a
+  // passenger stop: it has no mappin, LocKey, spawn, approach, or berth.
+  private func RecordPassageAfterSelected() -> Void {
     let player: ref<PlayerPuppet> = GetPlayer(this.GetGameInstance());
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
-    let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(this.GetGameInstance());
     let position: Vector4;
-    let anchorPosition: Vector4;
-    let locKey: String;
     let line: Int32 = this.GetSelectedLineNumber();
     let eventId: Int32;
     let confirmation: ref<NCTCSurveyWriteConfirmationCallback>;
     if !IsDefined(player) || !IsDefined(quests) || line < 1 { return; };
     position = player.GetWorldPosition();
-    quests.SetFact(n"nctc_insert_stop_line", line);
-    quests.SetFact(n"nctc_insert_stop_after_index", this.surveyStopIndex);
-    quests.SetFact(n"nctc_insert_stop_x", Cast<Int32>(position.X * 1000.00));
-    quests.SetFact(n"nctc_insert_stop_y", Cast<Int32>(position.Y * 1000.00));
-    quests.SetFact(n"nctc_insert_stop_z", Cast<Int32>(position.Z * 1000.00));
-    quests.SetFact(n"nctc_insert_stop_loc_key", 0);
-    if IsDefined(markers) && markers.GetTravelAnchorWithin(position, 100.00, locKey, anchorPosition) {
-      quests.SetFact(n"nctc_insert_stop_loc_key", StringToInt(StrAfterFirst(locKey, "LocKey#"), 0));
-    };
+    quests.SetFact(n"nctc_passage_line", line);
+    quests.SetFact(n"nctc_passage_after_index", this.surveyStopIndex);
+    quests.SetFact(n"nctc_passage_x", Cast<Int32>(position.X * 1000.00));
+    quests.SetFact(n"nctc_passage_y", Cast<Int32>(position.Y * 1000.00));
+    quests.SetFact(n"nctc_passage_z", Cast<Int32>(position.Z * 1000.00));
     quests.SetFact(n"nctc_survey_event_kind", 7);
     eventId = quests.GetFact(n"nctc_survey_event_id") + 1;
     quests.SetFact(n"nctc_survey_write_ack_event_id", -1);
     quests.SetFact(n"nctc_survey_event_id", eventId);
     confirmation = new NCTCSurveyWriteConfirmationCallback();
-    confirmation.game = this.GetGameInstance(); confirmation.eventId = eventId; confirmation.kind = "inserted stop";
+    confirmation.game = this.GetGameInstance(); confirmation.eventId = eventId; confirmation.kind = "passage point";
     GameInstance.GetDelaySystem(this.GetGameInstance()).DelayCallback(confirmation, 0.75, false);
-    NCTCSettings.Notify(this.GetGameInstance(), "NCTC: inserting stop after " + ToString(this.surveyStopIndex) + " on line " + ToString(line));
+    NCTCSettings.Notify(this.GetGameInstance(), "NCTC: recording passage after stop " + ToString(this.surveyStopIndex) + " on line " + ToString(line));
   }
 
   // The draft number is reserved for a genuinely new line. Editing an

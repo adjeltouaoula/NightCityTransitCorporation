@@ -161,6 +161,7 @@ local function load_network()
   network.stops = network.stops or {}
   network.captures = network.captures or {}
   network.hubs = network.hubs or {}
+  network.passages = network.passages or {}
   network.lineColors = network.lineColors or {}
   local stop_ids_assigned = ensure_stop_ids(network)
   local capture_ids_assigned = false
@@ -548,49 +549,20 @@ local function replace_selected_stop(network, line, stop_index, position, loc_ke
   return true, count
 end
 
--- Inserts without rewriting the existing stops or their capture vectors.
--- Captures retain their stable stopId; only their display ordinal changes.
-local function insert_stop_after_selected(network, line, after_index, position, loc_key, event_id)
+-- A passage is a traffic-only point on the leg after a stop. It must never
+-- become an NCTC stop, mappin, hub, or service/capture profile.
+local function add_passage_after_selected(network, line, after_index, position, event_id)
   local target, count = selected_stop(network, line, after_index)
   if not target then return false, count end
-  local duplicate_radius_squared = SAME_LINE_DUPLICATE_RADIUS_METRES * SAME_LINE_DUPLICATE_RADIUS_METRES
-  for _, existing in ipairs(network.stops or {}) do
-    if existing.line == line and existing.position and distance_squared(existing.position, position) <= duplicate_radius_squared then
-      log("ignored inserted duplicate stop on line " .. tostring(line))
-      return false, count
-    end
-  end
-  network.nextStopId = network.nextStopId or 1
-  local inserted = {
-    id = network.nextStopId,
+  network.passages = network.passages or {}
+  table.insert(network.passages, {
+    id = "passage-" .. tostring(event_id),
     eventId = event_id,
     line = line,
-    sequence = after_index + 1,
-    anchorType = loc_key and loc_key > 0 and "travelAnchor" or "manual",
-    locKey = loc_key and loc_key > 0 and loc_key or nil,
+    afterStopId = target.id,
     position = copy_position(position)
-  }
-  network.nextStopId = network.nextStopId + 1
-  local global_index = nil
-  for index, stop in ipairs(network.stops or {}) do
-    if stop == target then global_index = index; break end
-  end
-  if not global_index then return false, count end
-  table.insert(network.stops, global_index + 1, inserted)
-  -- The current external representation and route resolver use array order.
-  -- Keep old sequence metadata legible too, without using it to route.
-  local ordinal = 0
-  for _, stop in ipairs(network.stops) do
-    if stop.line == line then ordinal = ordinal + 1; stop.sequence = ordinal end
-  end
-  for _, capture in ipairs(network.captures or {}) do
-    if capture.line == line then
-      if capture.stopId == inserted.id then capture.stopIndex = after_index + 1
-      elseif (capture.stopIndex or 0) > after_index then capture.stopIndex = capture.stopIndex + 1 end
-    end
-  end
-  join_or_create_hub(network, inserted, event_id)
-  return true, count + 1
+  })
+  return true, count
 end
 
 local function find_capture(network, stop_id)
@@ -691,21 +663,20 @@ local function persist_capture(quests, event_id)
     kind = "moved selected stop " .. tostring(fact(quests, "nctc_replace_stop_index")) .. "/" .. tostring(count)
   elseif event_kind == 7 then
     local position = {
-      x = fact(quests, "nctc_insert_stop_x") / 1000.0,
-      y = fact(quests, "nctc_insert_stop_y") / 1000.0,
-      z = fact(quests, "nctc_insert_stop_z") / 1000.0
+      x = fact(quests, "nctc_passage_x") / 1000.0,
+      y = fact(quests, "nctc_passage_y") / 1000.0,
+      z = fact(quests, "nctc_passage_z") / 1000.0
     }
-    local inserted, count = insert_stop_after_selected(network,
-      fact(quests, "nctc_insert_stop_line"),
-      fact(quests, "nctc_insert_stop_after_index"),
+    local inserted, count = add_passage_after_selected(network,
+      fact(quests, "nctc_passage_line"),
+      fact(quests, "nctc_passage_after_index"),
       position,
-      fact(quests, "nctc_insert_stop_loc_key"),
       event_id)
     if not inserted then
-      log("rejected selected-stop insertion " .. tostring(event_id) .. ": selected stop unavailable or duplicate")
+      log("rejected passage point " .. tostring(event_id) .. ": selected stop unavailable")
       return
     end
-    kind = "inserted stop after " .. tostring(fact(quests, "nctc_insert_stop_after_index")) .. "/" .. tostring(count)
+    kind = "passage point after " .. tostring(fact(quests, "nctc_passage_after_index")) .. "/" .. tostring(count)
   else
     local capture_line = fact(quests, "nctc_survey_capture_line")
     local capture_stop_index = fact(quests, "nctc_survey_capture_stop_index")
@@ -803,6 +774,18 @@ local function publish_network(quests, network)
   for line, color in pairs(network.lineColors or {}) do
     set_fact(quests, "nctc_external_line_" .. tostring(line) .. "_color", color)
   end
+  local passage_count = math.min(#(network.passages or {}), 160)
+  for index = 1, passage_count do
+    local passage = network.passages[index]
+    local prefix = "nctc_external_passage_" .. tostring(index - 1) .. "_"
+    local position = passage.position or {}
+    set_fact(quests, prefix .. "line", passage.line or 0)
+    set_fact(quests, prefix .. "after_stop_id", passage.afterStopId or 0)
+    set_fact(quests, prefix .. "x", math.floor((position.x or 0) * 1000))
+    set_fact(quests, prefix .. "y", math.floor((position.y or 0) * 1000))
+    set_fact(quests, prefix .. "z", math.floor((position.z or 0) * 1000))
+  end
+  set_fact(quests, "nctc_external_network_passage_count", passage_count)
   set_fact(quests, "nctc_external_network_stop_count", count)
 end
 

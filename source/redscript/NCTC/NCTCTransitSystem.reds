@@ -381,6 +381,32 @@ public class NCTCServiceProfiles {
   private static func ReadVector(quests: ref<QuestsSystem>, prefix: String) -> Vector4 {
     return new Vector4(Cast<Float>(quests.GetFact(StringToName(prefix + "x"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "y"))) / 1000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "z"))) / 1000.00, 1.00);
   }
+
+  // Passage points are traffic-only waypoints associated with the leg after
+  // an authored stop. They are not stops and never open doors or dwell.
+  public static func TryGetPassageAfter(game: GameInstance, line: String, afterStopId: Int32, ordinal: Int32, out passage: Vector4) -> Bool {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
+    let requestedLine: Int32 = StringToInt(line, -1);
+    let count: Int32;
+    let index: Int32 = 0;
+    let matched: Int32 = 0;
+    let prefix: String;
+    if !IsDefined(quests) || requestedLine < 1 || afterStopId < 1 || !Equals(quests.GetFact(n"nctc_external_network_ready"), 1) { return false; };
+    count = quests.GetFact(n"nctc_external_network_passage_count");
+    while index < count {
+      prefix = "nctc_external_passage_" + ToString(index) + "_";
+      if Equals(quests.GetFact(StringToName(prefix + "line")), requestedLine)
+        && Equals(quests.GetFact(StringToName(prefix + "after_stop_id")), afterStopId) {
+        if Equals(matched, ordinal) {
+          passage = NCTCServiceProfiles.ReadVector(quests, prefix);
+          return AbsF(passage.X) > 1.00 || AbsF(passage.Y) > 1.00;
+        };
+        matched += 1;
+      };
+      index += 1;
+    };
+    return false;
+  }
 }
 
 public class NCTCServiceDispatchCallback extends DelayCallback {
@@ -417,6 +443,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let departureRequested: Bool;
   private let legPolls: Int32;
   private let telemetryPolls: Int32;
+  private let followingPassage: Bool;
+  private let passageAfterStopId: Int32;
+  private let passageOrdinal: Int32;
+  private let passageTarget: Vector4;
 
   private func GetServiceBerth() -> Vector4 {
     return this.hasSurveyProfile ? this.surveyBerth : this.requestedStop;
@@ -427,6 +457,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
   // so that this native stop lands at the passenger-service point in one pass.
   private func GetTrafficTarget() -> Vector4 {
     let target: Vector4 = this.GetServiceBerth();
+    if this.followingPassage { return this.passageTarget; };
     if AbsF(this.surveyBerthForward.X) > 0.01 || AbsF(this.surveyBerthForward.Y) > 0.01 {
       return target + this.surveyBerthForward * 13.70;
     };
@@ -679,6 +710,21 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.telemetryPolls = 0;
       this.PublishRouteCommandTelemetry();
     };
+    // A passage is reached without a service stop. Switch to the next passage
+    // or the final berth before the traffic controller settles into a dwell.
+    if this.followingPassage && this.controller.IsNear(this.passageTarget, 6.00) {
+      this.controller.CancelTrafficRoute();
+      if !this.AdvancePassageOrDestination() {
+        this.PublishLoopDiagnostic(34, 0);
+        this.ScheduleDispatch(1.00);
+        return;
+      };
+      this.legPolls = 0;
+      this.driveCommandSent = this.controller.DriveToTraffic(this.GetTrafficTarget(), 0.00);
+      this.PublishLoopDiagnostic(this.driveCommandSent ? 31 : 33, this.requestedStopId);
+      this.ScheduleDispatch(0.25);
+      return;
+    };
     // The AI target is offset beyond the berth. Service remains tied to the
     // real berth, where the Mahir pivot settles in one continuous approach.
     if this.controller.IsStoppedNear(this.GetServiceBerth(), 7.00) {
@@ -730,7 +776,8 @@ public class NCTCTransitSystem extends ScriptableSystem {
     let nextApproach: Vector4;
     let nextBerth: Vector4;
     let nextYaw: Float;
-    if !NCTCServiceProfiles.TryGetNextStop(this.GetGameInstance(), this.requestedLine, this.requestedStopId, nextStopId, nextStop) {
+    let previousStopId: Int32 = this.requestedStopId;
+    if !NCTCServiceProfiles.TryGetNextStop(this.GetGameInstance(), this.requestedLine, previousStopId, nextStopId, nextStop) {
       this.PublishLoopDiagnostic(4, 0);
       return false;
     };
@@ -755,8 +802,23 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.dwellPolls = 0;
     this.boardingDoorWasOpen = false;
     this.legPolls = 0;
+    this.followingPassage = NCTCServiceProfiles.TryGetPassageAfter(this.GetGameInstance(), this.requestedLine, previousStopId, 0, this.passageTarget);
+    this.passageAfterStopId = previousStopId;
+    this.passageOrdinal = 0;
     this.PublishRouteDisplay(nextStopId);
     this.PublishLoopDiagnostic(6, nextStopId);
+    return true;
+  }
+
+  private func AdvancePassageOrDestination() -> Bool {
+    let nextPassage: Vector4;
+    let nextOrdinal: Int32 = this.passageOrdinal + 1;
+    if NCTCServiceProfiles.TryGetPassageAfter(this.GetGameInstance(), this.requestedLine, this.passageAfterStopId, nextOrdinal, nextPassage) {
+      this.passageOrdinal = nextOrdinal;
+      this.passageTarget = nextPassage;
+      return true;
+    };
+    this.followingPassage = false;
     return true;
   }
 
