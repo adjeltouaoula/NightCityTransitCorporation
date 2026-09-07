@@ -446,7 +446,7 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
         passagePosition = new Vector4(Cast<Float>(GameInstance.GetQuestsSystem(this.GetGameInstance()).GetFact(StringToName("nctc_external_passage_" + ToString(passageIndex) + "_x"))) / 1000.00, Cast<Float>(GameInstance.GetQuestsSystem(this.GetGameInstance()).GetFact(StringToName("nctc_external_passage_" + ToString(passageIndex) + "_y"))) / 1000.00, Cast<Float>(GameInstance.GetQuestsSystem(this.GetGameInstance()).GetFact(StringToName("nctc_external_passage_" + ToString(passageIndex) + "_z"))) / 1000.00, 1.00);
         markerData = new NCTCStopMappinData();
         markerData.line = "PASSAGE";
-        markerData.services = "NCTC DEV — Passage L" + ToString(passageLine) + " après arrêt #" + ToString(passageAfterStopId);
+        markerData.services = "NCTC DEV — Passage L" + ToString(passageLine) + " · après arrêt ID " + ToString(passageAfterStopId);
         markerData.color = -1;
         markerData.isHub = false;
         data.mappinType = t"Mappins.NCTCStopMappinDefinition";
