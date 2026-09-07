@@ -970,14 +970,15 @@ local function log_service_loop(quests)
     [35] = "route loop: active drive command failed before arrival",
     [36] = "route loop: ADE command telemetry",
     [37] = "route loop: bus manually despawned",
-    [38] = "route loop: native stop detected; forward berth correction sent"
+    [38] = "route loop: native stop detected; forward berth correction sent",
+    [39] = "route loop: holding for stable standing-passenger boarding"
   }
   local command_extra = ""
   if code == 29 or code == 31 or code == 32 then
     command_extra = " minDistance=" .. string.format("%.2fm", fact(quests, "nctc_dev_command_minimum_distance_mm") / 1000.0)
       .. string.format(" aiTarget=(%.3f, %.3f, %.3f)", ai_target_x, ai_target_y, ai_target_z)
   end
-  if code == 30 or code == 32 then
+  if code == 30 or code == 32 or code == 39 then
     command_extra = command_extra
       .. " dwell=" .. tostring(dwell_polls)
       .. " aboard=" .. tostring(player_aboard)

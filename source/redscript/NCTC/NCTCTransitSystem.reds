@@ -441,6 +441,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let approachCommandSent: Bool;
   private let routeStarted: Bool;
   private let dwellPolls: Int32;
+  // V can cross the open door while the stop's minimum dwell has already
+  // elapsed. Do not launch the traffic command on that same frame: require a
+  // short consecutive in-cabin confirmation before departure.
+  private let boardingPresencePolls: Int32;
   private let boardingDoorWasOpen: Bool;
   private let routeWaypoint: NewMappinID;
   private let departureRequested: Bool;
@@ -635,6 +639,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.approachCommandSent = false;
     this.routeStarted = false;
     this.dwellPolls = 0;
+    this.boardingPresencePolls = 0;
     this.boardingDoorWasOpen = false;
     this.departureRequested = false;
     this.legPolls = 0;
@@ -645,6 +650,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.hasSurveyProfile = false;
     this.routeStarted = false;
     this.dwellPolls = 0;
+    this.boardingPresencePolls = 0;
     return hadBus;
   }
 
@@ -702,7 +708,19 @@ public class NCTCTransitSystem extends ScriptableSystem {
         return;
       };
       if !boarded && this.dwellPolls < 40 {
+        this.boardingPresencePolls = 0;
         this.dwellPolls += 1;
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+
+      // Stand-in-cabin boarding is intentionally allowed, but it is not a
+      // stable vehicle attachment.  Give V two seconds to finish crossing
+      // the doorway before traffic acceleration begins. This replaces no
+      // physics and does not require a passenger seat.
+      if boarded && this.boardingPresencePolls < 8 {
+        this.boardingPresencePolls += 1;
+        this.PublishLoopDiagnostic(39, this.requestedStopId);
         this.ScheduleDispatch(0.25);
         return;
       };
@@ -721,6 +739,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       };
       this.arrived = false;
       this.dwellPolls = 0;
+      this.boardingPresencePolls = 0;
       this.legPolls = 0;
       this.driveCommandSent = this.controller.DriveToTraffic(this.GetTrafficTarget(), 0.00);
       this.PublishLoopDiagnostic(this.driveCommandSent ? 32 : 33, this.requestedStopId);
@@ -770,6 +789,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
         this.arrived = true;
         this.driveCommandSent = false;
         this.dwellPolls = 0;
+        this.boardingPresencePolls = 0;
         quests.SetFact(n"nctc_service_bus_at_stop", 1);
         this.controller.KeepPassengerDoorOpen();
         this.PublishLoopDiagnostic(30, this.requestedStopId);
