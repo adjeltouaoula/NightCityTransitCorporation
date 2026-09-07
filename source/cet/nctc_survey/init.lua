@@ -30,6 +30,7 @@ local runtime_session_id = 0
 local last_published_network_revision = -1
 local last_dispatch_log_id = 0
 local last_loop_log_id = 0
+local last_native_command_event_id = 0
 local last_sequence_probe_id = 0
 local last_profile_probe_id = 0
 local fact
@@ -670,6 +671,15 @@ local function publish_capture(quests, capture)
     set_fact(quests, prefix .. "y", math.floor((point.y or 0) * 1000))
     set_fact(quests, prefix .. "z", math.floor((point.z or 0) * 1000))
     set_fact(quests, prefix .. "yaw", math.floor((point.yaw or 0) * 1000))
+    if kind == "berth" then
+      -- The capture yaw is the surveyed direction of circulation. Publish a
+      -- world-space forward vector so redscript never has to guess yaw-axis
+      -- conventions when it computes the AI-only target beyond the berth.
+      local radians = math.rad(point.yaw or 0)
+      set_fact(quests, prefix .. "forward_x", math.floor(-math.sin(radians) * 1000000))
+      set_fact(quests, prefix .. "forward_y", math.floor(math.cos(radians) * 1000000))
+      set_fact(quests, prefix .. "forward_valid", 1)
+    end
     set_fact(quests, prefix .. "valid", 1)
   end
   publish_vector("spawn", capture.spawn)
@@ -768,6 +778,9 @@ local function log_service_loop(quests)
   local target_x = fact(quests, "nctc_dev_loop_target_x_mm") / 1000.0
   local target_y = fact(quests, "nctc_dev_loop_target_y_mm") / 1000.0
   local target_z = fact(quests, "nctc_dev_loop_target_z_mm") / 1000.0
+  local ai_target_x = fact(quests, "nctc_dev_loop_ai_target_x_mm") / 1000.0
+  local ai_target_y = fact(quests, "nctc_dev_loop_ai_target_y_mm") / 1000.0
+  local ai_target_z = fact(quests, "nctc_dev_loop_ai_target_z_mm") / 1000.0
   local bus_x = fact(quests, "nctc_dev_loop_bus_x_mm") / 1000.0
   local bus_y = fact(quests, "nctc_dev_loop_bus_y_mm") / 1000.0
   local bus_z = fact(quests, "nctc_dev_loop_bus_z_mm") / 1000.0
@@ -799,14 +812,25 @@ local function log_service_loop(quests)
     [34] = "route loop: next stopSequence/profile unavailable",
     [35] = "route loop: active drive command failed before arrival",
     [36] = "route loop: ADE command telemetry",
-    [37] = "route loop: bus manually despawned"
+    [37] = "route loop: bus manually despawned",
+    [38] = "route loop: native stop detected; forward berth correction sent"
   }
   local command_extra = ""
+  if code == 29 or code == 31 or code == 32 then
+    command_extra = " minDistance=" .. string.format("%.2fm", fact(quests, "nctc_dev_command_minimum_distance_mm") / 1000.0)
+      .. string.format(" aiTarget=(%.3f, %.3f, %.3f)", ai_target_x, ai_target_y, ai_target_z)
+  end
   if code == 36 then
     local command_states = { [0] = "missing", [1] = "active", [2] = "success", [3] = "failed/cancelled" }
     command_extra = " commandState=" .. (command_states[fact(quests, "nctc_dev_command_state")] or "unknown")
       .. " previousCommandState=" .. (command_states[fact(quests, "nctc_dev_previous_command_state")] or "unknown")
       .. " speed=" .. string.format("%.2f", fact(quests, "nctc_dev_command_speed_mm") / 1000.0)
+  end
+  if code == 38 then
+    command_extra = string.format(" correctionTarget=(%.3f, %.3f, %.3f)",
+      fact(quests, "nctc_dev_correction_target_x_mm") / 1000.0,
+      fact(quests, "nctc_dev_correction_target_y_mm") / 1000.0,
+      fact(quests, "nctc_dev_correction_target_z_mm") / 1000.0)
   end
   local session = fact(quests, "nctc_dev_service_session")
   log("service #" .. tostring(session) .. " loop " .. tostring(id) .. ": L" .. tostring(line) .. " currentStopId=" .. tostring(stop_id)
@@ -814,6 +838,24 @@ local function log_service_loop(quests)
     .. " -> " .. tostring(next_stop_id) .. " " .. (states[code] or ("state " .. tostring(code)))
     .. string.format(" | bus=(%.3f, %.3f, %.3f) target=(%.3f, %.3f, %.3f) distance=%.1fm berth(long=%.2fm lat=%.2fm speed=%.2f)",
       bus_x, bus_y, bus_z, target_x, target_y, target_z, target_distance, berth_longitudinal, berth_lateral, berth_speed) .. command_extra)
+end
+
+local function log_native_command_event(quests)
+  local id = fact(quests, "nctc_dev_native_command_event_id")
+  if id < last_native_command_event_id then last_native_command_event_id = id - 1 end
+  if id <= last_native_command_event_id then return end
+  last_native_command_event_id = id
+  local events = { [1] = "native command started", [2] = "native command ended", [3] = "native command stopped/cancelled" }
+  local states = { [1] = "active/other", [2] = "success", [3] = "failure/cancelled" }
+  log("native drive event #" .. tostring(id) .. ": "
+    .. (events[fact(quests, "nctc_dev_native_command_event_code")] or "unknown")
+    .. " object=" .. tostring(fact(quests, "nctc_dev_native_command_has_object"))
+    .. " state=" .. (states[fact(quests, "nctc_dev_native_command_state")] or "missing")
+    .. string.format(" | bus=(%.3f, %.3f, %.3f) speed=%.2f",
+      fact(quests, "nctc_dev_native_command_x_mm") / 1000.0,
+      fact(quests, "nctc_dev_native_command_y_mm") / 1000.0,
+      fact(quests, "nctc_dev_native_command_z_mm") / 1000.0,
+      fact(quests, "nctc_dev_native_command_speed_mm") / 1000.0))
 end
 
 registerForEvent("onUpdate", function()
@@ -825,6 +867,7 @@ registerForEvent("onUpdate", function()
   end
   log_dispatch_attempt(quests)
   log_service_loop(quests)
+  log_native_command_event(quests)
   log_sequence_probe(quests)
   log_profile_probe(quests)
   local event_id = fact(quests, "nctc_survey_event_id")
