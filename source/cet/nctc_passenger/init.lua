@@ -22,13 +22,21 @@ local passengerSlots = { seat_back_left = true, seat_back_right = true }
 local function setFact(name, value)
     local quests = Game.GetQuestsSystem()
     if not quests then return false end
+    -- NCTC's redscript prompt opens the hub using a named quest fact.  In
+    -- CET, the string fact API is the matching, verified path; SetFact(CName)
+    -- can succeed at the Lua call layer without changing that named fact.
+    local ok = pcall(function() quests:SetFactStr(name, value) end)
+    if ok then return true end
     return pcall(function() quests:SetFact(CName.new(name), value) end)
 end
 
 local function getFact(name)
     local quests = Game.GetQuestsSystem()
     if not quests then return 0 end
-    local ok, value = pcall(function() return quests:GetFact(CName.new(name)) end)
+    local ok, value = pcall(function() return quests:GetFactStr(name) end)
+    value = tonumber(value)
+    if ok and value ~= nil then return math.floor(value) end
+    ok, value = pcall(function() return quests:GetFact(CName.new(name)) end)
     if ok and type(value) == "number" then return value end
     ok, value = pcall(function() return quests:GetFact(name) end)
     return ok and type(value) == "number" and value or 0
