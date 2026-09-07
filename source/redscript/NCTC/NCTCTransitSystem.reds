@@ -712,7 +712,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
     };
     // A passage is reached without a service stop. Switch to the next passage
     // or the final berth before the traffic controller settles into a dwell.
-    if this.followingPassage && this.controller.IsNear(this.passageTarget, 6.00) {
+    // The traffic controller starts settling this long Mahir roughly 13 m
+    // before a raw waypoint even with minimumDistanceToTarget = 0. Switch at
+    // 15 m so a passage remains a flowing route handoff, never a stop.
+    if this.followingPassage && this.controller.IsNear(this.passageTarget, 15.00) {
       this.controller.CancelTrafficRoute();
       if !this.AdvancePassageOrDestination() {
         this.PublishLoopDiagnostic(34, 0);
