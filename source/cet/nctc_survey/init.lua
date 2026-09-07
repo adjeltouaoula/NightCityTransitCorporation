@@ -417,35 +417,16 @@ deduplicate_same_line_stops = function(network)
   return changed
 end
 
-local function delete_nearest_stop(network, line, position, loc_key)
-  if loc_key and loc_key > 0 then
-    for index, stop in ipairs(network.stops) do
-      if stop.line == line and stop.locKey == loc_key then
-        local removed = table.remove(network.stops, index)
-        local used = false
-        for _, remaining in ipairs(network.stops) do
-          if remaining.hubId == removed.hubId then used = true; break end
-        end
-        if not used then
-          for hub_index, hub in ipairs(network.hubs or {}) do
-            if hub.id == removed.hubId then table.remove(network.hubs, hub_index); break end
-          end
-        end
-        return true
-      end
-    end
-  end
-  local nearest, nearest_distance_squared = nil, DELETE_RADIUS_METRES * DELETE_RADIUS_METRES
-  for index, stop in ipairs(network.stops) do
+local function delete_selected_stop(network, line, selected_index)
+  local selected, ordinal = nil, 0
+  for index, stop in ipairs(network.stops or {}) do
     if stop.line == line then
-      local distance = distance_squared(stop.position, position)
-      if distance <= nearest_distance_squared then
-        nearest, nearest_distance_squared = index, distance
-      end
+      ordinal = ordinal + 1
+      if ordinal == selected_index then selected = index; break end
     end
   end
-  if not nearest then return false end
-  local removed = table.remove(network.stops, nearest)
+  if not selected then return false, "selected stop unavailable" end
+  local removed = table.remove(network.stops, selected)
   local used = false
   for _, stop in ipairs(network.stops) do
     if stop.hubId == removed.hubId then used = true; break end
@@ -455,7 +436,7 @@ local function delete_nearest_stop(network, line, position, loc_key)
       if hub.id == removed.hubId then table.remove(network.hubs, index); break end
     end
   end
-  return true
+  return true, "line " .. tostring(line) .. " stop " .. tostring(selected_index)
 end
 
 local function selected_stop(network, line, stop_index)
@@ -651,13 +632,9 @@ local function persist_capture(quests, event_id)
     }, event_id)
     kind = "manual stop"
   elseif event_kind == 4 then
-    local position = {
-      x = fact(quests, "nctc_delete_stop_x") / 1000.0,
-      y = fact(quests, "nctc_delete_stop_y") / 1000.0,
-      z = fact(quests, "nctc_delete_stop_z") / 1000.0
-    }
-    local deleted = delete_nearest_stop(network, fact(quests, "nctc_delete_stop_line"), position, fact(quests, "nctc_delete_stop_loc_key"))
-    kind = deleted and "deleted stop" or "no stop deleted"
+    local deleted, detail = delete_selected_stop(network,
+      fact(quests, "nctc_delete_stop_line"), fact(quests, "nctc_delete_stop_index"))
+    kind = deleted and "deleted " .. detail or "no stop deleted: " .. detail
   elseif event_kind == 6 then
     local position = {
       x = fact(quests, "nctc_replace_stop_x") / 1000.0,

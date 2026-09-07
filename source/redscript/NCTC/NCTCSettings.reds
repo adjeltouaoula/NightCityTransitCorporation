@@ -267,8 +267,8 @@ public class NCTCSettings extends ScriptableSystem {
   public let addManualStopKey: EInputKey = EInputKey.IK_NumPad4;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
-  @runtimeProperty("ModSettings.displayName", "Delete nearest stop")
-  @runtimeProperty("ModSettings.description", "Deletes the nearest stop for the active line, within 25 metres. Other lines at the same hub are kept.")
+  @runtimeProperty("ModSettings.displayName", "Delete selected stop")
+  @runtimeProperty("ModSettings.description", "Deletes the stop selected above from the active line. Other lines at the same hub are kept.")
   @runtimeProperty("ModSettings.category", "Developer mode")
   @runtimeProperty("ModSettings.dependency", "developerMode")
   public let deleteNearestStopKey: EInputKey = EInputKey.IK_NumPad5;
@@ -473,24 +473,22 @@ public class NCTCSettings extends ScriptableSystem {
   private func DeleteNearestStop() -> Void {
     let player: ref<PlayerPuppet> = GetPlayer(this.GetGameInstance());
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
-    let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(this.GetGameInstance());
-    let position: Vector4;
-    let anchorPosition: Vector4;
-    let locKey: String;
     let line: Int32 = this.GetSelectedLineNumber();
+    let eventId: Int32;
+    let confirmation: ref<NCTCSurveyWriteConfirmationCallback>;
     if !IsDefined(player) || !IsDefined(quests) || line < 1 { return; };
-    position = player.GetWorldPosition();
+    // The survey selector is the only unambiguous identity when a line visits
+    // the same fast-travel station more than once. Do not guess by LocKey.
     quests.SetFact(n"nctc_delete_stop_line", line);
-    quests.SetFact(n"nctc_delete_stop_x", Cast<Int32>(position.X * 1000.00));
-    quests.SetFact(n"nctc_delete_stop_y", Cast<Int32>(position.Y * 1000.00));
-    quests.SetFact(n"nctc_delete_stop_z", Cast<Int32>(position.Z * 1000.00));
-    quests.SetFact(n"nctc_delete_stop_loc_key", -1);
-    if IsDefined(markers) && markers.GetNearestTravelAnchor(position, locKey, anchorPosition) {
-      quests.SetFact(n"nctc_delete_stop_loc_key", StringToInt(StrAfterFirst(locKey, "LocKey#"), -1));
-    };
+    quests.SetFact(n"nctc_delete_stop_index", this.surveyStopIndex);
     quests.SetFact(n"nctc_survey_event_kind", 4);
-    quests.SetFact(n"nctc_survey_event_id", quests.GetFact(n"nctc_survey_event_id") + 1);
-    NCTCSettings.Notify(this.GetGameInstance(), "NCTC: deleting nearest stop for line " + ToString(line));
+    eventId = quests.GetFact(n"nctc_survey_event_id") + 1;
+    quests.SetFact(n"nctc_survey_write_ack_event_id", -1);
+    quests.SetFact(n"nctc_survey_event_id", eventId);
+    confirmation = new NCTCSurveyWriteConfirmationCallback();
+    confirmation.game = this.GetGameInstance(); confirmation.eventId = eventId; confirmation.kind = "selected stop";
+    GameInstance.GetDelaySystem(this.GetGameInstance()).DelayCallback(confirmation, 0.75, false);
+    NCTCSettings.Notify(this.GetGameInstance(), "NCTC: deleting selected stop " + ToString(this.surveyStopIndex) + " on line " + ToString(line));
   }
 
   // This action edits only the selected stop's map/call anchor. Surveyed
