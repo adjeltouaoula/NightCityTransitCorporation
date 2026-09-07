@@ -2,10 +2,10 @@
 # it is never a garage, summon, fuel, or maintenance vehicle for V.
 Vehicle.nctc_service_mahir_mt28_coach:
   $base: Vehicle.v_mahir_mt28_coach
-  # NCTO's traffic-ready Mahir is required for a valid NCTC service spawn.
-  # Collider experiments must therefore start from this entity, not replace it
-  # wholesale with the vanilla vehicle.
-  entityTemplatePath: night_city_traffic_overhaul\entities\transport\v_mahir_mt28_coach_basic_01.ent
+  # Diagnostic A/B: only the entity is switched to the original Mahir.
+  # NCTC's route controller and both CET modules are unchanged and included
+  # in the package, so the bus call remains available for this test.
+  entityTemplatePath: base\vehicles\special\v_mahir_mt28_coach_basic_01.ent
   # Auto Drive Enhanced exposes a dedicated passenger AutoDrive context for
   # every eligible mounted vehicle. NCTC drives this record through ADE's AI
   # command directly, so the player-facing AutoDrive action must stay disabled.
