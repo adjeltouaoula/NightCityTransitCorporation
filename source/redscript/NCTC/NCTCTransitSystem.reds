@@ -71,9 +71,9 @@ public class NCTCServiceBusController extends IScriptable {
   }
 
   // A berth is an oriented service line, not a large circular area. The bus
-  // pivot must reach that line, be aligned with it, and have almost stopped.
-  // This prevents a long Mahir from serving a stop while it is still many
-  // metres before the recorded position.
+  // must cross the gate while it is moving; NCTC then cancels the route and
+  // lets the vehicle stop. Requiring zero speed here would make the trigger
+  // unreachable, since movement is what carries the pivot across the berth.
   public func IsAtBerth(position: Vector4, out longitudinal: Float, out lateral: Float, out speed: Float) -> Bool {
     let delta: Vector4;
     let forward: Vector4;
@@ -85,9 +85,9 @@ public class NCTCServiceBusController extends IScriptable {
     longitudinal = Vector4.Dot(delta, forward);
     lateral = AbsF(Vector4.Dot(delta, right));
     speed = AbsF(this.bus.GetCurrentSpeed());
-    // The pivot must be at the berth plane (with a deliberately small
-    // tolerance) rather than merely within the former 18m arrival circle.
-    return longitudinal <= 2.00 && longitudinal >= -2.00 && lateral <= 3.00 && speed <= 0.75;
+    // Broad enough for a 0.5-second service poll at traffic speed, but
+    // directional: it cannot trigger merely because the bus is nearby.
+    return longitudinal <= 4.00 && longitudinal >= -6.00 && lateral <= 3.00;
   }
 
   public func IsPlayerAboard() -> Bool {
