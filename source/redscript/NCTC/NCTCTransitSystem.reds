@@ -15,18 +15,21 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
   }
 
   public func Call() -> Void {
-    let command: ref<AIVehicleDriveToPointAutonomousCommand>;
+    let command: ref<AIVehicleDriveToPointCommand>;
     if !IsDefined(this.bus) || !this.bus.IsAttached() || !IsDefined(this.bus.GetAIComponent()) { return; };
-    // Native-only experiment. These values mirror the relevant ADE snapshot
-    // without importing ADE or consulting its runtime settings.
-    command = new AIVehicleDriveToPointAutonomousCommand();
+    // NCTC-owned traffic command. It uses the game's traffic behavior without
+    // consulting ADE settings or activating the player's AutoDrive system.
+    command = new AIVehicleDriveToPointCommand();
     command.targetPosition = Vector4.Vector4To3(this.target);
-    // Native autonomous commands express speed in metres per second. The ADE
-    // snapshot value was 50 km/h, which is 13.89 m/s rather than 50 m/s.
-    command.maxSpeed = 13.89;
-    command.minSpeed = 0.00;
-    command.clearTrafficOnPath = false;
-    command.minimumDistanceToTarget = this.minimumDistance;
+    command.secureTimeOut = 1200.00;
+    command.useTraffic = true;
+    command.speedInTraffic = 50.00;
+    command.forceGreenLights = false;
+    // These must remain false for the service bus. Enabling either one lets
+    // the traffic controller snap the long Mahir to a neighboring lane when
+    // a route command starts or ends, which can eject standing passengers.
+    command.trafficTryNeighborsForStart = false;
+    command.trafficTryNeighborsForEnd = false;
     // Dev telemetry: proves the exact native stopping threshold carried by
     // the command that was actually sent, rather than inferring it later
     // from ADE's global settings.
@@ -46,11 +49,11 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
 public class NCTCServiceBusController extends IScriptable {
   private let bus: wref<VehicleObject>;
   private let playerAboardSignal: Bool;
-  private let activeRouteCommand: ref<AIVehicleDriveToPointAutonomousCommand>;
+  private let activeRouteCommand: ref<AIVehicleDriveToPointCommand>;
   // Diagnostic-only: retain the command that was active immediately before a
   // route handoff, so the dev log can prove whether it was replaced or left
   // alive alongside the command for the next stop.
-  private let previousRouteCommand: ref<AIVehicleDriveToPointAutonomousCommand>;
+  private let previousRouteCommand: ref<AIVehicleDriveToPointCommand>;
 
   public func Bind(bus: ref<VehicleObject>) -> Bool {
     if !IsDefined(bus) || !IsDefined(bus.GetAIComponent()) { return false; };
@@ -131,12 +134,11 @@ public class NCTCServiceBusController extends IScriptable {
   public func DriveToTraffic(target: Vector4, minimumDistance: Float) -> Bool {
     let callback: ref<NCTCDeferredDriveCommand>;
     if !this.IsReady() { return false; };
-    // An empty dynamic vehicle needs the same native driver-state transition
-    // used by autonomous vehicles. Do not repeat it while V is mounted: that
-    // can interrupt the rear passenger workspot during PassengerEvents.
-    if !this.IsPlayerAboard() {
-      this.PrepareEmptyBusForAutonomousDrive();
-    };
+    // Every new traffic leg needs the native NoDriver -> DriverReady state
+    // transition, including while V is aboard. Without it the command object
+    // remains Active but the vehicle controller stays idle after a service
+    // stop. ADE applies the same workaround after passenger/seat transitions.
+    this.PrepareBusForTrafficDrive();
     callback = new NCTCDeferredDriveCommand();
     this.previousRouteCommand = this.activeRouteCommand;
     this.activeRouteCommand = null;
@@ -145,7 +147,7 @@ public class NCTCServiceBusController extends IScriptable {
     return true;
   }
 
-  private func PrepareEmptyBusForAutonomousDrive() -> Void {
+  private func PrepareBusForTrafficDrive() -> Void {
     let noDriver: ref<AIEvent> = new AIEvent();
     let driverReady: ref<AIEvent> = new AIEvent();
     noDriver.name = n"NoDriver";
@@ -154,7 +156,7 @@ public class NCTCServiceBusController extends IScriptable {
     GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.10);
   }
 
-  public func SetActiveRouteCommand(command: ref<AIVehicleDriveToPointAutonomousCommand>) -> Void {
+  public func SetActiveRouteCommand(command: ref<AIVehicleDriveToPointCommand>) -> Void {
     this.activeRouteCommand = command;
   }
 
@@ -195,13 +197,13 @@ public class NCTCServiceBusController extends IScriptable {
 
   public func CancelTrafficRoute() -> Void {
     if this.IsReady() {
-      this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointAutonomousCommand", false, true);
+      this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
     };
   }
 
   public func ArriveAtStop() -> Void {
     if !this.IsReady() { return; };
-    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointAutonomousCommand", false, true);
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
   }
 
   // The Mahir coach door is stateful. The old working prototype did not rely

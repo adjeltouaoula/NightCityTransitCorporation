@@ -22,6 +22,10 @@ Get-ChildItem -LiteralPath $distRoot -Filter "NightCityTransitCorporation-*.zip"
 }
 Copy-Item -Path (Join-Path $projectRoot "source\redscript\NCTC\*.reds") -Destination (Join-Path $stageRoot "r6\scripts\NCTC")
 Copy-Item -Path (Join-Path $projectRoot "source\tweaks\NCTC\*.yaml") -Destination (Join-Path $stageRoot "r6\tweaks\NCTC")
+if (Test-Path -LiteralPath (Join-Path $projectRoot "source\archive\pc\mod\NCTCTrafficRuntime.archive")) {
+    New-Item -ItemType Directory -Force (Join-Path $stageRoot "archive\pc\mod") | Out-Null
+    Copy-Item -LiteralPath (Join-Path $projectRoot "source\archive\pc\mod\NCTCTrafficRuntime.archive") -Destination (Join-Path $stageRoot "archive\pc\mod\NCTCTrafficRuntime.archive")
+}
 # Experimental vehicle-physics archives remain excluded until their collision
 # setup is proven safe and useful.
 if ($IncludeDisplayPrototype) {
