@@ -578,10 +578,39 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.busEntityID = new EntityID();
       this.controller = null;
     };
+    // A summoned service is meaningful only with both a road spawn and a
+    // berth.  Previously an incomplete dev capture still spawned a generic
+    // bus ahead of V, then routed it to the stop marker.  That bus could never
+    // reach a valid service-arrival state, so its doors stayed closed.
+    this.surveyBerthForward = new Vector4(0.00, 0.00, 0.00, 0.00);
+    this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), line, stopId, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);
+    NCTCServiceProfiles.TryGetBerthForward(this.GetGameInstance(), stopId, this.surveyBerthForward);
+    quests = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    player = GetPlayer(this.GetGameInstance());
+    if !this.hasSurveyProfile {
+      if IsDefined(quests) {
+        quests.SetFact(n"nctc_dev_service_session", quests.GetFact(n"nctc_dev_service_session") + 1);
+        quests.SetFact(n"nctc_dev_dispatch_line", StringToInt(line, -1));
+        quests.SetFact(n"nctc_dev_dispatch_stop_id", stopId);
+        quests.SetFact(n"nctc_dev_dispatch_has_profile", 0);
+        quests.SetFact(n"nctc_dev_dispatch_spawn_distance_mm", -1000);
+        quests.SetFact(n"nctc_dev_dispatch_id", quests.GetFact(n"nctc_dev_dispatch_id") + 1);
+      };
+      return false;
+    };
     this.requestedLine = line;
     this.requestedStopId = stopId;
     this.serviceStopId = stopId;
     this.requestedStop = stop;
+    // A newly summoned bus must begin with the stop that was explicitly
+    // requested. Passage state belongs only to a leg already in progress;
+    // otherwise a stale point from the previous service can replace this
+    // first berth target and make the bus drive in the opposite direction.
+    this.followingPassage = false;
+    this.passageAfterStopId = 0;
+    this.passageOrdinal = 0;
+    this.passageTarget = new Vector4(0.00, 0.00, 0.00, 0.00);
+    this.passageForward = new Vector4(0.00, 0.00, 0.00, 0.00);
     // Until the bus is on its way to the following stop, its public display
     // identifies the service being called and the boarding stop.
     this.PublishRouteDisplay(stopId);
@@ -594,13 +623,8 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.departureRequested = false;
     this.legPolls = 0;
     GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_passenger_departure_requested", 0);
-    this.surveyBerthForward = new Vector4(0.00, 0.00, 0.00, 0.00);
-    this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), line, stopId, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);
-    NCTCServiceProfiles.TryGetBerthForward(this.GetGameInstance(), stopId, this.surveyBerthForward);
     // Development-only diagnostic bridge. CET writes this to nctc_survey.log;
     // it never creates a player-facing notification and is absent from public builds.
-    quests = GameInstance.GetQuestsSystem(this.GetGameInstance());
-    player = GetPlayer(this.GetGameInstance());
     if IsDefined(quests) {
       quests.SetFact(n"nctc_dev_service_session", quests.GetFact(n"nctc_dev_service_session") + 1);
       spawnDistance = this.hasSurveyProfile && IsDefined(player) ? Vector4.Distance(this.surveySpawn, player.GetWorldPosition()) : -1.00;

@@ -1,1 +1,618 @@
-{"lastEventId":8,"generatedBy":"NCTC developer survey snapshot","schemaVersion":2,"nextStopId":57,"captures":[{"stopIndex":1,"line":17,"approach":{"z":0,"yaw":0.039,"y":0,"x":0},"berth":{"z":7.135,"yaw":54.694,"y":-74.538,"x":-917.116},"eventId":3,"stopSequence":1,"stopLocKey":44536,"spawn":{"z":7.238,"yaw":-40.856,"y":-201.445,"x":-953.735},"stopId":20},{"stopIndex":2,"locKey":"44695","line":17,"approach":{"z":0,"yaw":0.042,"y":0,"x":0},"berth":{"y":435.985,"yaw":83.698,"z":6.234,"x":-1450.485},"eventId":2,"stopSequence":2,"stopLocKey":"44695","spawn":{"y":387.03,"yaw":58.148,"z":4.544,"x":-1285.402},"stopId":21},{"stopIndex":3,"locKey":"44476","line":17,"approach":[],"berth":{"z":7.7179794311523,"yaw":178.01884460449,"y":266.96304321289,"x":-2090.8569335938},"eventId":6,"stopSequence":3,"stopName":"centre ville","spawn":{"y":357.29190063477,"yaw":83.365020751953,"z":7.9559631347656,"x":-1992.9694824219},"stopId":22},{"stopIndex":4,"locKey":"44501","line":17,"approach":[],"berth":{"y":-534.273,"yaw":179.037,"z":12.674,"x":-2394.227},"eventId":8,"stopSequence":4,"stopName":"Cannery plaza","spawn":{"y":-389.572,"yaw":173.559,"z":12.77,"x":-2384.746},"stopId":28},{"stopIndex":5,"locKey":"44503","line":17,"approach":[],"berth":{"y":-1064.919,"yaw":173.575,"z":7.829,"x":-2157.803},"eventId":4,"stopSequence":5,"stopName":"megabuildingH2","spawn":{"z":7.656,"yaw":175.575,"y":-903.618,"x":-2152.458},"stopId":40},{"eventId":6,"stopIndex":7,"berth":{"y":-1326.208,"yaw":-87.819,"z":44.677,"x":-1519.522},"line":17,"stopSequence":7,"spawn":{"z":49.999,"yaw":86.052,"y":-1241.65,"x":-1530.063},"approach":[],"stopId":48},{"stopIndex":8,"line":17,"approach":[],"berth":{"y":-884.887,"yaw":-79.55,"z":11.296,"x":-1207.622},"eventId":6,"stopSequence":8,"spawn":{"y":-843.605,"yaw":-91.621,"z":11.442,"x":-1305.612},"stopId":51},{"stopIndex":6,"line":17,"approach":[],"berth":{"y":-1070.54,"yaw":174.013,"z":7.829,"x":-2159.613},"eventId":3,"stopSequence":6,"stopLocKey":"44503","spawn":{"y":-914.529,"yaw":175.943,"z":7.676,"x":-2153.912},"stopId":45}],"lineColors":{"23":2,"51":0,"68":4,"72":5,"17":3,"22":1},"revision":180,"hubs":[],"stops":[{"locKey":44679,"line":51,"anchorType":"fastTravel","name":"Wellsprings","sequence":1,"id":1},{"locKey":44533,"line":51,"anchorType":"fastTravel","name":"Skyline Est","sequence":2,"id":2},{"locKey":44532,"line":51,"anchorType":"fastTravel","name":"College Street","sequence":3,"id":3},{"locKey":44534,"line":51,"anchorType":"fastTravel","name":"Congress & Madison","sequence":4,"id":4},{"locKey":44515,"line":51,"anchorType":"fastTravel","name":"Senate and Market","sequence":5,"id":5},{"locKey":44679,"line":51,"anchorType":"fastTravel","name":"Wellsprings","sequence":6,"id":6},{"locKey":44679,"line":72,"anchorType":"fastTravel","name":"Wellsprings","sequence":1,"id":7},{"locKey":44515,"line":72,"anchorType":"fastTravel","name":"Senate and Market","sequence":2,"id":8},{"locKey":44501,"line":72,"anchorType":"fastTravel","name":"Cannery Plaza","sequence":3,"id":9},{"locKey":44473,"line":72,"anchorType":"fastTravel","name":"Marina de Gold Beach","sequence":4,"id":10},{"locKey":44700,"line":72,"anchorType":"fastTravel","name":"Alexander Street","sequence":5,"id":11},{"locKey":44679,"line":72,"anchorType":"fastTravel","name":"Wellsprings","sequence":10,"id":12},{"locKey":44501,"line":68,"anchorType":"fastTravel","name":"Cannery Plaza","sequence":4,"id":13},{"locKey":44515,"line":68,"anchorType":"fastTravel","name":"Senate and Market","sequence":5,"id":14},{"locKey":44534,"line":68,"anchorType":"fastTravel","name":"Congress & Madison","sequence":6,"id":15},{"locKey":44532,"line":68,"anchorType":"fastTravel","name":"College Street","sequence":7,"id":16},{"locKey":44534,"line":23,"anchorType":"fastTravel","name":"Congress & Madison","sequence":2,"id":17},{"locKey":44532,"line":23,"anchorType":"fastTravel","name":"College Street","sequence":3,"id":18},{"locKey":44530,"line":23,"anchorType":"fastTravel","name":"Republic and Vine","sequence":5,"id":19},{"hubId":"hub-5","locKey":44536,"line":17,"sequence":1,"eventId":5,"position":{"y":-83.498,"z":7.24,"x":-889.9},"anchorType":"fastTravel","stopName":"QG De Delamain","id":20},{"hubId":"hub-9","locKey":"44695","line":17,"sequence":2,"eventId":9,"position":{"y":441.47,"z":6.893,"x":-1453.648},"anchorType":"manual","stopName":"Metro: Sarsati & Republic","id":21},{"hubId":"hub-5","locKey":"44476","line":17,"sequence":3,"eventId":5,"position":{"y":275.559,"z":7.945,"x":-2097.192},"anchorType":"manual","stopName":"centre ville","id":22},{"hubId":"hub-4","locKey":"44501","line":17,"sequence":4,"eventId":4,"position":{"z":12.858,"y":-525.392,"x":-2399.462},"anchorType":"manual","stopName":"cannery plaza","id":28},{"hubId":"hub-6","locKey":"44522","line":17,"sequence":5,"eventId":6,"position":{"z":7.901,"y":-482.57,"x":-1763.593},"anchorType":"manual","stopName":"Embers","id":40},{"hubId":"hub-7","locKey":"44503","line":17,"sequence":6,"eventId":7,"position":{"z":8.044,"y":-1052.455,"x":-2162.623},"anchorType":"manual","stopName":"megabuildingH2","id":45},{"hubId":"hub-13","position":{"z":44.556,"y":-1329.494,"x":-1535.322},"anchorType":"manual","id":48,"eventId":8,"line":17,"sequence":7,"stopName":"Metro: Glen Sud"},{"hubId":"hub-17","position":{"z":11.552,"y":-890.199,"x":-1206.635},"anchorType":"manual","id":51,"eventId":9,"sequence":8,"line":17}]}
+{
+  "lastEventId": 7,
+  "hubs": [
+    {
+      "referenceStopId": 60,
+      "position": {
+        "x": -2098.576,
+        "y": -1225.476,
+        "z": 8.37
+      },
+      "id": "hub-19"
+    },
+    {
+      "referenceStopId": 59,
+      "position": {
+        "x": -2396.791,
+        "y": -525.01,
+        "z": 12.883
+      },
+      "id": "hub-16"
+    }
+  ],
+  "schemaVersion": 2,
+  "revision": 301,
+  "captures": [
+    {
+      "stopIndex": 1,
+      "stopId": 59,
+      "spawn": {
+        "yaw": -178.275,
+        "x": -2384.331,
+        "y": -377.381,
+        "z": 12.785
+      },
+      "approach": [],
+      "berth": {
+        "z": 12.674,
+        "x": -2393.443,
+        "y": -539.969,
+        "yaw": 171.188
+      },
+      "eventId": 3,
+      "stopSequence": 1,
+      "stopLocKey": 44501,
+      "line": 127
+    },
+    {
+      "stopId": 61,
+      "spawn": {
+        "z": 12.695,
+        "x": -2252.802,
+        "y": -1194.304,
+        "yaw": -116.284
+      },
+      "stopIndex": 2,
+      "berth": {
+        "z": 8.173,
+        "x": -2098.473,
+        "y": -1219.26,
+        "yaw": -93.584
+      },
+      "eventId": 3,
+      "stopSequence": 2,
+      "line": 127,
+      "approach": []
+    },
+    {
+      "stopIndex": 3,
+      "stopId": 62,
+      "spawn": {
+        "z": 7.485,
+        "x": -1819.206,
+        "y": -888.508,
+        "yaw": -125.608
+      },
+      "approach": [],
+      "berth": {
+        "z": 8.408,
+        "x": -1730.791,
+        "y": -909.054,
+        "yaw": -92.558
+      },
+      "eventId": 2,
+      "line": 127,
+      "stopLocKey": 44517,
+      "stopSequence": 3
+    },
+    {
+      "stopId": 63,
+      "spawn": {
+        "y": -1190.197,
+        "x": -2260.239,
+        "z": 12.643,
+        "yaw": -114.863
+      },
+      "stopIndex": 1,
+      "berth": {
+        "yaw": -90.113,
+        "x": -2105.619,
+        "z": 8.163,
+        "y": -1219.568
+      },
+      "eventId": 4,
+      "stopSequence": 2,
+      "approach": [],
+      "line": 999
+    },
+    {
+      "stopIndex": 2,
+      "stopId": 66,
+      "spawn": {
+        "z": 9.622,
+        "x": -1991.091,
+        "y": -1224.896,
+        "yaw": -89.913
+      },
+      "approach": [],
+      "berth": {
+        "yaw": -95.113,
+        "x": -1894.969,
+        "z": 17.254,
+        "y": -1227.232
+      },
+      "eventId": 2,
+      "stopSequence": 3,
+      "stopLocKey": 44516,
+      "line": 999
+    },
+    {
+      "spawn": {
+        "z": 7.238,
+        "yaw": -40.856,
+        "y": -201.445,
+        "x": -953.735
+      },
+      "stopIndex": 1,
+      "approach": {
+        "z": 0,
+        "yaw": 0.039,
+        "y": 0,
+        "x": 0
+      },
+      "berth": {
+        "z": 7.135,
+        "yaw": 54.694,
+        "y": -74.538,
+        "x": -917.116
+      },
+      "eventId": 3,
+      "stopSequence": 1,
+      "stopLocKey": 44536,
+      "line": 17,
+      "stopId": 20
+    },
+    {
+      "stopId": 21,
+      "stopIndex": 2,
+      "locKey": "44695",
+      "approach": {
+        "z": 0,
+        "yaw": 0.042,
+        "y": 0,
+        "x": 0
+      },
+      "berth": {
+        "y": 436.499,
+        "yaw": 83.148,
+        "z": 6.768,
+        "x": -1470.867
+      },
+      "eventId": 1,
+      "stopSequence": 2,
+      "stopName": "Metro: Sarsati & Republic",
+      "line": 17,
+      "spawn": {
+        "y": 387.03,
+        "yaw": 58.148,
+        "z": 4.544,
+        "x": -1285.402
+      }
+    },
+    {
+      "stopId": 22,
+      "stopIndex": 3,
+      "locKey": "44476",
+      "approach": [],
+      "berth": {
+        "z": 7.7179794311523,
+        "yaw": 178.01884460449,
+        "y": 266.96304321289,
+        "x": -2090.8569335938
+      },
+      "eventId": 6,
+      "stopSequence": 3,
+      "stopName": "centre ville",
+      "line": 17,
+      "spawn": {
+        "y": 357.29190063477,
+        "yaw": 83.365020751953,
+        "z": 7.9559631347656,
+        "x": -1992.9694824219
+      }
+    },
+    {
+      "stopId": 28,
+      "stopIndex": 4,
+      "locKey": "44501",
+      "approach": [],
+      "berth": {
+        "y": -534.273,
+        "yaw": 179.037,
+        "z": 12.674,
+        "x": -2394.227
+      },
+      "eventId": 8,
+      "stopSequence": 4,
+      "stopName": "Cannery plaza",
+      "line": 17,
+      "spawn": {
+        "y": -389.572,
+        "yaw": 173.559,
+        "z": 12.77,
+        "x": -2384.746
+      }
+    },
+    {
+      "stopId": 40,
+      "stopIndex": 5,
+      "locKey": "44503",
+      "approach": [],
+      "berth": {
+        "y": -1064.919,
+        "yaw": 173.575,
+        "z": 7.829,
+        "x": -2157.803
+      },
+      "eventId": 4,
+      "stopSequence": 5,
+      "stopName": "megabuildingH2",
+      "line": 17,
+      "spawn": {
+        "z": 7.656,
+        "yaw": 175.575,
+        "y": -903.618,
+        "x": -2152.458
+      }
+    },
+    {
+      "berth": {
+        "y": -1326.208,
+        "yaw": -87.819,
+        "z": 44.677,
+        "x": -1519.522
+      },
+      "spawn": {
+        "z": 49.999,
+        "yaw": 86.052,
+        "y": -1241.65,
+        "x": -1530.063
+      },
+      "stopSequence": 7,
+      "stopIndex": 7,
+      "stopId": 48,
+      "line": 17,
+      "eventId": 6,
+      "approach": []
+    },
+    {
+      "berth": {
+        "y": -882.248,
+        "yaw": -72.396,
+        "z": 10.598,
+        "x": -1181.202
+      },
+      "spawn": {
+        "y": -843.605,
+        "yaw": -91.621,
+        "z": 11.442,
+        "x": -1305.612
+      },
+      "stopSequence": 8,
+      "stopIndex": 8,
+      "stopId": 51,
+      "line": 17,
+      "eventId": 5,
+      "approach": []
+    },
+    {
+      "spawn": {
+        "y": -914.529,
+        "yaw": 175.943,
+        "z": 7.676,
+        "x": -2153.912
+      },
+      "stopIndex": 6,
+      "approach": [],
+      "berth": {
+        "y": -1070.54,
+        "yaw": 174.013,
+        "z": 7.829,
+        "x": -2159.613
+      },
+      "eventId": 3,
+      "stopSequence": 6,
+      "stopLocKey": "44503",
+      "line": 17,
+      "stopId": 45
+    }
+  ],
+  "nextStopId": 69,
+  "passages": [
+    {
+      "afterStopId": 45,
+      "yaw": 0,
+      "eventId": 2,
+      "line": 17,
+      "position": {
+        "x": -1976.761,
+        "y": -1096.132,
+        "z": 7.95
+      },
+      "id": "passage-2"
+    },
+    {
+      "afterStopId": 48,
+      "yaw": 0,
+      "eventId": 3,
+      "line": 17,
+      "position": {
+        "x": -1367.154,
+        "y": -1399.373,
+        "z": 45.195
+      },
+      "id": "passage-3"
+    }
+  ],
+  "lineColors": {
+    "17": 3,
+    "22": 1,
+    "23": 2,
+    "51": 0,
+    "68": 4,
+    "72": 5,
+    "127": 1,
+    "999": 1
+  },
+  "stops": [
+    {
+      "anchorType": "travelAnchor",
+      "sequence": 2,
+      "name": "Skyline Est",
+      "position": {
+        "x": -2072.916,
+        "y": -607.115,
+        "z": 7.595
+      },
+      "line": 51,
+      "locKey": 44679,
+      "id": 2
+    },
+    {
+      "anchorType": "fastTravel",
+      "name": "College Street",
+      "sequence": 3,
+      "line": 51,
+      "locKey": 44532,
+      "id": 3
+    },
+    {
+      "anchorType": "fastTravel",
+      "name": "Congress & Madison",
+      "sequence": 4,
+      "line": 51,
+      "locKey": 44534,
+      "id": 4
+    },
+    {
+      "anchorType": "fastTravel",
+      "name": "Senate and Market",
+      "sequence": 5,
+      "line": 51,
+      "locKey": 44515,
+      "id": 5
+    },
+    {
+      "anchorType": "fastTravel",
+      "name": "Senate and Market",
+      "sequence": 5,
+      "line": 68,
+      "locKey": 44515,
+      "id": 14
+    },
+    {
+      "anchorType": "fastTravel",
+      "name": "Congress & Madison",
+      "sequence": 6,
+      "line": 68,
+      "locKey": 44534,
+      "id": 15
+    },
+    {
+      "anchorType": "fastTravel",
+      "name": "College Street",
+      "sequence": 7,
+      "line": 68,
+      "locKey": 44532,
+      "id": 16
+    },
+    {
+      "anchorType": "fastTravel",
+      "name": "Congress & Madison",
+      "sequence": 2,
+      "line": 23,
+      "locKey": 44534,
+      "id": 17
+    },
+    {
+      "anchorType": "fastTravel",
+      "name": "College Street",
+      "sequence": 3,
+      "line": 23,
+      "locKey": 44532,
+      "id": 18
+    },
+    {
+      "anchorType": "fastTravel",
+      "name": "Republic and Vine",
+      "sequence": 5,
+      "line": 23,
+      "locKey": 44530,
+      "id": 19
+    },
+    {
+      "anchorType": "travelAnchor",
+      "position": {
+        "x": -2396.791,
+        "y": -525.01,
+        "z": 12.883
+      },
+      "sequence": 1,
+      "hubId": "hub-16",
+      "eventId": 16,
+      "line": 127,
+      "locKey": 44501,
+      "id": 59
+    },
+    {
+      "anchorType": "manual",
+      "position": {
+        "x": -2098.576,
+        "z": 8.37,
+        "y": -1225.476
+      },
+      "hubId": "hub-19",
+      "eventId": 19,
+      "line": 127,
+      "sequence": 2,
+      "id": 61
+    },
+    {
+      "anchorType": "travelAnchor",
+      "sequence": 3,
+      "position": {
+        "x": -1730.891,
+        "y": -914.664,
+        "z": 8.604
+      },
+      "eventId": 16,
+      "line": 127,
+      "locKey": 44517,
+      "id": 62
+    },
+    {
+      "anchorType": "manual",
+      "sequence": 2,
+      "hubId": "hub-19",
+      "eventId": 16,
+      "line": 999,
+      "position": {
+        "x": -2098.576,
+        "z": 8.37,
+        "y": -1225.476
+      },
+      "id": 63
+    },
+    {
+      "anchorType": "travelAnchor",
+      "sequence": 3,
+      "position": {
+        "x": -1895.734,
+        "y": -1235.04,
+        "z": 17.387
+      },
+      "eventId": 17,
+      "line": 999,
+      "locKey": 44516,
+      "id": 66
+    },
+    {
+      "hubId": "hub-5",
+      "locKey": 44536,
+      "sequence": 1,
+      "eventId": 5,
+      "anchorType": "fastTravel",
+      "stopName": "QG De Delamain",
+      "line": 17,
+      "position": {
+        "y": -83.498,
+        "z": 7.24,
+        "x": -889.9
+      },
+      "id": 20
+    },
+    {
+      "hubId": "hub-9",
+      "locKey": "44695",
+      "sequence": 2,
+      "eventId": 9,
+      "anchorType": "manual",
+      "stopName": "Metro: Sarsati & Republic",
+      "line": 17,
+      "position": {
+        "y": 441.47,
+        "z": 6.893,
+        "x": -1453.648
+      },
+      "id": 21
+    },
+    {
+      "hubId": "hub-5",
+      "locKey": "44476",
+      "sequence": 3,
+      "eventId": 5,
+      "anchorType": "manual",
+      "stopName": "centre ville",
+      "line": 17,
+      "position": {
+        "y": 275.559,
+        "z": 7.945,
+        "x": -2097.192
+      },
+      "id": 22
+    },
+    {
+      "hubId": "hub-4",
+      "locKey": "44501",
+      "sequence": 4,
+      "eventId": 4,
+      "anchorType": "manual",
+      "stopName": "cannery plaza",
+      "line": 17,
+      "position": {
+        "z": 12.858,
+        "y": -525.392,
+        "x": -2399.462
+      },
+      "id": 28
+    },
+    {
+      "hubId": "hub-6",
+      "locKey": "44522",
+      "sequence": 5,
+      "eventId": 6,
+      "anchorType": "manual",
+      "stopName": "Embers",
+      "line": 17,
+      "position": {
+        "z": 7.901,
+        "y": -482.57,
+        "x": -1763.593
+      },
+      "id": 40
+    },
+    {
+      "hubId": "hub-7",
+      "locKey": "44503",
+      "sequence": 6,
+      "eventId": 7,
+      "anchorType": "manual",
+      "stopName": "megabuildingH2",
+      "line": 17,
+      "position": {
+        "z": 8.044,
+        "y": -1052.455,
+        "x": -2162.623
+      },
+      "id": 45
+    },
+    {
+      "hubId": "hub-13",
+      "eventId": 8,
+      "id": 48,
+      "anchorType": "manual",
+      "stopName": "Metro: Glen Sud",
+      "line": 17,
+      "sequence": 7,
+      "position": {
+        "z": 44.556,
+        "y": -1329.494,
+        "x": -1535.322
+      }
+    },
+    {
+      "hubId": "hub-17",
+      "eventId": 9,
+      "anchorType": "manual",
+      "id": 51,
+      "line": 17,
+      "sequence": 8,
+      "position": {
+        "z": 11.552,
+        "y": -890.199,
+        "x": -1206.635
+      }
+    }
+  ],
+  "generatedBy": "NCTC developer survey snapshot"
+}

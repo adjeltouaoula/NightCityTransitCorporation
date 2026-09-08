@@ -356,7 +356,13 @@ end
 normalize_captures = function(network)
   local unique, ordered, changed = {}, {}, false
   for _, capture in ipairs(network.captures or {}) do
-    local key = tostring(capture.line or 0) .. ":" .. tostring(capture.stopIndex or 0)
+    -- stopIndex is only a mutable editor ordinal.  Deleting a stop and then
+    -- adding another can give two distinct stops the same ordinal, which used
+    -- to merge their captures and silently transplant a spawn/berth onto the
+    -- wrong stop.  Stable stopId is the authoritative identity.  The ordinal
+    -- remains a compatibility fallback for old networks that predate IDs.
+    local key = capture.stopId and ("id:" .. tostring(capture.stopId))
+      or ("legacy:" .. tostring(capture.line or 0) .. ":" .. tostring(capture.stopIndex or 0))
     local saved = unique[key]
     if not saved then
       saved = capture
@@ -803,9 +809,22 @@ local function capture_directly(kind)
 end
 
 local function publish_network(quests, network)
-  local count = math.min(#(network.stops or {}), 160)
+  -- The physical JSON array is append-order: moving a stop only changes its
+  -- authored `sequence`.  Redscript consumes the published array as the
+  -- route order, so publish a sorted copy rather than leaking append-order
+  -- into service navigation.
+  local ordered_stops = {}
+  for _, stop in ipairs(network.stops or {}) do table.insert(ordered_stops, stop) end
+  table.sort(ordered_stops, function(a, b)
+    local a_line, b_line = tonumber(a.line) or 0, tonumber(b.line) or 0
+    if a_line ~= b_line then return a_line < b_line end
+    local a_sequence, b_sequence = tonumber(a.sequence) or 0, tonumber(b.sequence) or 0
+    if a_sequence ~= b_sequence then return a_sequence < b_sequence end
+    return (tonumber(a.id) or 0) < (tonumber(b.id) or 0)
+  end)
+  local count = math.min(#ordered_stops, 160)
   for index = 1, count do
-    local stop = network.stops[index]
+    local stop = ordered_stops[index]
     local prefix = "nctc_external_stop_" .. tostring(index - 1) .. "_"
     set_fact(quests, prefix .. "line", stop.line or 0)
     set_fact(quests, prefix .. "id", stop.id or 0)

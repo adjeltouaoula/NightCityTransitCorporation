@@ -315,14 +315,14 @@ public class NCTCSettings extends ScriptableSystem {
   @runtimeProperty("ModSettings.description", "Deletes the nearest passage point for the selected line within 30 metres.")
   @runtimeProperty("ModSettings.category", "Developer mode")
   @runtimeProperty("ModSettings.dependency", "developerMode")
-  public let deleteNearestPassageKey: EInputKey = EInputKey.IK_NumPad9;
+  public let deleteNearestPassageKey: EInputKey = EInputKey.IK_NumPad8;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Despawn service bus")
   @runtimeProperty("ModSettings.description", "Immediately removes the active NCTC bus and clears its pending route request. A new bus can then be called right away.")
   @runtimeProperty("ModSettings.category", "Developer mode")
   @runtimeProperty("ModSettings.dependency", "developerMode")
-  public let despawnServiceBusKey: EInputKey = EInputKey.IK_NumPad8;
+  public let despawnServiceBusKey: EInputKey = EInputKey.IK_NumPad9;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "New line number (legacy)")
