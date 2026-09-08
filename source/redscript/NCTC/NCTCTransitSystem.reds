@@ -1,5 +1,4 @@
 module NCTC
-import AutoDriveEnhanced.*
 
 public class NCTCDeferredDriveCommand extends DelayCallback {
   private let bus: wref<VehicleObject>;
@@ -16,19 +15,15 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
   }
 
   public func Call() -> Void {
-    let command: ref<AIVehicleDriveToPointCommand>;
-    let settings: ref<Settings>;
+    let command: ref<AIVehicleDriveToPointAutonomousCommand>;
     if !IsDefined(this.bus) || !this.bus.IsAttached() || !IsDefined(this.bus.GetAIComponent()) { return; };
-    settings = Settings.GetInstance(this.bus.GetGame());
-    if !IsDefined(settings) { return; };
-    command = new AIVehicleDriveToPointCommand();
-    command.secureTimeOut = settings.secureTimeOut;
-    command.useTraffic = settings.useTraffic;
-    command.speedInTraffic = settings.speedInTraffic;
-    command.forceGreenLights = settings.forceGreenLights;
-    command.trafficTryNeighborsForStart = settings.trafficTryNeighborsForStart;
-    command.trafficTryNeighborsForEnd = settings.trafficTryNeighborsForEnd;
+    // Native-only experiment. These values mirror the relevant ADE snapshot
+    // without importing ADE or consulting its runtime settings.
+    command = new AIVehicleDriveToPointAutonomousCommand();
     command.targetPosition = Vector4.Vector4To3(this.target);
+    command.maxSpeed = 50.00;
+    command.minSpeed = 0.00;
+    command.clearTrafficOnPath = false;
     command.minimumDistanceToTarget = this.minimumDistance;
     // Dev telemetry: proves the exact native stopping threshold carried by
     // the command that was actually sent, rather than inferring it later
@@ -44,16 +39,16 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
   }
 }
 
-// Direct traffic command supplied by Auto Drive Enhanced. It controls the bus
-// only: V remains an ordinary passenger and its AutoDrive UI is never used.
+// NCTC owns the native autonomous command lifecycle. V remains an ordinary
+// passenger and no player AutoDrive system participates in service routing.
 public class NCTCServiceBusController extends IScriptable {
   private let bus: wref<VehicleObject>;
   private let playerAboardSignal: Bool;
-  private let activeRouteCommand: ref<AIVehicleDriveToPointCommand>;
+  private let activeRouteCommand: ref<AIVehicleDriveToPointAutonomousCommand>;
   // Diagnostic-only: retain the command that was active immediately before a
   // route handoff, so the dev log can prove whether it was replaced or left
   // alive alongside the command for the next stop.
-  private let previousRouteCommand: ref<AIVehicleDriveToPointCommand>;
+  private let previousRouteCommand: ref<AIVehicleDriveToPointAutonomousCommand>;
 
   public func Bind(bus: ref<VehicleObject>) -> Bool {
     if !IsDefined(bus) || !IsDefined(bus.GetAIComponent()) { return false; };
@@ -132,11 +127,11 @@ public class NCTCServiceBusController extends IScriptable {
   public func DriveToTraffic(target: Vector4, minimumDistance: Float) -> Bool {
     let callback: ref<NCTCDeferredDriveCommand>;
     if !this.IsReady() { return false; };
-    // An empty dynamic bus needs ADE's driver-state bootstrap. Never send its
-    // NoDriver/DriverReady pair while V is mounted: it can interrupt the rear
-    // passenger workspot and cancel the route command during PassengerEvents.
+    // An empty dynamic vehicle needs the same native driver-state transition
+    // used by autonomous vehicles. Do not repeat it while V is mounted: that
+    // can interrupt the rear passenger workspot during PassengerEvents.
     if !this.IsPlayerAboard() {
-      this.bus.WorkaroundForAutoDriveDontStart_ADE();
+      this.PrepareEmptyBusForAutonomousDrive();
     };
     callback = new NCTCDeferredDriveCommand();
     this.previousRouteCommand = this.activeRouteCommand;
@@ -146,7 +141,16 @@ public class NCTCServiceBusController extends IScriptable {
     return true;
   }
 
-  public func SetActiveRouteCommand(command: ref<AIVehicleDriveToPointCommand>) -> Void {
+  private func PrepareEmptyBusForAutonomousDrive() -> Void {
+    let noDriver: ref<AIEvent> = new AIEvent();
+    let driverReady: ref<AIEvent> = new AIEvent();
+    noDriver.name = n"NoDriver";
+    driverReady.name = n"DriverReady";
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.10);
+  }
+
+  public func SetActiveRouteCommand(command: ref<AIVehicleDriveToPointAutonomousCommand>) -> Void {
     this.activeRouteCommand = command;
   }
 
@@ -155,7 +159,7 @@ public class NCTCServiceBusController extends IScriptable {
   }
 
   // Telemetry only. The command state is exposed so the dev runtime can prove
-  // whether ADE completes, replaces, or leaves our submitted command active.
+  // whether the native controller completes, replaces, or leaves our command active.
   public func GetRouteCommandStatusCode() -> Int32 {
     if !IsDefined(this.activeRouteCommand) { return 0; };
     if Equals(this.activeRouteCommand.state, AICommandState.Success) { return 2; };
@@ -187,13 +191,13 @@ public class NCTCServiceBusController extends IScriptable {
 
   public func CancelTrafficRoute() -> Void {
     if this.IsReady() {
-      this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+      this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointAutonomousCommand", false, true);
     };
   }
 
   public func ArriveAtStop() -> Void {
     if !this.IsReady() { return; };
-    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointAutonomousCommand", false, true);
   }
 
   // The Mahir coach door is stateful. The old working prototype did not rely
@@ -762,8 +766,8 @@ public class NCTCTransitSystem extends ScriptableSystem {
     };
     this.legPolls += 1;
     // Every five seconds, log the exact state of the command object NCTC
-    // submitted to ADE. This is diagnostic-only and lets us distinguish a
-    // genuine ADE completion from a vehicle that merely stopped in traffic.
+    // submitted to the native AI. This is diagnostic-only and distinguishes
+    // command completion from a vehicle that merely stopped in traffic.
     this.telemetryPolls += 1;
     if this.telemetryPolls >= 10 {
       this.telemetryPolls = 0;
@@ -803,7 +807,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       // Intermediate route point: it has been reached in order, but no one
       // requested service there. Replace the completed command immediately
       // so the bus continues without doors or a dwell state. SendCommand does
-      // not replace an in-flight AIVehicleDriveToPointCommand by itself: the
+      // not replace an in-flight autonomous drive command by itself: the
       // old command remains active and can hold the bus at this stop. End it
       // before the deferred command for the next berth is submitted.
       this.controller.CancelTrafficRoute();

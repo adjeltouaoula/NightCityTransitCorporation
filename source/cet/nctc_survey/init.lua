@@ -1031,7 +1031,7 @@ local function log_service_loop(quests)
     [33] = "route loop: next drive command rejected",
     [34] = "route loop: next stopSequence/profile unavailable",
     [35] = "route loop: active drive command failed before arrival",
-    [36] = "route loop: ADE command telemetry",
+    [36] = "route loop: native command telemetry",
     [37] = "route loop: bus manually despawned",
     [38] = "route loop: native stop detected; forward berth correction sent"
   }
