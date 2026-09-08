@@ -11,3 +11,12 @@ Original mod: https://www.nexusmods.com/cyberpunk2077/mods/17099
 
 NCTC exposes passenger seats only. It does not include the original garage,
 player-driver, or manual bus-driving features.
+
+## Auto Drive Enhanced
+
+The optional standalone traffic-driving compatibility resource and its small
+REDscript command bridge are adapted from **Auto Drive Enhanced 0.0.0.20**.
+NCTC does not include ADE's player AutoDrive, HUD, settings, cameras, or CET
+runtime. The compatibility layer is used only by the NCTC service bus.
+
+Original mod: https://www.nexusmods.com/cyberpunk2077/mods/23157
