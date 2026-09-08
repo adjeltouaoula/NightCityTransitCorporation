@@ -42,35 +42,61 @@ public class NCTCStopPrompt {
     return Vector4.Distance(player.GetWorldPosition(), position) <= 6.00;
   }
 
-  public static func IsHubChoiceOpen(game: GameInstance) -> Bool {
-    return Equals(GameInstance.GetQuestsSystem(game).GetFact(n"nctc_hub_choice_open"), 1);
-  }
-
-  private static func OpenHubChoice(game: GameInstance, position: Vector4) -> Bool {
+  private static func StartHubChoice(game: GameInstance, position: Vector4) -> Bool {
     let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(game);
-    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
+    let player: ref<PlayerPuppet> = GetPlayer(game);
     let lines: array<String>;
     let stopIds: array<Int32>;
     let stop: Vector4;
-    let index: Int32 = 0;
-    if !IsDefined(markers) || !IsDefined(quests) || !markers.GetNearestServiceChoices(position, lines, stopIds, stop) || ArraySize(lines) < 2 { return false; };
-    quests.SetFact(n"nctc_hub_choice_count", ArraySize(lines));
-    quests.SetFact(n"nctc_hub_choice_x", Cast<Int32>(stop.X * 1000.00));
-    quests.SetFact(n"nctc_hub_choice_y", Cast<Int32>(stop.Y * 1000.00));
-    quests.SetFact(n"nctc_hub_choice_z", Cast<Int32>(stop.Z * 1000.00));
-    while index < ArraySize(lines) {
-      quests.SetFact(StringToName("nctc_hub_choice_" + ToString(index) + "_line"), StringToInt(lines[index], -1));
-      quests.SetFact(StringToName("nctc_hub_choice_" + ToString(index) + "_stop_id"), stopIds[index]);
-      index += 1;
-    };
-    quests.SetFact(n"nctc_hub_choice_open", 1);
-    quests.SetFact(n"nctc_hub_choice_revision", quests.GetFact(n"nctc_hub_choice_revision") + 1);
+    if !IsDefined(markers) || !IsDefined(player) || !markers.GetNearestServiceChoices(position, lines, stopIds, stop) || ArraySize(lines) < 1 { return false; };
+    player.m_nctcHubChoiceLines = lines;
+    player.m_nctcHubChoiceStopIds = stopIds;
+    player.m_nctcHubChoicePosition = stop;
+    player.m_nctcHubChoiceIndex = 0;
+    player.m_nctcHubChoiceActive = true;
+    NCTCStopPrompt.UpdateHubChoiceUI(game);
     return true;
+  }
+
+  public static func ClearHubChoice(player: ref<PlayerPuppet>) -> Void {
+    if !IsDefined(player) { return; };
+    NCTCStopPrompt.HideHubChoiceUI(player.GetGame());
+    player.m_nctcHubChoiceActive = false;
+    ArrayClear(player.m_nctcHubChoiceLines);
+    ArrayClear(player.m_nctcHubChoiceStopIds);
+  }
+
+  private static func UpdateHubChoiceUI(game: GameInstance) -> Void {
+    let player: ref<PlayerPuppet> = GetPlayer(game);
+    let defs: ref<AllBlackboardDefinitions> = GetAllBlackboardDefs();
+    let blackboard: ref<IBlackboard> = GameInstance.GetBlackboardSystem(game).Get(defs.UIInteractions);
+    let data: DialogChoiceHubs; let hub: ListChoiceHubData; let choice: ListChoiceData; let choiceType: ChoiceTypeWrapper;
+    let index: Int32 = 0;
+    if !IsDefined(player) || !player.m_nctcHubChoiceActive { return; };
+    hub.id = 77902; hub.title = "NCTC — Choisir une ligne"; hub.activityState = EVisualizerActivityState.Active; hub.hubPriority = Cast<Uint8>(1);
+    while index < ArraySize(player.m_nctcHubChoiceLines) {
+      choice.localizedName = "Attendre le bus " + player.m_nctcHubChoiceLines[index]; choice.inputActionName = n"None";
+      ChoiceTypeWrapper.SetType(choiceType, gameinteractionsChoiceType.Selected); choice.type = choiceType;
+      ArrayPush(hub.choices, choice); index += 1;
+    };
+    ArrayPush(data.choiceHubs, hub);
+    blackboard.SetVariant(defs.UIInteractions.DialogChoiceHubs, ToVariant(data), true);
+    blackboard.SetInt(defs.UIInteractions.ActiveChoiceHubID, hub.id, true);
+    blackboard.SetInt(defs.UIInteractions.SelectedIndex, player.m_nctcHubChoiceIndex, true);
+  }
+
+  private static func HideHubChoiceUI(game: GameInstance) -> Void {
+    let defs: ref<AllBlackboardDefinitions> = GetAllBlackboardDefs();
+    let blackboard: ref<IBlackboard> = GameInstance.GetBlackboardSystem(game).Get(defs.UIInteractions);
+    let data: DialogChoiceHubs;
+    blackboard.SetVariant(defs.UIInteractions.DialogChoiceHubs, ToVariant(data), true);
+    blackboard.SetInt(defs.UIInteractions.ActiveChoiceHubID, 0, true);
   }
 
   public static func SetVisible(game: GameInstance, visible: Bool) -> Void {
     let hub: InteractionChoiceHubData;
     let choice: InteractionChoiceData;
+    let choices: array<InteractionChoiceData>;
     let choiceType: ChoiceTypeWrapper;
     let visualizers: VisualizersInfo;
     let defs: ref<AllBlackboardDefinitions>;
@@ -84,14 +110,28 @@ public class NCTCStopPrompt {
     if IsDefined(NCTCSettings.Get(game)) && NCTCSettings.Get(game).ShouldRecordTerminalStops() {
       hub.title = "NCTC DEV";
       choice.localizedName = "Enregistrer l arret";
+      choice.inputAction = n"UI_Apply";
+      ChoiceTypeWrapper.SetType(choiceType, gameinteractionsChoiceType.Blueline);
+      choice.type = choiceType;
+      ArrayPush(choices, choice);
+    } else if IsDefined(GetPlayer(game)) && GetPlayer(game).m_nctcHubChoiceActive {
+      hub.active = false;
     } else if IsDefined(markers) && markers.GetNearestServiceChoices(GetPlayer(game).GetWorldPosition(), lines, stopIds, stop) {
       // A single service is immediately callable. A metro transfer retains one
       // parent action so it can coexist with the native metro/fast-travel UI.
       choice.localizedName = ArraySize(lines) == 1 ? "Attendre le bus " + lines[0] : "Attendre un bus";
-    } else { choice.localizedName = "Attendre le bus"; };
-    choice.inputAction = n"UI_Apply";
-    ChoiceTypeWrapper.SetType(choiceType, gameinteractionsChoiceType.Blueline);
-    choice.type = choiceType; hub.choices = [choice];
+      choice.inputAction = n"UI_Apply";
+      ChoiceTypeWrapper.SetType(choiceType, gameinteractionsChoiceType.Blueline);
+      choice.type = choiceType;
+      ArrayPush(choices, choice);
+    } else {
+      choice.localizedName = "Attendre le bus";
+      choice.inputAction = n"UI_Apply";
+      ChoiceTypeWrapper.SetType(choiceType, gameinteractionsChoiceType.Blueline);
+      choice.type = choiceType;
+      ArrayPush(choices, choice);
+    };
+    hub.choices = choices;
     visualizers.activeVisId = hub.id; visualizers.visIds = [hub.id];
     defs = GetAllBlackboardDefs(); blackboard = GameInstance.GetBlackboardSystem(game).Get(defs.UIInteractions);
     blackboard.SetVariant(defs.UIInteractions.InteractionChoiceHub, ToVariant(hub), true);
@@ -110,7 +150,6 @@ public class NCTCStopPrompt {
   public static func Refresh(game: GameInstance) -> Void {
     let player: ref<PlayerPuppet> = GetPlayer(game);
     let settings: ref<NCTCSettings> = NCTCSettings.Get(game);
-    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
     let line: String; let stop: Vector4; let stopIndex: Int32; let stopId: Int32;
     let nearStop: Bool;
     let visible: Bool;
@@ -119,19 +158,8 @@ public class NCTCStopPrompt {
     let choicePosition: Vector4;
     let ordinaryHub: Bool;
     if !IsDefined(player) { return; };
-    // A multi-line choice is dispatched from CET, whereas the normal one-line
-    // prompt dispatches here.  Keep the confirmation visual identical for
-    // both paths by letting redscript render it in either case.
-    if IsDefined(quests) && quests.GetFact(n"nctc_hub_choice_notify_line") > 0 {
-      NCTCStopPrompt.NotifyRequest(game, ToString(quests.GetFact(n"nctc_hub_choice_notify_line")));
-      quests.SetFact(n"nctc_hub_choice_notify_line", 0);
-    };
     nearStop = IsDefined(settings) && settings.ShouldRecordTerminalStops() ? NCTCStopPrompt.IsNearTravelTerminal(game) : NCTCStopPrompt.IsNearStop(game, line, stop, stopIndex, stopId);
-    // The line selector belongs to a physical stop. Leaving its interaction
-    // radius is a cancellation, not a persistent menu state.
-    if !nearStop && NCTCStopPrompt.IsHubChoiceOpen(game) {
-      GameInstance.GetQuestsSystem(game).SetFact(n"nctc_hub_choice_open", 0);
-    };
+    if !nearStop { NCTCStopPrompt.ClearHubChoice(player); };
     // Ordinary hubs open straight onto their line choices.  A metro hub keeps
     // a single parent action so vanilla Fast Travel / Metro actions remain
     // usable alongside it; that parent action alone opens the line picker.
@@ -142,14 +170,8 @@ public class NCTCStopPrompt {
         ordinaryHub = ArraySize(choiceLines) > 1 && !markers.IsNearMetroAnchor(player.GetWorldPosition());
       };
     };
-    if ordinaryHub && !NCTCStopPrompt.IsHubChoiceOpen(game) {
-      if NCTCStopPrompt.OpenHubChoice(game, player.GetWorldPosition()) {
-        NCTCStopPrompt.SetVisible(game, false);
-        player.m_nctcPromptVisible = false;
-        return;
-      };
-    };
-    visible = nearStop && !NCTCStopPrompt.IsHubChoiceOpen(game);
+    if ordinaryHub && !player.m_nctcHubChoiceActive { NCTCStopPrompt.StartHubChoice(game, player.GetWorldPosition()); };
+    visible = nearStop && !player.m_nctcHubChoiceActive;
     if visible || !Equals(player.m_nctcPromptVisible, visible) { NCTCStopPrompt.SetVisible(game, visible); };
     player.m_nctcPromptVisible = visible;
   }
@@ -167,10 +189,29 @@ public class NCTCStopPromptCallback extends DelayCallback {
 public class NCTCStopPromptInputListener {
   public let game: GameInstance;
   protected cb func OnAction(action: ListenerAction, consumer: ListenerActionConsumer) -> Bool {
-    let player: ref<PlayerPuppet>; let settings: ref<NCTCSettings>; let markers: ref<NCTCMapMarkerSystem>; let line: String; let locKey: String; let stop: Vector4; let stopIndex: Int32; let stopId: Int32;
-    if !Equals(ListenerAction.GetName(action), n"one_click_confirm") || !ListenerAction.IsButtonJustReleased(action) { return false; };
+    let player: ref<PlayerPuppet>; let settings: ref<NCTCSettings>; let markers: ref<NCTCMapMarkerSystem>; let line: String; let locKey: String; let stop: Vector4; let stopIndex: Int32; let stopId: Int32; let name: CName;
+    name = ListenerAction.GetName(action);
     player = GetPlayer(this.game);
-    if !IsDefined(player) || !player.m_nctcPromptVisible { return false; };
+    if !IsDefined(player) { return false; };
+    if player.m_nctcHubChoiceActive {
+      if Equals(name, n"ChoiceScrollUp") && ListenerAction.IsButtonJustPressed(action) {
+        player.m_nctcHubChoiceIndex -= 1;
+        if player.m_nctcHubChoiceIndex < 0 { player.m_nctcHubChoiceIndex = ArraySize(player.m_nctcHubChoiceLines) - 1; };
+        NCTCStopPrompt.UpdateHubChoiceUI(this.game); return true;
+      };
+      if Equals(name, n"ChoiceScrollDown") && ListenerAction.IsButtonJustPressed(action) {
+        player.m_nctcHubChoiceIndex += 1;
+        if player.m_nctcHubChoiceIndex >= ArraySize(player.m_nctcHubChoiceLines) { player.m_nctcHubChoiceIndex = 0; };
+        NCTCStopPrompt.UpdateHubChoiceUI(this.game); return true;
+      };
+      if Equals(name, n"ChoiceApply") && ListenerAction.IsButtonJustPressed(action) {
+        let selected: Int32 = player.m_nctcHubChoiceIndex;
+        if NCTCTransitSystem.Get(this.game).RequestService(player.m_nctcHubChoiceLines[selected], player.m_nctcHubChoiceStopIds[selected], player.m_nctcHubChoicePosition) { NCTCStopPrompt.NotifyRequest(this.game, player.m_nctcHubChoiceLines[selected]); };
+        NCTCStopPrompt.ClearHubChoice(player); return true;
+      };
+      return false;
+    };
+    if !Equals(name, n"one_click_confirm") || !ListenerAction.IsButtonJustReleased(action) || !player.m_nctcPromptVisible { return false; };
     settings = NCTCSettings.Get(this.game);
     if IsDefined(settings) && settings.ShouldRecordTerminalStops() {
       markers = NCTCMapMarkerSystem.GetInstance(this.game);
@@ -181,9 +222,9 @@ public class NCTCStopPromptInputListener {
     // Only metro hubs have a second level: the first action preserves room for
     // vanilla Metro/Fast Travel actions, then presents the NCTC lines.
     markers = NCTCMapMarkerSystem.GetInstance(this.game);
-    if IsDefined(markers) && markers.IsNearMetroAnchor(player.GetWorldPosition()) && NCTCStopPrompt.OpenHubChoice(this.game, player.GetWorldPosition()) {
-      NCTCStopPrompt.SetVisible(this.game, false);
-      player.m_nctcPromptVisible = false;
+    if IsDefined(markers) && markers.IsNearMetroAnchor(player.GetWorldPosition()) && NCTCStopPrompt.StartHubChoice(this.game, player.GetWorldPosition()) {
+      NCTCStopPrompt.SetVisible(this.game, true);
+      player.m_nctcPromptVisible = true;
       return true;
     };
     if NCTCTransitSystem.Get(this.game).RequestService(line, stopId, stop) { NCTCStopPrompt.NotifyRequest(this.game, line); };
@@ -193,7 +234,11 @@ public class NCTCStopPromptInputListener {
 
 @addField(PlayerPuppet) private let m_nctcPromptInputListener: ref<NCTCStopPromptInputListener>;
 @addField(PlayerPuppet) public let m_nctcPromptVisible: Bool;
-@addField(PlayerPuppet) public let m_nctcHubChoiceLatched: Bool;
+@addField(PlayerPuppet) public let m_nctcHubChoiceActive: Bool;
+@addField(PlayerPuppet) public let m_nctcHubChoiceIndex: Int32;
+@addField(PlayerPuppet) public let m_nctcHubChoiceLines: array<String>;
+@addField(PlayerPuppet) public let m_nctcHubChoiceStopIds: array<Int32>;
+@addField(PlayerPuppet) public let m_nctcHubChoicePosition: Vector4;
 
 @wrapMethod(PlayerPuppet)
 protected cb func OnGameAttached() -> Bool {
@@ -206,6 +251,7 @@ protected cb func OnGameAttached() -> Bool {
 @wrapMethod(PlayerPuppet)
 protected cb func OnDetach() -> Bool {
   if IsDefined(this.m_nctcPromptInputListener) { this.UnregisterInputListener(this.m_nctcPromptInputListener); this.m_nctcPromptInputListener = null; };
+  NCTCStopPrompt.ClearHubChoice(this);
   NCTCStopPrompt.SetVisible(this.GetGame(), false); this.m_nctcPromptVisible = false; wrappedMethod();
 }
 

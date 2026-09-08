@@ -242,23 +242,9 @@ local function showHubChoice()
 end
 
 local function updateHubChoice()
-    if getFact("nctc_hub_choice_open") ~= 1 then
-        hideHubChoice()
-        return
-    end
-    local revision = getFact("nctc_hub_choice_revision")
-    if NCBN.hubChoiceVisible and revision == NCBN.hubChoiceRevision then return end
-    local choices, count = {}, getFact("nctc_hub_choice_count")
-    local x, y, z = getFact("nctc_hub_choice_x") / 1000.0, getFact("nctc_hub_choice_y") / 1000.0, getFact("nctc_hub_choice_z") / 1000.0
-    for index = 0, count - 1 do
-        local line = getFact("nctc_hub_choice_" .. tostring(index) .. "_line")
-        local stopId = getFact("nctc_hub_choice_" .. tostring(index) .. "_stop_id")
-        if line > 0 and stopId > 0 then table.insert(choices, { line = line, stopId = stopId, x = x, y = y, z = z }) end
-    end
-    hideChoice()
-    hideHubChoice()
-    NCBN.hubChoices, NCBN.selectedHubLine, NCBN.hubChoiceRevision = choices, 0, revision
-    showHubChoice()
+    -- Hub line selection is now a native Redscript interaction. CET retains
+    -- only the passenger-seat UI and must not reopen a legacy saved menu.
+    return
 end
 
 local function mountPassenger(seat)
@@ -401,7 +387,6 @@ end)
 
 registerForEvent("onUpdate", function()
     NCBN.inputLocked = false
-    updateHubChoice()
     local player, bus = Game.GetPlayer(), findServiceBus()
     if not player or not bus then
         NCBN.passengerMountRequested = false
