@@ -31,6 +31,7 @@ local last_published_network_revision = -1
 local last_dispatch_log_id = 0
 local last_loop_log_id = 0
 local last_native_command_event_id = 0
+local last_service_crime_suppressed_id = 0
 local last_sequence_probe_id = 0
 local last_profile_probe_id = 0
 local fact
@@ -1084,6 +1085,14 @@ local function log_native_command_event(quests)
       fact(quests, "nctc_dev_native_command_speed_mm") / 1000.0))
 end
 
+local function log_service_protection(quests)
+  local id = fact(quests, "nctc_dev_service_crime_suppressed_id")
+  if id < last_service_crime_suppressed_id then last_service_crime_suppressed_id = id - 1 end
+  if id <= last_service_crime_suppressed_id then return end
+  last_service_crime_suppressed_id = id
+  log("service protection #" .. tostring(id) .. ": ignored bus impact crime attribution; V heat unchanged")
+end
+
 registerForEvent("onUpdate", function()
   local quests = Game.GetQuestsSystem()
   if not quests then return end
@@ -1094,6 +1103,7 @@ registerForEvent("onUpdate", function()
   log_dispatch_attempt(quests)
   log_service_loop(quests)
   log_native_command_event(quests)
+  log_service_protection(quests)
   log_sequence_probe(quests)
   log_profile_probe(quests)
   local event_id = fact(quests, "nctc_survey_event_id")

@@ -21,7 +21,9 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
     // without importing ADE or consulting its runtime settings.
     command = new AIVehicleDriveToPointAutonomousCommand();
     command.targetPosition = Vector4.Vector4To3(this.target);
-    command.maxSpeed = 50.00;
+    // Native autonomous commands express speed in metres per second. The ADE
+    // snapshot value was 50 km/h, which is 13.89 m/s rather than 50 m/s.
+    command.maxSpeed = 13.89;
     command.minSpeed = 0.00;
     command.clearTrafficOnPath = false;
     command.minimumDistanceToTarget = this.minimumDistance;
@@ -54,6 +56,8 @@ public class NCTCServiceBusController extends IScriptable {
     if !IsDefined(bus) || !IsDefined(bus.GetAIComponent()) { return false; };
     this.bus = bus;
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
+    GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
     return true;
   }
 
