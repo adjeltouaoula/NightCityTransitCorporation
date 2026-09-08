@@ -9,7 +9,7 @@ local NCBN = { tag = "NightCityBusNetwork.PrototypeBus", interactionUI = nil, ch
     uiMissingLogged = false, wasInside = false, lastMountedSlot = nil,
     passengerMountRequested = false, mountRequestDeadline = 0, wasMounted = false,
     hubChoiceVisible = false, hubChoiceHub = nil, hubChoices = {}, selectedHubLine = 0,
-    hubChoiceRevision = -1 }
+    hubChoiceRevision = -1, lastInsideLocal = nil }
 
 -- Local-space zone in the aisle beside the two validated rear passenger seats.
 local seatAreas = {
@@ -133,6 +133,11 @@ local function sameSeats(left, right)
     if #left ~= #right then return false end
     for i = 1, #left do if left[i].id ~= right[i].id then return false end end
     return true
+end
+
+local function vectorText(value)
+    if not value then return "none" end
+    return string.format("(%.3f, %.3f, %.3f)", value.x, value.y, value.z)
 end
 
 local function offeredSeats(bus, player)
@@ -392,6 +397,8 @@ registerForEvent("onUpdate", function()
         NCBN.passengerMountRequested = false
         NCBN.mountRequestDeadline = 0
         NCBN.wasMounted = false
+        NCBN.wasInside = false
+        NCBN.lastInsideLocal = nil
         setFact("nctc_player_in_service_bus", 0)
         signalTransitSystem(false)
         hideChoice()
@@ -444,15 +451,27 @@ registerForEvent("onUpdate", function()
     end
     NCBN.lastMountedSlot = nil
     local inside = insideNow
+    local localNow = localPosition(bus, player)
     setFact("nctc_player_in_service_bus", inside and 1 or 0)
     signalTransitSystem(inside)
     if inside ~= NCBN.wasInside then
+        local loopLine = getFact("nctc_dev_loop_line")
+        local loopStop = getFact("nctc_dev_loop_stop_id")
+        local serviceStop = getFact("nctc_dev_loop_service_stop_id")
+        local nextStop = getFact("nctc_dev_loop_next_stop_id")
         NCBN.wasInside = inside
         print((inside and "[NCBN] Player entered the walkable cabin." or "[NCBN] Player left the walkable cabin.")
             .. " atStop=" .. tostring(getFact("nctc_service_bus_at_stop"))
             .. " speed=" .. string.format("%.2f", bus:GetCurrentSpeed())
-            .. " departureRequest=" .. tostring(getFact("nctc_passenger_departure_requested")))
+            .. " departureRequest=" .. tostring(getFact("nctc_passenger_departure_requested"))
+            .. " route=L" .. tostring(loopLine) .. " stop=" .. tostring(loopStop)
+            .. " serviceStop=" .. tostring(serviceStop) .. " next=" .. tostring(nextStop)
+            .. " localNow=" .. vectorText(localNow)
+            .. " localPrevious=" .. vectorText(NCBN.lastInsideLocal)
+            .. " playerWorld=" .. vectorText(player:GetWorldPosition())
+            .. " busWorld=" .. vectorText(bus:GetWorldPosition()))
     end
+    if inside then NCBN.lastInsideLocal = localNow end
     local seats = offeredSeats(bus, player)
     if not sameSeats(NCBN.offeredSeats, seats) then
         hideChoice()
