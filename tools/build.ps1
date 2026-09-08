@@ -15,7 +15,15 @@ Copy-Item -LiteralPath (Join-Path $GamePath "red4ext\plugins\Codeware\Scripts\Co
 # Auto Drive Enhanced remains an external runtime dependency. Its scripts are
 # copied only into the temporary compiler root, never into the NCTC package.
 Copy-Item -LiteralPath (Join-Path $GamePath "red4ext\plugins\mod_settings\packed.reds") -Destination (Join-Path $scriptsRoot "ModSettings\ModSettings.reds")
-Copy-Item -Path (Join-Path $GamePath "r6\scripts\auto_drive_enhanced\*.reds") -Destination (Join-Path $scriptsRoot "AutoDriveEnhanced")
+$installedAde = Join-Path $GamePath "r6\scripts\auto_drive_enhanced\*.reds"
+$vendorAde = Join-Path $projectRoot "source\vendor\auto_drive_enhanced\*.reds"
+if (Test-Path -Path $installedAde) {
+    Copy-Item -Path $installedAde -Destination (Join-Path $scriptsRoot "AutoDriveEnhanced")
+} elseif (Test-Path -Path $vendorAde) {
+    Copy-Item -Path $vendorAde -Destination (Join-Path $scriptsRoot "AutoDriveEnhanced")
+} else {
+    throw "Auto Drive Enhanced compiler sources were not found in the game or source/vendor."
+}
 
 & (Join-Path $GamePath "engine\tools\scc.exe") -compile $scriptsRoot -customCacheDir (Join-Path $cacheRoot "modded")
 if ($LASTEXITCODE -ne 0) { throw "Redscript compilation failed with exit code $LASTEXITCODE." }
