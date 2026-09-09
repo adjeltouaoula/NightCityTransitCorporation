@@ -258,14 +258,28 @@ public class NCTCSettings extends ScriptableSystem {
   @runtimeProperty("ModSettings.description", "Developer-only shortcut. Cycles the active line through lines present in the current network.")
   @runtimeProperty("ModSettings.category", "Developer mode")
   @runtimeProperty("ModSettings.dependency", "developerMode")
-  public let previousExistingLineKey: EInputKey = EInputKey.IK_F11;
+  public let previousExistingLineKey: EInputKey = EInputKey.IK_NumSlash;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Next existing line")
   @runtimeProperty("ModSettings.description", "Developer-only shortcut. Cycles the active line through lines present in the current network.")
   @runtimeProperty("ModSettings.category", "Developer mode")
   @runtimeProperty("ModSettings.dependency", "developerMode")
-  public let nextExistingLineKey: EInputKey = EInputKey.IK_F12;
+  public let nextExistingLineKey: EInputKey = EInputKey.IK_NumStar;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Previous survey stop")
+  @runtimeProperty("ModSettings.description", "Developer-only shortcut. Selects the previous stop on the active line; wraps from the first stop to the last.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let previousSurveyStopKey: EInputKey = EInputKey.IK_NumMinus;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Next survey stop")
+  @runtimeProperty("ModSettings.description", "Developer-only shortcut. Selects the next stop on the active line; wraps from the last stop to the first.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let nextSurveyStopKey: EInputKey = EInputKey.IK_NumPlus;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Survey stop")
@@ -485,6 +499,8 @@ public class NCTCSettings extends ScriptableSystem {
     // branch. That prevents a save restore from replaying old coordinates.
     if Equals(event.GetKey(), this.previousExistingLineKey) { this.CycleExistingLine(false); return; };
     if Equals(event.GetKey(), this.nextExistingLineKey) { this.CycleExistingLine(true); return; };
+    if Equals(event.GetKey(), this.previousSurveyStopKey) { this.CycleSurveyStop(false); return; };
+    if Equals(event.GetKey(), this.nextSurveyStopKey) { this.CycleSurveyStop(true); return; };
     if Equals(event.GetKey(), this.addManualStopKey) { this.RecordManualStop(); return; };
     if Equals(event.GetKey(), this.deleteNearestStopKey) { this.DeleteNearestStop(); return; };
     if Equals(event.GetKey(), this.moveSelectedStopKey) { this.MoveSelectedStop(); return; };
@@ -516,6 +532,37 @@ public class NCTCSettings extends ScriptableSystem {
     };
     if candidate == 0 { candidate = fallback; };
     if candidate > 0 { this.activeLineNumber = candidate; this.surveyStopIndex = 1; this.PublishSurveySettings(); this.NotifySelectedSurveyStop(); };
+  }
+
+
+  private func CycleSurveyStop(forward: Bool) -> Void {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    let count: Int32;
+    let index: Int32;
+    let lineStopCount: Int32;
+    if !IsDefined(quests) { return; };
+    count = quests.GetFact(n"nctc_external_network_stop_count");
+    while index < count {
+      if Equals(quests.GetFact(StringToName("nctc_external_stop_" + ToString(index) + "_line")), this.activeLineNumber) {
+        lineStopCount += 1;
+      };
+      index += 1;
+    };
+    if lineStopCount < 1 {
+      this.surveyStopIndex = 1;
+      this.PublishSurveySettings();
+      this.NotifySelectedSurveyStop();
+      return;
+    };
+    if forward {
+      this.surveyStopIndex += 1;
+      if this.surveyStopIndex > lineStopCount { this.surveyStopIndex = 1; };
+    } else {
+      this.surveyStopIndex -= 1;
+      if this.surveyStopIndex < 1 { this.surveyStopIndex = lineStopCount; };
+    };
+    this.PublishSurveySettings();
+    this.NotifySelectedSurveyStop();
   }
 
   private func Record(kind: String) -> Void {
