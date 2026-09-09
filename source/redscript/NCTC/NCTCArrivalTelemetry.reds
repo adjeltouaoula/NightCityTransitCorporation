@@ -24,6 +24,7 @@ public class NCTCArrivalTelemetry {
   }
 }
 
+@if(ModuleExists("AutoDriveEnhanced"))
 @wrapMethod(AIDriveCommandsDelegate)
 public final func DoStartDriveToPoint(context: ScriptExecutionContext) -> Bool {
   let result: Bool = wrappedMethod(context);
@@ -31,6 +32,7 @@ public final func DoStartDriveToPoint(context: ScriptExecutionContext) -> Bool {
   return result;
 }
 
+@if(ModuleExists("AutoDriveEnhanced"))
 @wrapMethod(AIDriveCommandsDelegate)
 public final static func DoEndDriveToPoint(context: ScriptExecutionContext) -> Bool {
   let result: Bool = wrappedMethod(context);
@@ -38,6 +40,7 @@ public final static func DoEndDriveToPoint(context: ScriptExecutionContext) -> B
   return result;
 }
 
+@if(ModuleExists("AutoDriveEnhanced"))
 @wrapMethod(AIDriveCommandsDelegate)
 public final func DoStopDriveToPoint(context: ScriptExecutionContext) -> Bool {
   NCTCArrivalTelemetry.Publish(context, 3, this.m_driveToPointAutonomousCommand as AIVehicleDriveToPointCommand);

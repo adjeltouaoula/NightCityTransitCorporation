@@ -1199,7 +1199,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37214 then
+  if revision == 37219 then
+    log("NCTC runtime build=37219 r372s r372n drive baseline with vanilla compile guard")
+  elseif revision == 37214 then
     log("NCTC runtime build=37214 r372n generation-safe rolling handoff")
   else
     log("NCTC runtime build=" .. tostring(revision))
