@@ -1,0 +1,36 @@
+name: Build r372n known-good retest
+on:
+  push:
+    branches: ["maintenance/retest-r372n-known-good"]
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify historical runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'nctc_dev_build_revision", 37214' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'r372n generation-safe rolling handoff' source/cet/nctc_survey/init.lua
+      - name: Package exact historical runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD"
+          STAGE="$ROOT/tmp/retest/NightCityTransitCorporation"
+          mkdir -p "$STAGE/r6/scripts/NCTC" "$STAGE/r6/tweaks/NCTC" "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey" "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" "$ROOT/dist"
+          cp source/redscript/NCTC/*.reds "$STAGE/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/*.yaml "$STAGE/r6/tweaks/NCTC/"
+          cp source/cet/nctc_survey/* "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_passenger/* "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp README.md THIRD_PARTY_NOTICES.md "$STAGE/"
+          cd "$ROOT/tmp/retest"
+          zip -qr "$ROOT/dist/NightCityTransitCorporation-0.3.0-devkit-r372n-known-good-retest.zip" NightCityTransitCorporation
+          sha256sum "$ROOT/dist/NightCityTransitCorporation-0.3.0-devkit-r372n-known-good-retest.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NCTC-r372n-known-good-retest
+          path: dist/NightCityTransitCorporation-0.3.0-devkit-r372n-known-good-retest.zip
