@@ -5,7 +5,7 @@ Vehicle.nctc_service_mahir_mt28_coach:
   # NCTO's Mahir entity is its traffic-ready variant.  NCTC keeps its own
   # record and passenger runtime, while this experiment verifies whether the
   # traffic entity resolves rear under-run collisions correctly.
-  entityTemplatePath: night_city_traffic_overhaul\entities\transport\v_mahir_mt28_coach_basic_01.ent
+  entityTemplatePath: nctc\vehicles\mahir_display.ent
   tags:
     - !append n"NCTCServiceBus"
     # Compatibility guard when ADE happens to be installed. NCTC does not
