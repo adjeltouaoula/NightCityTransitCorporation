@@ -1,0 +1,78 @@
+name: Build r372s diagnostic baseline
+on:
+  push:
+    branches: ["diagnostic/r372s-r372n-vanilla-guard"]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply r372s diagnostic patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          telemetry = Path('source/redscript/NCTC/NCTCArrivalTelemetry.reds')
+          text = telemetry.read_text(encoding='utf-8')
+          needle = '@wrapMethod(AIDriveCommandsDelegate)'
+          if text.count(needle) != 3:
+              raise SystemExit(f'unexpected telemetry wrapper count: {text.count(needle)}')
+          text = text.replace(needle, '@if(ModuleExists("AutoDriveEnhanced"))\n' + needle)
+          telemetry.write_text(text, encoding='utf-8')
+
+          transit = Path('source/redscript/NCTC/NCTCTransitSystem.reds')
+          text = transit.read_text(encoding='utf-8')
+          old = 'SetFact(n"nctc_dev_build_revision", 37214)'
+          if text.count(old) != 1:
+              raise SystemExit('r372n transit marker not found exactly once')
+          text = text.replace(old, 'SetFact(n"nctc_dev_build_revision", 37219)')
+          transit.write_text(text, encoding='utf-8')
+
+          survey = Path('source/cet/nctc_survey/init.lua')
+          text = survey.read_text(encoding='utf-8')
+          old = 'if revision == 37214 then\n    log("NCTC runtime build=37214 r372n generation-safe rolling handoff")'
+          new = 'if revision == 37219 then\n    log("NCTC runtime build=37219 r372s r372n drive baseline with vanilla compile guard")\n  elseif revision == 37214 then\n    log("NCTC runtime build=37214 r372n generation-safe rolling handoff")'
+          if text.count(old) != 1:
+              raise SystemExit('r372n survey marker not found exactly once')
+          text = text.replace(old, new)
+          survey.write_text(text, encoding='utf-8')
+      - name: Validate isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '37219' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'r372s r372n drive baseline with vanilla compile guard' source/cet/nctc_survey/init.lua
+          test "$(grep -c '@if(ModuleExists("AutoDriveEnhanced"))' source/redscript/NCTC/NCTCArrivalTelemetry.reds)" -eq 3
+          git diff --check
+      - name: Commit diagnostic runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name nctc-import-bot
+          git config user.email nctc-import-bot@users.noreply.github.com
+          git add source/redscript/NCTC/NCTCArrivalTelemetry.reds source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_survey/init.lua
+          git commit -m 'diag: r372s retest r372n drive with vanilla telemetry guard [skip ci]'
+          git push origin HEAD:diagnostic/r372s-r372n-vanilla-guard
+      - name: Package r372s
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD"
+          STAGE="$ROOT/tmp/r372s/NightCityTransitCorporation"
+          mkdir -p "$STAGE/r6/scripts/NCTC" "$STAGE/r6/tweaks/NCTC" "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey" "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" "$ROOT/dist"
+          cp source/redscript/NCTC/*.reds "$STAGE/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/*.yaml "$STAGE/r6/tweaks/NCTC/"
+          cp source/cet/nctc_survey/* "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_passenger/* "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp README.md THIRD_PARTY_NOTICES.md "$STAGE/"
+          cd "$ROOT/tmp/r372s"
+          zip -qr "$ROOT/dist/NightCityTransitCorporation-0.3.0-devkit-r372s-r372n-drive-vanilla-guard.zip" NightCityTransitCorporation
+          sha256sum "$ROOT/dist/NightCityTransitCorporation-0.3.0-devkit-r372s-r372n-drive-vanilla-guard.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NCTC-r372s-r372n-drive-vanilla-guard
+          path: dist/NightCityTransitCorporation-0.3.0-devkit-r372s-r372n-drive-vanilla-guard.zip
