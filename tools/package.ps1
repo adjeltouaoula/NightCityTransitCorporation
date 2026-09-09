@@ -23,13 +23,18 @@ Get-ChildItem -LiteralPath $distRoot -Filter "NightCityTransitCorporation-*.zip"
 Copy-Item -Path (Join-Path $projectRoot "source\redscript\NCTC\*.reds") -Destination (Join-Path $stageRoot "r6\scripts\NCTC")
 Copy-Item -Path (Join-Path $projectRoot "source\tweaks\NCTC\*.yaml") -Destination (Join-Path $stageRoot "r6\tweaks\NCTC")
 
-# Required native traffic behavior. Every validated autonomous-service build
-# (r371 through r372n) shipped this archive. Without it DriveToPoint commands
-# can remain Active while the Mahir never moves, so packaging must fail rather
-# than silently produce an immobile service bus.
+# Required standalone traffic-driving compatibility resource. Every validated
+# autonomous-service build (r371 through r372n) shipped this exact archive.
+# It is adapted from ADE, but it is bundled by NCTC and does not require the
+# player's Auto Drive Enhanced mod to be installed.
 $trafficRuntimeArchive = Join-Path $projectRoot "source\archive\pc\mod\NCTCTrafficRuntime.archive"
+$expectedTrafficRuntimeSha256 = "98701118D1F5A4DA6AC47CA070300EC607012CCAD51E91406FB657B034736A7D"
 if (!(Test-Path -LiteralPath $trafficRuntimeArchive)) {
     throw 'Missing required source\archive\pc\mod\NCTCTrafficRuntime.archive.'
+}
+$trafficRuntimeSha256 = (Get-FileHash -LiteralPath $trafficRuntimeArchive -Algorithm SHA256).Hash
+if ($trafficRuntimeSha256 -ne $expectedTrafficRuntimeSha256) {
+    throw "Unexpected NCTCTrafficRuntime.archive SHA-256: $trafficRuntimeSha256"
 }
 New-Item -ItemType Directory -Force (Join-Path $stageRoot "archive\pc\mod") | Out-Null
 Copy-Item -LiteralPath $trafficRuntimeArchive -Destination (Join-Path $stageRoot "archive\pc\mod\NCTCTrafficRuntime.archive")
