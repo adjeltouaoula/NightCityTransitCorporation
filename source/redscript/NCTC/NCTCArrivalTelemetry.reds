@@ -24,6 +24,11 @@ public class NCTCArrivalTelemetry {
   }
 }
 
+// These hooks observe ADE's own delegate methods. The vanilla NCTC traffic
+// runtime provides its fallback methods via @addMethod, which cannot be a
+// reliable @wrapMethod target in the same compilation set. Keep the ADE
+// observer only when the ADE module actually owns those methods.
+@if(ModuleExists("AutoDriveEnhanced"))
 @wrapMethod(AIDriveCommandsDelegate)
 public final func DoStartDriveToPoint(context: ScriptExecutionContext) -> Bool {
   let result: Bool = wrappedMethod(context);
@@ -31,6 +36,7 @@ public final func DoStartDriveToPoint(context: ScriptExecutionContext) -> Bool {
   return result;
 }
 
+@if(ModuleExists("AutoDriveEnhanced"))
 @wrapMethod(AIDriveCommandsDelegate)
 public final static func DoEndDriveToPoint(context: ScriptExecutionContext) -> Bool {
   let result: Bool = wrappedMethod(context);
@@ -38,6 +44,7 @@ public final static func DoEndDriveToPoint(context: ScriptExecutionContext) -> B
   return result;
 }
 
+@if(ModuleExists("AutoDriveEnhanced"))
 @wrapMethod(AIDriveCommandsDelegate)
 public final func DoStopDriveToPoint(context: ScriptExecutionContext) -> Bool {
   NCTCArrivalTelemetry.Publish(context, 3, this.m_driveToPointAutonomousCommand as AIVehicleDriveToPointCommand);
