@@ -167,8 +167,8 @@ public class NCTCSettings extends ScriptableSystem {
   public let developerTerminalAction: NCTCDeveloperTerminalAction = NCTCDeveloperTerminalAction.CallBus;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
-  @runtimeProperty("ModSettings.displayName", "Survey line")
-  @runtimeProperty("ModSettings.description", "Line for the passage currently being surveyed.")
+  @runtimeProperty("ModSettings.displayName", "Legacy survey line")
+  @runtimeProperty("ModSettings.description", "Legacy fixed selector. Hidden; use Active line number.")
   @runtimeProperty("ModSettings.category", "Developer mode")
   @runtimeProperty("ModSettings.displayValues.Line17", "17")
   @runtimeProperty("ModSettings.displayValues.Line22", "22")
@@ -178,6 +178,29 @@ public class NCTCSettings extends ScriptableSystem {
   @runtimeProperty("ModSettings.displayValues.Line72", "72")
   @runtimeProperty("ModSettings.dependency", "developerMode")
   public let surveyLine: NCTCSurveyLine = NCTCSurveyLine.Line17;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Active line number")
+  @runtimeProperty("ModSettings.description", "Line currently edited. If it does not exist, adding its first stop creates it with New line color.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.min", "1")
+  @runtimeProperty("ModSettings.max", "999")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let activeLineNumber: Int32 = 17;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Previous existing line")
+  @runtimeProperty("ModSettings.description", "Developer-only shortcut. Cycles the active line through lines present in the current network.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let previousExistingLineKey: EInputKey = EInputKey.IK_PageUp;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Next existing line")
+  @runtimeProperty("ModSettings.description", "Developer-only shortcut. Cycles the active line through lines present in the current network.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let nextExistingLineKey: EInputKey = EInputKey.IK_PageDown;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Survey stop")
@@ -302,8 +325,8 @@ public class NCTCSettings extends ScriptableSystem {
   public let despawnServiceBusKey: EInputKey = EInputKey.IK_NumPad8;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
-  @runtimeProperty("ModSettings.displayName", "New line number")
-  @runtimeProperty("ModSettings.description", "Number for the draft line being created. Set it before recording its first stop.")
+  @runtimeProperty("ModSettings.displayName", "New line number (legacy)")
+  @runtimeProperty("ModSettings.description", "Legacy draft setting. Hidden; use Active line number.")
   @runtimeProperty("ModSettings.category", "Developer mode")
   @runtimeProperty("ModSettings.min", "1")
   @runtimeProperty("ModSettings.max", "999")
@@ -312,7 +335,7 @@ public class NCTCSettings extends ScriptableSystem {
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "New line color")
-  @runtimeProperty("ModSettings.description", "Applied once, when Create / replace draft line records its first stop. Later changes do not alter an existing line.")
+  @runtimeProperty("ModSettings.description", "Applied when Active line number receives its first stop. Later changes do not alter an existing line.")
   @runtimeProperty("ModSettings.category", "Developer mode")
   @runtimeProperty("ModSettings.displayValues.Orange", "Orange")
   @runtimeProperty("ModSettings.displayValues.Yellow", "Yellow")
@@ -325,8 +348,8 @@ public class NCTCSettings extends ScriptableSystem {
   public let draftLineColor: NCTCDraftLineColor = NCTCDraftLineColor.Orange;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
-  @runtimeProperty("ModSettings.displayName", "Create / replace draft line")
-  @runtimeProperty("ModSettings.description", "Enable this, then press New stop once. That press creates an empty draft line and adds its first stop. Later New stop presses append stops in order.")
+  @runtimeProperty("ModSettings.displayName", "Create / replace draft line (legacy)")
+  @runtimeProperty("ModSettings.description", "Legacy draft switch. Hidden; adding the first stop now creates the active line automatically.")
   @runtimeProperty("ModSettings.category", "Developer mode")
   @runtimeProperty("ModSettings.dependency", "developerMode")
   public let beginDraftLine: Bool = false;
@@ -365,7 +388,7 @@ public class NCTCSettings extends ScriptableSystem {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
     if !IsDefined(quests) { return; };
     quests.SetFact(n"nctc_survey_developer_mode", this.developerMode ? 1 : 0);
-    quests.SetFact(n"nctc_survey_line", EnumInt(this.surveyLine));
+    quests.SetFact(n"nctc_survey_line", this.activeLineNumber);
     quests.SetFact(n"nctc_survey_selected_line", this.GetSelectedLineNumber());
     quests.SetFact(n"nctc_survey_selected_stop_index", this.surveyStopIndex);
     quests.SetFact(n"nctc_survey_passage", EnumInt(this.surveyPassage));
@@ -384,7 +407,7 @@ public class NCTCSettings extends ScriptableSystem {
     // A single category prevents empty developer headings leaking into the
     // normal configuration screen. Only the master switch stays visible.
     for variable in ModSettings.GetVars(n"Night City Transit Corporation", n"Developer mode") {
-      if Equals(variable.GetName(), n"surveyPassage") || Equals(variable.GetName(), n"recordSpawnKey") || Equals(variable.GetName(), n"recordApproachKey") || Equals(variable.GetName(), n"recordBerthKey") { variable.SetVisible(false); }
+      if Equals(variable.GetName(), n"surveyLine") || Equals(variable.GetName(), n"surveyPassage") || Equals(variable.GetName(), n"recordSpawnKey") || Equals(variable.GetName(), n"recordApproachKey") || Equals(variable.GetName(), n"recordBerthKey") || Equals(variable.GetName(), n"draftLineNumber") || Equals(variable.GetName(), n"beginDraftLine") { variable.SetVisible(false); }
       else if !Equals(variable.GetName(), n"developerMode") { variable.SetVisible(this.developerMode); };
     };
   }
@@ -395,6 +418,8 @@ public class NCTCSettings extends ScriptableSystem {
     if !this.developerMode || !Equals(event.GetAction(), EInputAction.IACT_Press) { return; };
     // Spawn / approach / berth are captured directly by CET in the devkit
     // branch. That prevents a save restore from replaying old coordinates.
+    if Equals(event.GetKey(), this.previousExistingLineKey) { this.CycleExistingLine(false); return; };
+    if Equals(event.GetKey(), this.nextExistingLineKey) { this.CycleExistingLine(true); return; };
     if Equals(event.GetKey(), this.addManualStopKey) { this.RecordManualStop(); return; };
     if Equals(event.GetKey(), this.deleteNearestStopKey) { this.DeleteNearestStop(); return; };
     if Equals(event.GetKey(), this.moveSelectedStopKey) { this.MoveSelectedStop(); return; };
@@ -402,6 +427,41 @@ public class NCTCSettings extends ScriptableSystem {
     if Equals(event.GetKey(), this.deleteNearestPassageKey) { this.DeleteNearestPassage(); return; };
     if Equals(event.GetKey(), this.despawnServiceBusKey) {
       if NCTCTransitSystem.Get(this.GetGameInstance()).DespawnServiceBus() { NCTCSettings.Notify(this.GetGameInstance(), "NCTC service bus despawned"); };
+    };
+  }
+
+  // The active-number field remains usable for a new service. PageUp/PageDown
+  // are merely a convenience for moving through services already published by
+  // CET, never a second source of line state.
+  private func CycleExistingLine(forward: Bool) -> Void {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    let count: Int32;
+    let index: Int32;
+    let line: Int32;
+    let candidate: Int32 = 0;
+    let fallback: Int32 = 0;
+    if !IsDefined(quests) { return; };
+    count = quests.GetFact(n"nctc_external_network_stop_count");
+    index = 0;
+    while index < count {
+      line = quests.GetFact(StringToName("nctc_external_stop_" + ToString(index) + "_line"));
+      if line > 0 {
+        if forward {
+          if line > this.activeLineNumber && (candidate == 0 || line < candidate) { candidate = line; };
+          if fallback == 0 || line < fallback { fallback = line; };
+        } else {
+          if line < this.activeLineNumber && line > candidate { candidate = line; };
+          if fallback == 0 || line > fallback { fallback = line; };
+        };
+      };
+      index += 1;
+    };
+    if candidate == 0 { candidate = fallback; };
+    if candidate > 0 {
+      this.activeLineNumber = candidate;
+      this.surveyStopIndex = 1;
+      this.PublishSurveySettings();
+      this.NotifySelectedSurveyStop();
     };
   }
 
@@ -458,6 +518,7 @@ public class NCTCSettings extends ScriptableSystem {
     if !IsDefined(player) || !IsDefined(quests) || line < 1 { return; };
     position = player.GetWorldPosition();
     quests.SetFact(n"nctc_manual_stop_line", line);
+    quests.SetFact(n"nctc_manual_stop_color", EnumInt(this.draftLineColor));
     quests.SetFact(n"nctc_manual_stop_x", Cast<Int32>(position.X * 1000.00));
     quests.SetFact(n"nctc_manual_stop_y", Cast<Int32>(position.Y * 1000.00));
     quests.SetFact(n"nctc_manual_stop_z", Cast<Int32>(position.Z * 1000.00));
@@ -577,50 +638,28 @@ public class NCTCSettings extends ScriptableSystem {
     NCTCSettings.Notify(this.GetGameInstance(), "NCTC: deleting nearest passage point on line " + ToString(line));
   }
 
-  // The draft number is reserved for a genuinely new line. Editing an
-  // existing network line must always use the Survey line selector.
+  // All developer operations address the one active line. The Lua survey
+  // runtime creates it on the first manual or terminal stop when needed.
   private func GetSelectedLineNumber() -> Int32 {
-    switch this.surveyLine {
-      case NCTCSurveyLine.Line17: return 17;
-      case NCTCSurveyLine.Line22: return 22;
-      case NCTCSurveyLine.Line23: return 23;
-      case NCTCSurveyLine.Line51: return 51;
-      case NCTCSurveyLine.Line68: return 68;
-      case NCTCSurveyLine.Line72: return 72;
-    };
-    return 0;
+    return this.activeLineNumber;
   }
 
   // Called by a fast-travel terminal's F interaction while developer mode is
   // enabled. A draft stop is bound to that terminal's native LocKey.
   public func RecordTerminalStop(locKey: String, position: Vector4) -> Bool {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
-    let count: Int32;
-    let line: Int32 = this.draftLineNumber;
-    let prefix: String;
+    let line: Int32 = this.GetSelectedLineNumber();
     let locKeyID: Int32 = this.ParseTravelAnchorLocKey(locKey);
     if !this.developerMode || !IsDefined(quests) || line < 1 || locKeyID < 0 { return false; };
-    if this.beginDraftLine {
-      quests.SetFact(n"nctc_draft_line_number", line);
-      quests.SetFact(n"nctc_draft_line_stop_count", 0);
-      quests.SetFact(n"nctc_draft_line_color", EnumInt(this.draftLineColor));
-      this.beginDraftLine = false;
-      this.ClearBeginDraftSetting();
-    };
-    if !Equals(quests.GetFact(n"nctc_draft_line_number"), line) {
-      NCTCSettings.Notify(this.GetGameInstance(), "NCTC: enable Create / replace draft line first");
-      return false;
-    };
-    count = quests.GetFact(n"nctc_draft_line_stop_count");
-    prefix = "nctc_draft_line_" + ToString(line) + "_stop_" + ToString(count) + "_";
-    quests.SetFact(StringToName(prefix + "loc_key"), locKeyID);
-    quests.SetFact(StringToName(prefix + "x"), Cast<Int32>(position.X * 1000.00));
-    quests.SetFact(StringToName(prefix + "y"), Cast<Int32>(position.Y * 1000.00));
-    quests.SetFact(StringToName(prefix + "z"), Cast<Int32>(position.Z * 1000.00));
-    quests.SetFact(n"nctc_draft_line_stop_count", count + 1);
-    quests.SetFact(n"nctc_survey_event_kind", 2);
+    quests.SetFact(n"nctc_terminal_stop_line", line);
+    quests.SetFact(n"nctc_terminal_stop_color", EnumInt(this.draftLineColor));
+    quests.SetFact(n"nctc_terminal_stop_loc_key", locKeyID);
+    quests.SetFact(n"nctc_terminal_stop_x", Cast<Int32>(position.X * 1000.00));
+    quests.SetFact(n"nctc_terminal_stop_y", Cast<Int32>(position.Y * 1000.00));
+    quests.SetFact(n"nctc_terminal_stop_z", Cast<Int32>(position.Z * 1000.00));
+    quests.SetFact(n"nctc_survey_event_kind", 9);
     quests.SetFact(n"nctc_survey_event_id", quests.GetFact(n"nctc_survey_event_id") + 1);
-    NCTCSettings.Notify(this.GetGameInstance(), "NCTC line " + ToString(line) + ": stop " + ToString(count + 1) + " saved");
+    NCTCSettings.Notify(this.GetGameInstance(), "NCTC line " + ToString(line) + ": terminal stop saved");
     return true;
   }
 

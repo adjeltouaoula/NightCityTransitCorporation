@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 2,
+  "exportedAt": "2026-09-08T03:27:00+02:00",
+  "source": "F:/Program Files/GOG Galaxy/Games/Cyberpunk 2077/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json",
+  "line": 127,
+  "color": 1,
+  "stops": [
+    {
+      "position": { "y": -525.01, "z": 12.883, "x": -2396.791 },
+      "sequence": 1,
+      "anchorType": "travelAnchor",
+      "line": 127,
+      "id": 59,
+      "eventId": 16,
+      "locKey": 44501
+    },
+    {
+      "position": { "y": -1225.476, "z": 8.37, "x": -2098.576 },
+      "sequence": 2,
+      "anchorType": "manual",
+      "line": 127,
+      "id": 61,
+      "eventId": 19,
+      "hubId": "hub-19"
+    },
+    {
+      "position": { "y": -914.664, "z": 8.604, "x": -1730.891 },
+      "sequence": 3,
+      "anchorType": "travelAnchor",
+      "line": 127,
+      "id": 62,
+      "eventId": 16,
+      "locKey": 44517
+    }
+  ],
+  "captures": [
+    {
+      "stopLocKey": 44501,
+      "line": 127,
+      "stopIndex": 1,
+      "spawn": { "y": -383.298, "yaw": 179.438, "z": 12.777, "x": -2384.352 },
+      "stopId": 59,
+      "approach": [],
+      "berth": { "y": -539.969, "x": -2393.443, "z": 12.674, "yaw": 171.188 },
+      "eventId": 2,
+      "stopSequence": 1
+    },
+    {
+      "spawn": { "y": -1194.304, "yaw": -116.284, "z": 12.695, "x": -2252.802 },
+      "stopId": 61,
+      "stopIndex": 2,
+      "line": 127,
+      "approach": [],
+      "berth": { "y": -1219.26, "yaw": -93.584, "z": 8.173, "x": -2098.473 },
+      "eventId": 3,
+      "stopSequence": 2
+    },
+    {
+      "stopLocKey": 44517,
+      "line": 127,
+      "stopIndex": 3,
+      "spawn": { "y": -888.508, "x": -1819.206, "z": 7.485, "yaw": -125.608 },
+      "stopId": 62,
+      "approach": [],
+      "berth": { "y": -909.054, "x": -1730.791, "z": 8.408, "yaw": -92.558 },
+      "eventId": 2,
+      "stopSequence": 3
+    }
+  ],
+  "passages": []
+}

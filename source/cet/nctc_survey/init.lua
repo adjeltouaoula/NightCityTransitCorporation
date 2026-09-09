@@ -36,6 +36,7 @@ local last_profile_probe_id = 0
 local fact
 local deduplicate_same_line_stops
 local normalize_captures
+local remove_orphan_captures
 local ensure_stop_ids
 local join_or_create_hub
 
@@ -181,6 +182,7 @@ local function load_network()
     end
   end
   local duplicates_merged = deduplicate_same_line_stops(network)
+  local orphan_captures_removed = remove_orphan_captures(network)
   local captures_normalized = normalize_captures(network)
   local colors_migrated = false
   -- Migration for networks created before per-line colours existed.
@@ -192,12 +194,13 @@ local function load_network()
     end
   end
   network.revision = network.revision or 1
-  if colors_migrated or duplicates_merged or captures_normalized or stop_ids_assigned or capture_ids_assigned then
+  if colors_migrated or duplicates_merged or orphan_captures_removed or captures_normalized or stop_ids_assigned or capture_ids_assigned then
     network.revision = network.revision + 1
     write_network(network)
     if colors_migrated then log("migrated legacy line colours into active network") end
     if duplicates_merged then log("normalized same-line duplicate stops in active network") end
     if captures_normalized then log("merged legacy duplicate survey captures") end
+    if orphan_captures_removed then log("removed survey captures belonging to deleted stops") end
     if stop_ids_assigned then log("assigned stable IDs to survey stops") end
     if capture_ids_assigned then log("attached legacy survey captures to stable stop IDs") end
   end
@@ -315,6 +318,13 @@ local function add_stop(network, stop, event_id)
   return true
 end
 
+local function line_has_stop(network, line)
+  for _, stop in ipairs(network.stops or {}) do
+    if stop.line == line then return true end
+  end
+  return false
+end
+
 local function line_stop_index(network, global_index, line)
   local ordinal = 0
   for index, stop in ipairs(network.stops) do
@@ -427,6 +437,15 @@ local function delete_selected_stop(network, line, selected_index)
   end
   if not selected then return false, "selected stop unavailable" end
   local removed = table.remove(network.stops, selected)
+  -- Survey captures are keyed by the stable stop ID. Leaving one behind
+  -- after deletion makes the next stop at this ordinal inherit stale spawn
+  -- and berth data during normalization, so a newly recorded capture can
+  -- silently target a deleted stop instead of the selected one.
+  for index = #(network.captures or {}), 1, -1 do
+    if network.captures[index].stopId == removed.id then
+      table.remove(network.captures, index)
+    end
+  end
   local used = false
   for _, stop in ipairs(network.stops) do
     if stop.hubId == removed.hubId then used = true; break end
@@ -437,6 +456,24 @@ local function delete_selected_stop(network, line, selected_index)
     end
   end
   return true, "line " .. tostring(line) .. " stop " .. tostring(selected_index)
+end
+
+-- Networks written by earlier devkit builds can already contain captures for
+-- deleted IDs. Remove only those provably orphaned records; do not guess or
+-- transfer their coordinates to a different stop.
+remove_orphan_captures = function(network)
+  local known = {}
+  local changed = false
+  for _, stop in ipairs(network.stops or {}) do known[stop.id] = true end
+  for index = #(network.captures or {}), 1, -1 do
+    local capture = network.captures[index]
+    if capture.stopId and capture.stopId > 0 and not known[capture.stopId] then
+      log("removed orphan capture for deleted stop ID " .. tostring(capture.stopId))
+      table.remove(network.captures, index)
+      changed = true
+    end
+  end
+  return changed
 end
 
 local function selected_stop(network, line, stop_index)
@@ -621,16 +658,35 @@ local function persist_capture(quests, event_id)
       z = fact(quests, "nctc_manual_stop_z") / 1000.0
     }
     local loc_key = fact(quests, "nctc_manual_stop_loc_key")
+    local line = fact(quests, "nctc_manual_stop_line")
+    local is_new_line = not line_has_stop(network, line)
     add_stop(network, {
       eventId = event_id,
-      line = fact(quests, "nctc_manual_stop_line"),
+      line = line,
       -- The coordinate remains manual/roadside even when an anchor lends its
       -- name. The type only documents that the display LocKey was linked.
       anchorType = loc_key > 0 and "travelAnchor" or "manual",
       locKey = loc_key > 0 and loc_key or nil,
       position = position
     }, event_id)
+    if is_new_line then network.lineColors[tostring(line)] = fact(quests, "nctc_manual_stop_color") end
     kind = "manual stop"
+  elseif event_kind == 9 then
+    local line = fact(quests, "nctc_terminal_stop_line")
+    local is_new_line = not line_has_stop(network, line)
+    add_stop(network, {
+      eventId = event_id,
+      line = line,
+      anchorType = "fastTravel",
+      locKey = fact(quests, "nctc_terminal_stop_loc_key"),
+      position = {
+        x = fact(quests, "nctc_terminal_stop_x") / 1000.0,
+        y = fact(quests, "nctc_terminal_stop_y") / 1000.0,
+        z = fact(quests, "nctc_terminal_stop_z") / 1000.0
+      }
+    }, event_id)
+    if is_new_line then network.lineColors[tostring(line)] = fact(quests, "nctc_terminal_stop_color") end
+    kind = "terminal stop"
   elseif event_kind == 4 then
     local deleted, detail = delete_selected_stop(network,
       fact(quests, "nctc_delete_stop_line"), fact(quests, "nctc_delete_stop_index"))
