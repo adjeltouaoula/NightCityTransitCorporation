@@ -6,13 +6,10 @@ Vehicle.nctc_service_mahir_mt28_coach:
   # record and passenger runtime, while this experiment verifies whether the
   # traffic entity resolves rear under-run collisions correctly.
   entityTemplatePath: night_city_traffic_overhaul\entities\transport\v_mahir_mt28_coach_basic_01.ent
-  # Auto Drive Enhanced exposes a dedicated passenger AutoDrive context for
-  # every eligible mounted vehicle. NCTC drives this record through ADE's AI
-  # command directly, so the player-facing AutoDrive action must stay disabled.
   tags:
     - !append n"NCTCServiceBus"
-    # Auto Drive Enhanced reads this record tag before exposing its player
-    # AutoDrive action. NCTC still sends its own traffic commands directly.
+    # Compatibility guard when ADE happens to be installed. NCTC does not
+    # import or invoke ADE in this experiment.
     - !append n"CannotAutoDrive"
   # Keep the vanilla Mahir entity exactly as in the validated NCBN 0.0.13
   # passenger build. Seat/door behaviour is added at runtime.

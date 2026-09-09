@@ -31,6 +31,7 @@ local last_published_network_revision = -1
 local last_dispatch_log_id = 0
 local last_loop_log_id = 0
 local last_native_command_event_id = 0
+local last_service_crime_suppressed_id = 0
 local last_sequence_probe_id = 0
 local last_profile_probe_id = 0
 local fact
@@ -70,7 +71,7 @@ local function log_sequence_probe(quests)
   local states = {
     [1] = "network not ready / invalid line",
     [2] = "current stop ID absent from published line",
-    [3] = "successor selected by JSON array order",
+    [3] = "successor selected by published service order",
     [4] = "candidate array entry had no stop ID",
     [5] = "wrapped to first line entry",
     [6] = "no stops published for requested line"
@@ -434,15 +435,20 @@ deduplicate_same_line_stops = function(network)
 end
 
 local function delete_selected_stop(network, line, selected_index)
-  local selected, ordinal = nil, 0
+  local matches = {}
   for index, stop in ipairs(network.stops or {}) do
     if stop.line == line then
-      ordinal = ordinal + 1
-      if ordinal == selected_index then selected = index; break end
+      table.insert(matches, { arrayIndex = index, stop = stop })
     end
   end
+  table.sort(matches, function(a, b)
+    local a_sequence, b_sequence = tonumber(a.stop.sequence) or 0, tonumber(b.stop.sequence) or 0
+    if a_sequence ~= b_sequence then return a_sequence < b_sequence end
+    return (tonumber(a.stop.id) or 0) < (tonumber(b.stop.id) or 0)
+  end)
+  local selected = matches[selected_index]
   if not selected then return false, "selected stop unavailable" end
-  local removed = table.remove(network.stops, selected)
+  local removed = table.remove(network.stops, selected.arrayIndex)
   for index = #(network.captures or {}), 1, -1 do
     if network.captures[index].stopId == removed.id then table.remove(network.captures, index) end
   end
@@ -477,9 +483,15 @@ local function selected_stop(network, line, stop_index)
   for _, stop in ipairs(network.stops or {}) do
     if stop.line == line then table.insert(matches, stop) end
   end
-  -- JSON array order is the authored service order. Do not sort by the old
-  -- sparse sequence field: manual edits and deletions can leave duplicates or
-  -- gaps, which previously made the settings notification select another stop.
+  -- IMPORTANT: the runtime publishes/consumes stops in authored `sequence`
+  -- order, not in physical JSON append order.  The developer editor must use
+  -- that exact same ordering or "after stop N" can silently bind a passage
+  -- to a different stable stop ID than the bus will use for that route leg.
+  table.sort(matches, function(a, b)
+    local a_sequence, b_sequence = tonumber(a.sequence) or 0, tonumber(b.sequence) or 0
+    if a_sequence ~= b_sequence then return a_sequence < b_sequence end
+    return (tonumber(a.id) or 0) < (tonumber(b.id) or 0)
+  end)
   return matches[stop_index], #matches
 end
 
@@ -565,7 +577,7 @@ end
 
 -- A passage is a traffic-only point on the leg after a stop. It must never
 -- become an NCTC stop, mappin, hub, or service/capture profile.
-local function add_passage_after_selected(network, line, after_index, position, event_id)
+local function add_passage_after_selected(network, line, after_index, position, yaw, event_id)
   local target, count = selected_stop(network, line, after_index)
   if not target then return false, count end
   network.passages = network.passages or {}
@@ -574,8 +586,12 @@ local function add_passage_after_selected(network, line, after_index, position, 
     eventId = event_id,
     line = line,
     afterStopId = target.id,
+    -- Keep the human-readable service order beside the stable ID. Runtime
+    -- routing still keys on afterStopId, but this makes authoring mistakes
+    -- obvious and gives future migrations enough information to repair them.
+    afterSequence = target.sequence or after_index,
     position = copy_position(position),
-    yaw = fact(quests, "nctc_passage_yaw") / 1000.0
+    yaw = yaw
   })
   return true, count
 end
@@ -714,6 +730,7 @@ local function persist_capture(quests, event_id)
       fact(quests, "nctc_passage_line"),
       fact(quests, "nctc_passage_after_index"),
       position,
+      fact(quests, "nctc_passage_yaw") / 1000.0,
       event_id)
     if not inserted then
       log("rejected passage point " .. tostring(event_id) .. ": selected stop unavailable")
@@ -845,6 +862,7 @@ local function publish_network(quests, network)
     local position = passage.position or {}
     set_fact(quests, prefix .. "line", passage.line or 0)
     set_fact(quests, prefix .. "after_stop_id", passage.afterStopId or 0)
+    set_fact(quests, prefix .. "after_sequence", passage.afterSequence or 0)
     set_fact(quests, prefix .. "x", math.floor((position.x or 0) * 1000))
     set_fact(quests, prefix .. "y", math.floor((position.y or 0) * 1000))
     set_fact(quests, prefix .. "z", math.floor((position.z or 0) * 1000))
@@ -1031,7 +1049,7 @@ local function log_service_loop(quests)
     [33] = "route loop: next drive command rejected",
     [34] = "route loop: next stopSequence/profile unavailable",
     [35] = "route loop: active drive command failed before arrival",
-    [36] = "route loop: ADE command telemetry",
+    [36] = "route loop: native command telemetry",
     [37] = "route loop: bus manually despawned",
     [38] = "route loop: native stop detected; forward berth correction sent"
   }
@@ -1084,6 +1102,14 @@ local function log_native_command_event(quests)
       fact(quests, "nctc_dev_native_command_speed_mm") / 1000.0))
 end
 
+local function log_service_protection(quests)
+  local id = fact(quests, "nctc_dev_service_crime_suppressed_id")
+  if id < last_service_crime_suppressed_id then last_service_crime_suppressed_id = id - 1 end
+  if id <= last_service_crime_suppressed_id then return end
+  last_service_crime_suppressed_id = id
+  log("service protection #" .. tostring(id) .. ": ignored bus impact crime attribution; V heat unchanged")
+end
+
 registerForEvent("onUpdate", function()
   local quests = Game.GetQuestsSystem()
   if not quests then return end
@@ -1094,6 +1120,7 @@ registerForEvent("onUpdate", function()
   log_dispatch_attempt(quests)
   log_service_loop(quests)
   log_native_command_event(quests)
+  log_service_protection(quests)
   log_sequence_probe(quests)
   log_profile_probe(quests)
   local event_id = fact(quests, "nctc_survey_event_id")
