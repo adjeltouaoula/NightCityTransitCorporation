@@ -1,11 +1,15 @@
 param(
     [string]$Version = "0.3.0-devkit",
     [switch]$IncludeSurveyRuntime,
-    [switch]$IncludeDisplayPrototype
+    [switch]$IncludeDisplayPrototype,
+    [switch]$IncludeDoorCollisionTest
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
+if (!$IncludeDoorCollisionTest -and (Select-String -LiteralPath (Join-Path $projectRoot 'source\tweaks\NCTC\nctc_service_bus.yaml') -SimpleMatch 'nctc\door_test\mahir.ent' -Quiet)) {
+    throw 'This checkout references the door-test entity; IncludeDoorCollisionTest is required.'
+}
 # Builds are kept in the canonical NCTC project distribution folder so every
 # development branch publishes to the same installable location.
 $distRoot = "C:\MyDocuments\NCBusNetwork\night-city-transit-corporation\dist"
@@ -15,15 +19,21 @@ $archivePath = Join-Path $distRoot "NightCityTransitCorporation-$Version.zip"
 
 if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
 New-Item -ItemType Directory -Force (Join-Path $stageRoot "r6\scripts\NCTC"), (Join-Path $stageRoot "r6\tweaks\NCTC"), $distRoot, $oldDistRoot | Out-Null
-Get-ChildItem -LiteralPath $distRoot -Filter "NightCityTransitCorporation-*.zip" -File | ForEach-Object {
+if (!$IncludeDoorCollisionTest) { Get-ChildItem -LiteralPath $distRoot -Filter "NightCityTransitCorporation-*.zip" -File | ForEach-Object {
     $oldArchivePath = Join-Path $oldDistRoot $_.Name
     if (Test-Path -LiteralPath $oldArchivePath) { Remove-Item -LiteralPath $oldArchivePath -Force }
     Move-Item -LiteralPath $_.FullName -Destination $oldArchivePath
-}
+} }
 Copy-Item -Path (Join-Path $projectRoot "source\redscript\NCTC\*.reds") -Destination (Join-Path $stageRoot "r6\scripts\NCTC")
 Copy-Item -Path (Join-Path $projectRoot "source\tweaks\NCTC\*.yaml") -Destination (Join-Path $stageRoot "r6\tweaks\NCTC")
 # Experimental vehicle-physics archives remain excluded until their collision
 # setup is proven safe and useful.
+if ($IncludeDoorCollisionTest) {
+    $doorArchive = Join-Path $projectRoot 'tmp\NCTCDoorCollisionTest.archive'
+    if (!(Test-Path -LiteralPath $doorArchive)) { throw 'Generate the door test archive first.' }
+    New-Item -ItemType Directory -Force (Join-Path $stageRoot 'archive\pc\mod') | Out-Null
+    Copy-Item -LiteralPath $doorArchive -Destination (Join-Path $stageRoot 'archive\pc\mod\NCTCDoorCollisionTest.archive')
+}
 if ($IncludeDisplayPrototype) {
     $displayArchive = Join-Path $projectRoot 'tmp\NCTCDisplayPrototype.archive'
     if (!(Test-Path -LiteralPath $displayArchive)) { throw 'Generate the display widget and bus archive first.' }

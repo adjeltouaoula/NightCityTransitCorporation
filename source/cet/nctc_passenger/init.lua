@@ -129,6 +129,81 @@ local function setBoardingDoor(bus, open)
     end
 end
 
+-- D3 read-only diagnostics. Rays test query collision, not character blocking.
+local doorTrace = { elapsed = 0, id = nil, state = nil, failed = false }
+local function doorRead(fn)
+    local ok, value = pcall(fn)
+    return ok and tostring(value) or ("unavailable:" .. tostring(value))
+end
+local function doorWorldPoint(bus, x, y, z)
+    local o, r, f, u = bus:GetWorldPosition(), bus:GetWorldRight(), bus:GetWorldForward(), bus:GetWorldUp()
+    return Vector4.new(o.x+r.x*x+f.x*y+u.x*z, o.y+r.y*x+f.y*y+u.y*z,
+        o.z+r.z*x+f.z*y+u.z*z, 1)
+end
+local function traceDoorPhysics(bus, player, id)
+    -- Fixed segments across both leaves; a nearby body panel is a control.
+    -- Independent of camera aim, so looking away does not move the probes.
+    local camera = doorRead(function()
+        local system = Game.GetCameraSystem()
+        local forward, origin = system:GetActiveCameraForward(), player:GetWorldPosition()
+        local target = doorWorldPoint(bus, 1.23, 4.46, 1.10)
+        local dx, dy, dz = target.x-origin.x, target.y-origin.y, target.z-origin.z
+        local length = math.sqrt(dx*dx+dy*dy+dz*dz)
+        return string.format("forward=%.3f,%.3f,%.3f playerToDoorDot=%.3f", forward.x, forward.y,
+            forward.z, (dx*forward.x+dy*forward.y+dz*forward.z)/math.max(length, 0.001))
+    end)
+    local results = {}
+    for _, probe in ipairs({{name="leafA", y=4.22}, {name="leafB", y=4.68}, {name="bodyControl", y=3.30}}) do
+        for _, group in ipairs({"Vehicle", "Dynamic", "Static"}) do
+            results[#results+1] = probe.name .. "/" .. group .. "=" .. doorRead(function()
+                local hit, trace = Game.GetSpatialQueriesSystem():SyncRaycastByCollisionGroup(
+                    doorWorldPoint(bus, 2.05, probe.y, 1.10),
+                    doorWorldPoint(bus, 0.65, probe.y, 1.10), group, false, false)
+                if not hit then return "miss" end
+                -- Optional RedHotTools inspection supplies actual physics proxy/shape IDs.
+                local detail = doorRead(function()
+                    local target = Game.GetWorldInspector():GetPhysicsTraceObject(trace)
+                    if not target.resolved then return "unresolved" end
+                    return "entity:" .. tostring(target.entity:GetEntityID().hash)
+                        .. ",component:" .. tostring(target.component:GetName())
+                        .. ",proxy:" .. tostring(target.proxyID)
+                        .. ",actor:" .. tostring(target.actorIndex)
+                        .. ",shape:" .. tostring(target.shapeIndex)
+                        .. ",distance:" .. tostring(target.distance)
+                end)
+                return "hit{" .. detail .. "}"
+            end)
+        end
+    end
+    print("[NCTC Doors D3 physics] bus=" .. id .. " camera=" .. camera .. " " .. table.concat(results, " | "))
+end
+local function traceDoors(bus, player, dt, distance, mounted, inside, allowed)
+    doorTrace.elapsed = doorTrace.elapsed + (tonumber(dt) or 0)
+    local id = tostring(bus:GetEntityID().hash)
+    local fresh = id ~= doorTrace.id
+    local state = doorRead(function() return bus:GetVehiclePS():GetDoorState(EVehicleDoor.seat_front_right) end)
+    local desired = allowed and math.abs(bus:GetCurrentSpeed()) <= 1.00 and (mounted or distance < 10.00)
+    local key = state .. ":" .. tostring(desired) .. ":" .. tostring(inside)
+    if not fresh and key == doorTrace.state and doorTrace.elapsed < (distance < 12 and 0.25 or 5) then return end
+    doorTrace.id, doorTrace.state, doorTrace.elapsed = id, key, 0
+    local p = localPosition(bus, player)
+    local door = bus:FindComponentByName(CName.new("door"))
+    print("[NCTC Doors D3] bus=" .. id .. " state=" .. state
+        .. " desiredOpen=" .. tostring(desired) .. " atStop=" .. tostring(allowed)
+        .. " mounted=" .. tostring(mounted) .. " cabinZone=" .. tostring(inside)
+        .. " speed=" .. string.format("%.3f", bus:GetCurrentSpeed())
+        .. " distance=" .. string.format("%.3f", distance)
+        .. " playerLocal=" .. string.format("%.3f,%.3f,%.3f", p.x, p.y, p.z)
+        .. " component=" .. tostring(door ~= nil)
+        .. " enabled=" .. doorRead(function() return door:IsEnabled() end))
+    if fresh then
+        for _, field in ipairs({"simulationType", "useResourceSimulationType", "startInactive", "filterDataSource", "filterData", "mesh", "parentTransform", "skinning"}) do
+            print("[NCTC Doors D3 component] " .. field .. "=" .. doorRead(function() return door[field] end))
+        end
+    end
+    if distance < 12 then traceDoorPhysics(bus, player, id) end
+end
+
 local function sameSeats(left, right)
     if #left ~= #right then return false end
     for i = 1, #left do if left[i].id ~= right[i].id then return false end end
@@ -390,10 +465,11 @@ registerForEvent("onInit", function()
     print("[NCBN] Interior passenger-seat interaction initialized.")
 end)
 
-registerForEvent("onUpdate", function()
+registerForEvent("onUpdate", function(dt)
     NCBN.inputLocked = false
     local player, bus = Game.GetPlayer(), findServiceBus()
     if not player or not bus then
+        doorTrace.id, doorTrace.state, doorTrace.elapsed = nil, nil, 0
         NCBN.passengerMountRequested = false
         NCBN.mountRequestDeadline = 0
         NCBN.wasMounted = false
@@ -412,6 +488,11 @@ registerForEvent("onUpdate", function()
     -- route loop revokes this fact, CET must allow the door to stay closed so
     -- the departure state can advance.
     local boardingAllowed = getFact("nctc_service_bus_at_stop") == 1
+    local traceOk, traceError = pcall(traceDoors, bus, player, dt, distance, isMounted, insideNow, boardingAllowed)
+    if not traceOk and not doorTrace.failed then
+        doorTrace.failed = true
+        print("[NCTC Doors D2] diagnostic error (gameplay unchanged): " .. tostring(traceError))
+    end
     -- At a scheduled stop the door stays open for boarding and alighting,
     -- including while V is already mounted in a rear passenger workspot.
     setBoardingDoor(bus, boardingAllowed and math.abs(bus:GetCurrentSpeed()) <= 1.00 and (isMounted or distance < 10.00))
