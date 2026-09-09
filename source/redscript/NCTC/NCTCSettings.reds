@@ -258,14 +258,14 @@ public class NCTCSettings extends ScriptableSystem {
   @runtimeProperty("ModSettings.description", "Developer-only shortcut. Cycles the active line through lines present in the current network.")
   @runtimeProperty("ModSettings.category", "Developer mode")
   @runtimeProperty("ModSettings.dependency", "developerMode")
-  public let previousExistingLineKey: EInputKey = EInputKey.IK_PageUp;
+  public let previousExistingLineKey: EInputKey = EInputKey.IK_F11;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Next existing line")
   @runtimeProperty("ModSettings.description", "Developer-only shortcut. Cycles the active line through lines present in the current network.")
   @runtimeProperty("ModSettings.category", "Developer mode")
   @runtimeProperty("ModSettings.dependency", "developerMode")
-  public let nextExistingLineKey: EInputKey = EInputKey.IK_PageDown;
+  public let nextExistingLineKey: EInputKey = EInputKey.IK_F12;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Survey stop")
@@ -546,6 +546,7 @@ public class NCTCSettings extends ScriptableSystem {
         quests.SetFact(n"nctc_survey_capture_point", 3);
       };
     };
+    quests.SetFact(n"nctc_survey_event_session", quests.GetFact(n"nctc_survey_runtime_session"));
     quests.SetFact(n"nctc_survey_event_kind", 1);
     eventId = quests.GetFact(n"nctc_survey_event_id") + 1;
     // The immediate prompt only confirms the key was captured. CET writes the
@@ -579,6 +580,7 @@ public class NCTCSettings extends ScriptableSystem {
     if IsDefined(markers) && markers.GetTravelAnchorWithin(position, 100.00, locKey, anchorPosition) {
       quests.SetFact(n"nctc_manual_stop_loc_key", this.ParseTravelAnchorLocKey(locKey));
     };
+    quests.SetFact(n"nctc_survey_event_session", quests.GetFact(n"nctc_survey_runtime_session"));
     quests.SetFact(n"nctc_survey_event_kind", 3);
     quests.SetFact(n"nctc_survey_event_id", quests.GetFact(n"nctc_survey_event_id") + 1);
     NCTCSettings.Notify(this.GetGameInstance(), "NCTC: manual stop saved for line " + ToString(line));
@@ -595,6 +597,7 @@ public class NCTCSettings extends ScriptableSystem {
     // the same fast-travel station more than once. Do not guess by LocKey.
     quests.SetFact(n"nctc_delete_stop_line", line);
     quests.SetFact(n"nctc_delete_stop_index", this.surveyStopIndex);
+    quests.SetFact(n"nctc_survey_event_session", quests.GetFact(n"nctc_survey_runtime_session"));
     quests.SetFact(n"nctc_survey_event_kind", 4);
     eventId = quests.GetFact(n"nctc_survey_event_id") + 1;
     quests.SetFact(n"nctc_survey_write_ack_event_id", -1);
@@ -629,6 +632,7 @@ public class NCTCSettings extends ScriptableSystem {
     if IsDefined(markers) && markers.GetTravelAnchorWithin(position, 100.00, locKey, anchorPosition) {
       quests.SetFact(n"nctc_replace_stop_loc_key", this.ParseTravelAnchorLocKey(locKey));
     };
+    quests.SetFact(n"nctc_survey_event_session", quests.GetFact(n"nctc_survey_runtime_session"));
     quests.SetFact(n"nctc_survey_event_kind", 6);
     eventId = quests.GetFact(n"nctc_survey_event_id") + 1;
     quests.SetFact(n"nctc_survey_write_ack_event_id", -1);
@@ -658,6 +662,7 @@ public class NCTCSettings extends ScriptableSystem {
     // Face the direction the bus must travel through this point. Like berth
     // yaw, this compensates for the Mahir pivot stopping short of raw targets.
     quests.SetFact(n"nctc_passage_yaw", Cast<Int32>(player.GetWorldYaw() * 1000.00));
+    quests.SetFact(n"nctc_survey_event_session", quests.GetFact(n"nctc_survey_runtime_session"));
     quests.SetFact(n"nctc_survey_event_kind", 7);
     eventId = quests.GetFact(n"nctc_survey_event_id") + 1;
     quests.SetFact(n"nctc_survey_write_ack_event_id", -1);
@@ -681,6 +686,7 @@ public class NCTCSettings extends ScriptableSystem {
     quests.SetFact(n"nctc_delete_passage_x", Cast<Int32>(position.X * 1000.00));
     quests.SetFact(n"nctc_delete_passage_y", Cast<Int32>(position.Y * 1000.00));
     quests.SetFact(n"nctc_delete_passage_z", Cast<Int32>(position.Z * 1000.00));
+    quests.SetFact(n"nctc_survey_event_session", quests.GetFact(n"nctc_survey_runtime_session"));
     quests.SetFact(n"nctc_survey_event_kind", 8);
     eventId = quests.GetFact(n"nctc_survey_event_id") + 1;
     quests.SetFact(n"nctc_survey_write_ack_event_id", -1);
@@ -708,6 +714,7 @@ public class NCTCSettings extends ScriptableSystem {
     quests.SetFact(n"nctc_terminal_stop_x", Cast<Int32>(position.X * 1000.00));
     quests.SetFact(n"nctc_terminal_stop_y", Cast<Int32>(position.Y * 1000.00));
     quests.SetFact(n"nctc_terminal_stop_z", Cast<Int32>(position.Z * 1000.00));
+    quests.SetFact(n"nctc_survey_event_session", quests.GetFact(n"nctc_survey_runtime_session"));
     quests.SetFact(n"nctc_survey_event_kind", 9);
     quests.SetFact(n"nctc_survey_event_id", quests.GetFact(n"nctc_survey_event_id") + 1);
     NCTCSettings.Notify(this.GetGameInstance(), "NCTC line " + ToString(line) + ": terminal stop saved");

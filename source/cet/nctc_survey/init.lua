@@ -1199,7 +1199,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37214 then
+  if revision == 37215 then
+    log("NCTC runtime build=37215 r372o survey session guard")
+  elseif revision == 37214 then
     log("NCTC runtime build=37214 r372n generation-safe rolling handoff")
   else
     log("NCTC runtime build=" .. tostring(revision))
@@ -1222,23 +1224,26 @@ registerForEvent("onUpdate", function()
   log_service_calm_reaction(quests)
   log_sequence_probe(quests)
   log_profile_probe(quests)
+  -- r372o: REDscript stamps each survey event with the current CET session.
+  -- Save data can restore old facts, so refresh the live token every frame.
+  set_fact(quests, "nctc_survey_runtime_session", runtime_session_id)
   local event_id = fact(quests, "nctc_survey_event_id")
-  -- A save load restores the old event counter. Treat that first observed
-  -- value as a baseline, never as a brand-new capture that could overwrite
-  -- the external network with stale save data.
+  local event_session = fact(quests, "nctc_survey_event_session")
   if not survey_events_initialized then
     survey_events_initialized = true
     last_event_id = event_id
   elseif event_id < last_event_id then
-    -- Loading a save restores older quest facts, including this counter and
-    -- the old survey vectors. It is not a new capture. Treat it as a new
-    -- baseline or it would overwrite the external JSON just saved moments
-    -- earlier with stale coordinates from the save.
     last_event_id = event_id
     log("ignored restored survey event counter " .. tostring(event_id))
   elseif event_id > last_event_id then
     last_event_id = event_id
-    persist_capture(quests, event_id)
+    if event_session == runtime_session_id then
+      persist_capture(quests, event_id)
+    else
+      log("ignored stale restored survey event " .. tostring(event_id)
+        .. " session=" .. tostring(event_session)
+        .. " currentSession=" .. tostring(runtime_session_id))
+    end
   end
   local now = os.clock()
   if now >= next_sync_time then
