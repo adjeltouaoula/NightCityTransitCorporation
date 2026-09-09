@@ -1,0 +1,79 @@
+name: Build r372t restore traffic behavior archive
+on:
+  push:
+    branches: ["diagnostic/r372t-restore-traffic-archive"]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply r372t marker only
+        shell: python
+        run: |
+          from pathlib import Path
+
+          transit = Path('source/redscript/NCTC/NCTCTransitSystem.reds')
+          text = transit.read_text(encoding='utf-8')
+          old = 'SetFact(n"nctc_dev_build_revision", 37219)'
+          if text.count(old) != 1:
+              raise SystemExit(f'r372s transit marker count={text.count(old)}')
+          text = text.replace(old, 'SetFact(n"nctc_dev_build_revision", 37220)')
+          transit.write_text(text, encoding='utf-8')
+
+          survey = Path('source/cet/nctc_survey/init.lua')
+          text = survey.read_text(encoding='utf-8')
+          old = 'if revision == 37219 then\n    log("NCTC runtime build=37219 r372s r372n drive baseline with vanilla compile guard")'
+          new = 'if revision == 37220 then\n    log("NCTC runtime build=37220 r372t traffic behavior archive restored")\n  elseif revision == 37219 then\n    log("NCTC runtime build=37219 r372s r372n drive baseline with vanilla compile guard")'
+          if text.count(old) != 1:
+              raise SystemExit(f'r372s survey marker count={text.count(old)}')
+          text = text.replace(old, new)
+          survey.write_text(text, encoding='utf-8')
+      - name: Validate controlled experiment
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '37220' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'r372t traffic behavior archive restored' source/cet/nctc_survey/init.lua
+          test -s source/archive/pc/mod/NightCityTransitCorporation.archive
+          test "$(grep -c '@if(ModuleExists("AutoDriveEnhanced"))' source/redscript/NCTC/NCTCArrivalTelemetry.reds)" -eq 3
+          git diff --check
+      - name: Commit diagnostic marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name nctc-import-bot
+          git config user.email nctc-import-bot@users.noreply.github.com
+          git add source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_survey/init.lua
+          git commit -m 'diag: r372t restore packaged traffic behavior archive [skip ci]'
+          git push origin HEAD:diagnostic/r372t-restore-traffic-archive
+      - name: Package r372t including behavior archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD"
+          STAGE="$ROOT/tmp/r372t/NightCityTransitCorporation"
+          mkdir -p "$STAGE/r6/scripts/NCTC" \
+                   "$STAGE/r6/tweaks/NCTC" \
+                   "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey" \
+                   "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" \
+                   "$STAGE/archive/pc/mod" \
+                   "$ROOT/dist"
+          cp source/redscript/NCTC/*.reds "$STAGE/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/*.yaml "$STAGE/r6/tweaks/NCTC/"
+          cp source/cet/nctc_survey/* "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_passenger/* "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp source/archive/pc/mod/NightCityTransitCorporation.archive "$STAGE/archive/pc/mod/NightCityTransitCorporation.archive"
+          cp README.md THIRD_PARTY_NOTICES.md "$STAGE/"
+          test -s "$STAGE/archive/pc/mod/NightCityTransitCorporation.archive"
+          cd "$ROOT/tmp/r372t"
+          zip -qr "$ROOT/dist/NightCityTransitCorporation-0.3.0-devkit-r372t-traffic-behavior-archive-restored.zip" NightCityTransitCorporation
+          unzip -l "$ROOT/dist/NightCityTransitCorporation-0.3.0-devkit-r372t-traffic-behavior-archive-restored.zip" | grep 'archive/pc/mod/NightCityTransitCorporation.archive'
+          sha256sum "$ROOT/dist/NightCityTransitCorporation-0.3.0-devkit-r372t-traffic-behavior-archive-restored.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NCTC-r372t-traffic-behavior-archive-restored
+          path: dist/NightCityTransitCorporation-0.3.0-devkit-r372t-traffic-behavior-archive-restored.zip
