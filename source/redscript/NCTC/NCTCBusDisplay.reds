@@ -1,5 +1,22 @@
 module NCTC
 
+// Route signs belong to the service, not to the driver's dashboard lifecycle.
+// Preserve the existing implementation (including EVS), then restore only our
+// six named components. This runs on lifecycle changes, never on a timer.
+@wrapMethod(VehicleObject)
+private final func SetInteriorUIEnabled(enabled: Bool) -> Void {
+  let names: array<CName>;
+  let widget: ref<worlduiWidgetComponent>;
+  wrappedMethod(enabled);
+  names = [n"nctc_interior_route_display", n"nctc_front_line_display", n"nctc_front_route_display", n"nctc_right_route_display", n"nctc_left_route_display", n"nctc_rear_line_display"];
+  for name in names {
+    widget = this.FindComponentByName(name) as worlduiWidgetComponent;
+    if IsDefined(widget) && !widget.IsEnabled() {
+      widget.Toggle(true);
+    };
+  };
+}
+
 // World-space prototype. Like the NCART screens, this listens for route
 // changes and reads the vehicle owner; it does not require a seated player.
 public class NCTCBusDisplayController extends inkGameController {
@@ -11,28 +28,78 @@ public class NCTCBusDisplayController extends inkGameController {
   private let headerText: ref<inkText>;
   private let stopText: ref<inkText>;
   private let lineOnly: Bool;
+  private let probe: Bool;
 
   protected cb func OnInitialize() -> Bool {
+    let background: ref<inkRectangle>;
     let root: ref<inkCompoundWidget> = this.GetRootWidget() as inkCompoundWidget;
     this.bus = this.GetOwnerEntity() as VehicleObject;
-    if !IsDefined(root) || !IsDefined(this.bus) || !this.bus.RecordHasTag(n"NCTCServiceBus") {
+    // This widget is embedded only in the dedicated NCTC entity template.
+    if !IsDefined(root) || !IsDefined(this.bus) {
       if IsDefined(root) { root.SetVisible(false); };
       return false;
     };
     this.quests = GameInstance.GetQuestsSystem(this.bus.GetGame());
     if !IsDefined(this.quests) { root.SetVisible(false); return false; };
     root.RemoveAllChildren();
-    this.lineOnly = Equals(root.GetName(), n"NCTCBusLineDisplay");
-    if this.lineOnly {
-      this.lineText = this.CreateLabel(root, 104, 0.00, 128.00);
+    this.lineOnly = Equals(root.GetName(), n"NCTCBusLineDisplay") || Equals(root.GetName(), n"NCTCBusRearLineDisplay");
+    this.probe = Equals(root.GetName(), n"NCTCBusProbeDisplay");
+    if this.probe {
+      this.CreateVisualProbe(root);
+    } else { if this.lineOnly {
+      // Font size is clamped to 200 by INK. Use a proportionate canvas instead.
+      this.lineText = this.CreateLabel(root, 200, 0.00, Equals(root.GetName(), n"NCTCBusRearLineDisplay") ? 260.00 : 240.00);
+      this.lineText.SetSize(new Vector2(320.00, Equals(root.GetName(), n"NCTCBusRearLineDisplay") ? 260.00 : 240.00));
+      this.lineText.SetMargin(new inkMargin(0.00, 0.00, 0.00, 0.00));
+      this.lineText.SetTintColor(new HDRColor(2.92, 0.56, 0.56, 1.00));
     } else {
-      this.headerText = this.CreateLabel(root, 30, 4.00, 42.00);
-      this.stopText = this.CreateLabel(root, 58, 39.00, 85.00);
-    };
+      background = new inkRectangle();
+      background.SetSize(new Vector2(1024.00, 116.00));
+      background.SetTintColor(new HDRColor(0.005, 0.005, 0.005, 1.00));
+      background.Reparent(root);
+      this.headerText = this.CreateLabel(root, 44, 0.00, 116.00);
+      this.headerText.SetSize(new Vector2(292.00, 116.00));
+      this.headerText.SetTintColor(new HDRColor(2.92, 0.56, 0.56, 1.00));
+      this.stopText = this.CreateLabel(root, 100, 0.00, 116.00);
+      this.stopText.SetMargin(new inkMargin(312.00, 0.00, 12.00, 0.00));
+      this.stopText.SetSize(new Vector2(700.00, 116.00));
+      this.stopText.SetWrapping(false);
+      this.stopText.SetOverflowPolicy(textOverflowPolicy.AutoScroll);
+      // Native inkText defaults are speed 0.2 / delay 30 (engine units).
+      this.stopText.scrollTextSpeed = 2.50;
+      this.stopText.scrollDelay = Cast<Uint16>(45);
+    }; };
     this.routeListener = this.quests.RegisterListener(n"nctc_display_revision", this, n"OnRouteChanged");
     this.requestedListener = this.quests.RegisterListener(n"nctc_display_stop_requested", this, n"OnRouteChanged");
     this.Refresh();
     return true;
+  }
+
+  // Same validated probe surface, now displaying the existing route facts.
+  private func CreateVisualProbe(root: ref<inkCompoundWidget>) -> Void {
+    let background: ref<inkRectangle> = new inkRectangle();
+    root.RemoveAllChildren();
+    root.SetSize(new Vector2(1024.00, 512.00));
+    root.SetVisible(true);
+    root.SetOpacity(1.00);
+    background.SetName(n"NCTCProbeBackground");
+    background.SetSize(new Vector2(1024.00, 512.00));
+    background.SetTintColor(new HDRColor(1.00, 0.00, 1.00, 1.00));
+    background.SetOpacity(1.00);
+    background.SetVisible(true);
+    background.Reparent(root);
+    // The Probe resource is now 1024x512 from creation, matching the mesh.
+    this.lineText = this.CreateLabel(root, 100, 20.00, 160.00);
+    this.lineText.SetName(n"NCTCProbeLine");
+    this.headerText = this.CreateLabel(root, 40, 182.00, 70.00);
+    this.headerText.SetName(n"NCTCProbeHeader");
+    this.stopText = this.CreateLabel(root, 54, 254.00, 220.00);
+    this.stopText.SetName(n"NCTCProbeStop");
+    for label in [this.lineText, this.headerText, this.stopText] {
+      label.SetFitToContent(false);
+      label.SetContentVAlign(inkEVerticalAlign.Center);
+      label.SetTintColor(new HDRColor(1.00, 1.00, 1.00, 1.00));
+    };
   }
 
   private func CreateLabel(root: ref<inkCompoundWidget>, size: Int32, top: Float, height: Float) -> ref<inkText> {
@@ -43,9 +110,11 @@ public class NCTCBusDisplayController extends inkGameController {
     label.SetLetterCase(textLetterCase.UpperCase);
     label.SetMargin(new inkMargin(12.00, top, 12.00, 0.00));
     label.SetSize(new Vector2(1000.00, height));
+    label.SetFitToContent(false);
     label.SetHorizontalAlignment(textHorizontalAlignment.Center);
     label.SetVerticalAlignment(textVerticalAlignment.Center);
     label.SetContentHAlign(inkEHorizontalAlign.Center);
+    label.SetContentVAlign(inkEVerticalAlign.Center);
     label.SetTintColor(new HDRColor(0.73, 0.14, 0.14, 1.00));
     label.Reparent(root);
     return label;
@@ -77,13 +146,14 @@ public class NCTCBusDisplayController extends inkGameController {
       };
       index += 1;
     };
-    if this.lineOnly {
+    if this.lineOnly || this.probe {
       this.lineText.SetText(line > 0 ? ToString(line) : "—");
-    } else {
-      this.headerText.SetText("NEXT  >  STOP");
+    };
+    if !this.lineOnly {
+      if IsDefined(this.headerText) { this.headerText.SetText("NEXT  >  STOP"); };
       this.stopText.SetText(name);
       this.stopText.SetTintColor(Equals(this.quests.GetFact(n"nctc_display_stop_requested"), 1)
-        ? new HDRColor(1.00, 0.55, 0.10, 1.00) : new HDRColor(0.73, 0.14, 0.14, 1.00));
+        ? new HDRColor(1.00, 0.55, 0.10, 1.00) : (this.probe ? new HDRColor(1.00, 1.00, 1.00, 1.00) : new HDRColor(2.92, 0.56, 0.56, 1.00)));
     };
   }
 
