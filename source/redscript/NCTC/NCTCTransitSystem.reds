@@ -117,14 +117,11 @@ public class NCTCServiceBusController extends IScriptable {
   }
 
   public func DriveWithEnhancedAutoDrive(target: Vector4) -> Bool {
-    let component: ref<AutoDriveComponent>;
-    let settings: ref<Settings>;
-    if !this.IsReady() || !this.IsPlayerSeated() || Vector4.IsXYZZero(target) { return false; };
-    component = this.bus.GetAutoDriveComponent_ADE();
-    settings = Settings.GetInstance(this.bus.GetGame());
-    if !IsDefined(component) || !IsDefined(settings) { return false; };
-    this.activeRouteCommand = null;
-    return component.StartAutoDriveToNCTC(target, Equals(settings.drivingAI, DrivingAIType.ModdedTraffic));
+    // Do not invoke ADE's player AutoDrive handler for the service bus. The
+    // old implementation required shipping a fork of ADE's driving_ai.reds,
+    // which overwrote the user's installed ADE and caused version conflicts.
+    // NCTC owns its route through the native traffic command instead.
+    return this.DriveToTraffic(target, 8.00);
   }
 
   public func SetActiveRouteCommand(command: ref<AIVehicleDriveToPointCommand>) -> Void {
@@ -597,11 +594,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.arrived = false;
       this.dwellPolls = 0;
       this.legPolls = 0;
-      this.adeRouteLeg = this.controller.IsPlayerSeated();
+      this.adeRouteLeg = false;
       this.adeArrivalSignal = false;
-      this.driveCommandSent = this.adeRouteLeg
-        ? this.controller.DriveWithEnhancedAutoDrive(this.surveyBerth)
-        : this.controller.DriveToTraffic(this.surveyBerth, 8.00);
+      this.driveCommandSent = this.controller.DriveToTraffic(this.surveyBerth, 8.00);
       this.PublishLoopDiagnostic(this.driveCommandSent ? 32 : 33, this.requestedStopId);
       this.ScheduleDispatch(0.25);
       return;
@@ -638,10 +633,8 @@ public class NCTCTransitSystem extends ScriptableSystem {
           return;
         };
         this.legPolls = 0;
-        this.adeRouteLeg = this.controller.IsPlayerSeated();
-        this.driveCommandSent = this.adeRouteLeg
-          ? this.controller.DriveWithEnhancedAutoDrive(this.surveyBerth)
-          : this.controller.DriveToTraffic(this.surveyBerth, 8.00);
+        this.adeRouteLeg = false;
+        this.driveCommandSent = this.controller.DriveToTraffic(this.surveyBerth, 8.00);
         this.PublishLoopDiagnostic(this.driveCommandSent ? 31 : 33, this.requestedStopId);
         this.ScheduleDispatch(0.25);
         return;

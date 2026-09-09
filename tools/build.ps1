@@ -16,13 +16,5 @@ Copy-Item -LiteralPath (Join-Path $GamePath "red4ext\plugins\Codeware\Scripts\Co
 # copied only into the temporary compiler root, never into the NCTC package.
 Copy-Item -LiteralPath (Join-Path $GamePath "red4ext\plugins\mod_settings\packed.reds") -Destination (Join-Path $scriptsRoot "ModSettings\ModSettings.reds")
 Copy-Item -Path (Join-Path $GamePath "r6\scripts\auto_drive_enhanced\*.reds") -Destination (Join-Path $scriptsRoot "AutoDriveEnhanced")
-# Experimental ADE-owned route branch: replace only the source file that adds
-# NCTC's explicit-destination entry point. This is never used by the release
-# baseline and remains an ADE dependency.
-$nctcAdePatch = Join-Path $projectRoot "source\vendor\auto_drive_enhanced\driving_ai.reds"
-if (Test-Path -LiteralPath $nctcAdePatch) {
-    Copy-Item -LiteralPath $nctcAdePatch -Destination (Join-Path $scriptsRoot "AutoDriveEnhanced\driving_ai.reds") -Force
-}
-
 & (Join-Path $GamePath "engine\tools\scc.exe") -compile $scriptsRoot -customCacheDir (Join-Path $cacheRoot "modded")
 if ($LASTEXITCODE -ne 0) { throw "Redscript compilation failed with exit code $LASTEXITCODE." }

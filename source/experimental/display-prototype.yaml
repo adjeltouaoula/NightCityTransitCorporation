@@ -1,0 +1,4 @@
+# Only packaged with -IncludeDisplayPrototype on the display experiment.
+Vehicle.nctc_service_mahir_mt28_coach:
+  $type: Vehicle
+  entityTemplatePath: nctc\vehicles\mahir_display.ent

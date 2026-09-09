@@ -270,7 +270,12 @@ end
 normalize_captures = function(network)
   local unique, ordered, changed = {}, {}, false
   for _, capture in ipairs(network.captures or {}) do
-    local key = tostring(capture.line or 0) .. ":" .. tostring(capture.stopIndex or 0)
+    -- stopIndex is a mutable editor ordinal: deleting, inserting or reordering
+    -- a stop can legitimately change it. stopId is the durable identity of the
+    -- stop, so it must be the primary key for persisted spawn/approach/berth
+    -- captures. Keep the ordinal only as a migration fallback for old files.
+    local key = capture.stopId and ("id:" .. tostring(capture.stopId))
+      or ("legacy:" .. tostring(capture.line or 0) .. ":" .. tostring(capture.stopIndex or 0))
     local saved = unique[key]
     if not saved then
       saved = capture
