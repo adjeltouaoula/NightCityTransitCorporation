@@ -1199,7 +1199,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37216 then
+  if revision == 37217 then
+    log("NCTC runtime build=37217 r372q vanilla arrival telemetry compile guard")
+  elseif revision == 37216 then
     log("NCTC runtime build=37216 r372p survey line/stop numpad hotkeys")
   elseif revision == 37215 then
     log("NCTC runtime build=37215 r372o survey session guard")
