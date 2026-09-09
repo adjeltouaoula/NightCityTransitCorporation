@@ -4,10 +4,14 @@
 - **Bus pocket guide:** add an in-game NCTC guide for consulting the bus network, lines and stops; presentation and access method remain to be designed.
 - **Seated NPC passengers:** populate service buses with NPCs sitting in passenger seats.
 - **NPC stop requests and alighting:** NPCs should rarely request a stop and alight at the same time as V. Vary the number of alighting passengers according to the size of the hub; define the hub-size metric and balancing later.
+- **In-bus video:** add video content to the passenger cabin.
+- **In-bus map:** add a map display inside the passenger cabin.
+- **Seated exterior vehicle view:** provide an exterior view of the bus while V is seated as a passenger.
+- **Passenger rotation:** keep V's orientation synchronized with the bus as it turns while V is aboard.
 
 - **Priority — called-stop service:** an "await bus" request must reserve that exact stop as a service stop. When the bus reaches it, it must stop, open its doors, wait for boarding, then continue the line. Only unrequested intermediate stops may be passed without stopping.
 - **Abandoned call:** once V has requested a bus, add a separate distance-based cancellation/despawn rule for when V leaves the stop area. This must never be coupled to merely hiding the local interaction proposal when V walks away before choosing a line.
-- **NCTC map navigation:** selecting an NCTC marker must keep it tracked after closing and reopening the world map. Its first-person waypoint icon is currently the broken red icon with a yellow outline; replace it with a valid NCTC/vanilla navigation visual.
+- **NCTC map navigation:** fix the GPS point position and its icon. Selecting an NCTC marker must keep it tracked after closing and reopening the world map. Its first-person waypoint icon is currently the broken red icon with a yellow outline; replace it with a valid NCTC/vanilla navigation visual.
 - Expand the developer line-colour picker from 7 to **15 highly distinguishable presets** for map icons and hub text. The renderer itself supports arbitrary RGB/HDR colours; this is an authoring/UI palette task.
 - Add physical collision to the bus doors so V and traffic cannot pass through them.
 - Add a separate developer-only "replace selected stop" action. It must preserve the selected stop's position in its line while replacing its anchor, LocKey, display name, and map position; spawn/approach/berth capture data must remain unchanged, and it must never share the normal "add stop" binding.
