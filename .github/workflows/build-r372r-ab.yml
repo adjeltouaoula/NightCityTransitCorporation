@@ -1,0 +1,29 @@
+name: Build r372r A-B baseline
+on:
+  push:
+    branches: ["maintenance/build-r372r-ab"]
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$PWD"
+          STAGE="$ROOT/tmp/ab/NightCityTransitCorporation"
+          mkdir -p "$STAGE/r6/scripts/NCTC" "$STAGE/r6/tweaks/NCTC" "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey" "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" "$ROOT/dist"
+          cp source/redscript/NCTC/*.reds "$STAGE/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/*.yaml "$STAGE/r6/tweaks/NCTC/"
+          cp source/cet/nctc_survey/* "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_passenger/* "$STAGE/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp README.md THIRD_PARTY_NOTICES.md "$STAGE/"
+          cd "$ROOT/tmp/ab"
+          zip -qr "$ROOT/dist/NightCityTransitCorporation-0.3.0-devkit-r372r-ab-baseline.zip" NightCityTransitCorporation
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NCTC-r372r-ab-baseline
+          path: dist/NightCityTransitCorporation-0.3.0-devkit-r372r-ab-baseline.zip
