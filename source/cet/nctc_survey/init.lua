@@ -1199,7 +1199,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37218 then
+  if revision == 37303 then
+    log("NCTC runtime build=37303 r373c direct final berth maneuver on restored baseline")
+  elseif revision == 37218 then
     log("NCTC runtime build=37218 r372r display regression rollback")
   elseif revision == 37217 then
     log("NCTC runtime build=37217 r372q vanilla arrival telemetry compile guard")
