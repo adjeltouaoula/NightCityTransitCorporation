@@ -137,6 +137,71 @@ public enum NCTCDraftLineColor {
 // Saved by Mod Settings, not by a CET overlay.
 public class NCTCSettings extends ScriptableSystem {
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Adaptive traffic speed")
+  @runtimeProperty("ModSettings.description", "Automatically adapts the service-bus traffic speed by district and by long road segments.")
+  @runtimeProperty("ModSettings.category", "Service bus")
+  @runtimeProperty("ModSettings.category.order", "-10")
+  public let adaptiveTrafficSpeed: Bool = true;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Dense city speed")
+  @runtimeProperty("ModSettings.description", "Base traffic-speed target for City Center / Dogtown before the long-road bonus.")
+  @runtimeProperty("ModSettings.category", "Service bus")
+  @runtimeProperty("ModSettings.min", "25")
+  @runtimeProperty("ModSettings.max", "80")
+  @runtimeProperty("ModSettings.step", "5")
+  @runtimeProperty("ModSettings.dependency", "adaptiveTrafficSpeed")
+  public let denseCityTrafficSpeed: Int32 = 45;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "City speed")
+  @runtimeProperty("ModSettings.description", "Base traffic-speed target for Watson, Westbrook and Heywood.")
+  @runtimeProperty("ModSettings.category", "Service bus")
+  @runtimeProperty("ModSettings.min", "25")
+  @runtimeProperty("ModSettings.max", "80")
+  @runtimeProperty("ModSettings.step", "5")
+  @runtimeProperty("ModSettings.dependency", "adaptiveTrafficSpeed")
+  public let cityTrafficSpeed: Int32 = 50;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Outer city speed")
+  @runtimeProperty("ModSettings.description", "Base traffic-speed target for Santo Domingo and Pacifica.")
+  @runtimeProperty("ModSettings.category", "Service bus")
+  @runtimeProperty("ModSettings.min", "25")
+  @runtimeProperty("ModSettings.max", "90")
+  @runtimeProperty("ModSettings.step", "5")
+  @runtimeProperty("ModSettings.dependency", "adaptiveTrafficSpeed")
+  public let outerCityTrafficSpeed: Int32 = 55;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Badlands speed")
+  @runtimeProperty("ModSettings.description", "Base traffic-speed target in the Badlands.")
+  @runtimeProperty("ModSettings.category", "Service bus")
+  @runtimeProperty("ModSettings.min", "30")
+  @runtimeProperty("ModSettings.max", "100")
+  @runtimeProperty("ModSettings.step", "5")
+  @runtimeProperty("ModSettings.dependency", "adaptiveTrafficSpeed")
+  public let badlandsTrafficSpeed: Int32 = 70;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Fallback / manual speed")
+  @runtimeProperty("ModSettings.description", "Fallback when no district profile is resolved. Also used as the fixed speed when adaptive mode is disabled.")
+  @runtimeProperty("ModSettings.category", "Service bus")
+  @runtimeProperty("ModSettings.min", "25")
+  @runtimeProperty("ModSettings.max", "90")
+  @runtimeProperty("ModSettings.step", "5")
+  public let fallbackTrafficSpeed: Int32 = 50;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Absolute speed ceiling")
+  @runtimeProperty("ModSettings.description", "Hard safety ceiling applied after district and long-road bonuses.")
+  @runtimeProperty("ModSettings.category", "Service bus")
+  @runtimeProperty("ModSettings.min", "30")
+  @runtimeProperty("ModSettings.max", "120")
+  @runtimeProperty("ModSettings.step", "5")
+  public let absoluteTrafficSpeedCeiling: Int32 = 80;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Developer mode")
   @runtimeProperty("ModSettings.description", "Enables NCTC survey captures. Numpad 1 records spawn, 2 approach, and 3 berth.")
   @runtimeProperty("ModSettings.category", "Developer mode")

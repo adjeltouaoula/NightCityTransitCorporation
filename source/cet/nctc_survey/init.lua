@@ -32,6 +32,7 @@ local last_dispatch_log_id = 0
 local last_loop_log_id = 0
 local last_native_command_event_id = 0
 local last_service_crime_suppressed_id = 0
+local last_service_calm_reaction_id = 0
 local last_sequence_probe_id = 0
 local last_profile_probe_id = 0
 local fact
@@ -1055,7 +1056,11 @@ local function log_service_loop(quests)
   }
   local command_extra = ""
   if code == 29 or code == 31 or code == 32 then
+    local speed_profiles = { [0] = "fallback/manual", [1] = "dense-city", [2] = "city", [3] = "outer-city", [4] = "badlands" }
+    local profile_code = fact(quests, "nctc_dev_command_speed_profile")
     command_extra = " minDistance=" .. string.format("%.2fm", fact(quests, "nctc_dev_command_minimum_distance_mm") / 1000.0)
+      .. " speedLimit=" .. string.format("%.1f", fact(quests, "nctc_dev_command_speed_limit_x10") / 10.0)
+      .. " profile=" .. (speed_profiles[profile_code] or ("unknown(" .. tostring(profile_code) .. ")"))
       .. string.format(" aiTarget=(%.3f, %.3f, %.3f)", ai_target_x, ai_target_y, ai_target_z)
   end
   if code == 30 or code == 32 then
@@ -1110,6 +1115,14 @@ local function log_service_protection(quests)
   log("service protection #" .. tostring(id) .. ": ignored bus impact crime attribution; V heat unchanged")
 end
 
+local function log_service_calm_reaction(quests)
+  local id = fact(quests, "nctc_dev_service_calm_reaction_id")
+  if id < last_service_calm_reaction_id then last_service_calm_reaction_id = id - 1 end
+  if id <= last_service_calm_reaction_id then return end
+  last_service_calm_reaction_id = id
+  log("service calm #" .. tostring(id) .. ": reaction downgraded; NCTC panic/flee suppressed")
+end
+
 registerForEvent("onUpdate", function()
   local quests = Game.GetQuestsSystem()
   if not quests then return end
@@ -1121,6 +1134,7 @@ registerForEvent("onUpdate", function()
   log_service_loop(quests)
   log_native_command_event(quests)
   log_service_protection(quests)
+  log_service_calm_reaction(quests)
   log_sequence_probe(quests)
   log_profile_probe(quests)
   local event_id = fact(quests, "nctc_survey_event_id")

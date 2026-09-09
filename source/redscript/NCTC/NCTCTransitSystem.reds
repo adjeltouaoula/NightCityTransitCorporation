@@ -5,12 +5,16 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
   private let controller: wref<NCTCServiceBusController>;
   private let target: Vector4;
   private let minimumDistance: Float;
+  private let trafficSpeedLimit: Float;
+  private let trafficSpeedProfile: Int32;
 
-  public func Configure(bus: ref<VehicleObject>, controller: ref<NCTCServiceBusController>, target: Vector4, minimumDistance: Float) -> ref<NCTCDeferredDriveCommand> {
+  public func Configure(bus: ref<VehicleObject>, controller: ref<NCTCServiceBusController>, target: Vector4, minimumDistance: Float, trafficSpeedLimit: Float, trafficSpeedProfile: Int32) -> ref<NCTCDeferredDriveCommand> {
     this.bus = bus;
     this.controller = controller;
     this.target = target;
     this.minimumDistance = minimumDistance;
+    this.trafficSpeedLimit = trafficSpeedLimit;
+    this.trafficSpeedProfile = trafficSpeedProfile;
     return this;
   }
 
@@ -23,7 +27,7 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
     command.targetPosition = Vector4.Vector4To3(this.target);
     command.secureTimeOut = 1200.00;
     command.useTraffic = true;
-    command.speedInTraffic = 50.00;
+    command.speedInTraffic = this.trafficSpeedLimit;
     command.forceGreenLights = false;
     // These must remain false for the service bus. Enabling either one lets
     // the traffic controller snap the long Mahir to a neighboring lane when
@@ -34,6 +38,8 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
     // the command that was actually sent, rather than inferring it later
     // from ADE's global settings.
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_minimum_distance_mm", Cast<Int32>(this.minimumDistance * 1000.00));
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_speed_limit_x10", Cast<Int32>(this.trafficSpeedLimit * 10.00));
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_speed_profile", this.trafficSpeedProfile);
     command.needDriver = false;
     command.driveDownTheRoadIndefinitely = false;
     // SendCommand is the path used by Delamain while V is mounted as a
@@ -133,6 +139,8 @@ public class NCTCServiceBusController extends IScriptable {
 
   public func DriveToTraffic(target: Vector4, minimumDistance: Float) -> Bool {
     let callback: ref<NCTCDeferredDriveCommand>;
+    let speedProfile: Int32;
+    let speedLimit: Float;
     if !this.IsReady() { return false; };
     // Every new traffic leg needs the native NoDriver -> DriverReady state
     // transition, including while V is aboard. Without it the command object
@@ -142,9 +150,92 @@ public class NCTCServiceBusController extends IScriptable {
     callback = new NCTCDeferredDriveCommand();
     this.previousRouteCommand = this.activeRouteCommand;
     this.activeRouteCommand = null;
-    callback.Configure(this.bus, this, target, minimumDistance);
+    speedLimit = this.ResolveTrafficSpeed(target, speedProfile);
+    callback.Configure(this.bus, this, target, minimumDistance, speedLimit, speedProfile);
     GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.25, false);
     return true;
+  }
+
+  // Adaptive NCTC service speed. The game district supplies the zone profile
+  // while long uninterrupted legs receive a small arterial/highway bonus.
+  // This only changes the per-command traffic target: vehicle physics and the
+  // traffic controller's obstacle/lane logic remain vanilla.
+  private func ResolveTrafficSpeed(target: Vector4, out profile: Int32) -> Float {
+    let settings: ref<NCTCSettings> = NCTCSettings.Get(this.bus.GetGame());
+    let prevention: ref<PreventionSystem>;
+    let district: ref<District>;
+    let record: wref<District_Record>;
+    let recordId: TweakDBID;
+    let depth: Int32 = 0;
+    let speed: Float = 50.00;
+    let hardCeiling: Float = 80.00;
+    let legDistance: Float;
+
+    profile = 0;
+
+    if IsDefined(settings) {
+      speed = Cast<Float>(settings.fallbackTrafficSpeed);
+      hardCeiling = Cast<Float>(settings.absoluteTrafficSpeedCeiling);
+      if !settings.adaptiveTrafficSpeed {
+        if speed > hardCeiling { speed = hardCeiling; };
+        return speed;
+      };
+    };
+
+    prevention = GameInstance.GetScriptableSystemsContainer(this.bus.GetGame()).Get(NameOf<PreventionSystem>()) as PreventionSystem;
+    if IsDefined(prevention) {
+      district = prevention.GetCurrentDistrict();
+      if IsDefined(district) {
+        record = district.GetDistrictRecord();
+      };
+    };
+
+    while IsDefined(record) && depth < 8 {
+      recordId = record.GetID();
+
+      if Equals(recordId, t"Districts.Badlands") {
+        profile = 4;
+        speed = IsDefined(settings) ? Cast<Float>(settings.badlandsTrafficSpeed) : 70.00;
+        break;
+      };
+
+      if Equals(recordId, t"Districts.CityCenter") || Equals(recordId, t"Districts.Dogtown") {
+        profile = 1;
+        speed = IsDefined(settings) ? Cast<Float>(settings.denseCityTrafficSpeed) : 45.00;
+        break;
+      };
+
+      if Equals(recordId, t"Districts.SantoDomingo") || Equals(recordId, t"Districts.Pacifica") {
+        profile = 3;
+        speed = IsDefined(settings) ? Cast<Float>(settings.outerCityTrafficSpeed) : 55.00;
+        break;
+      };
+
+      if Equals(recordId, t"Districts.Watson") || Equals(recordId, t"Districts.Westbrook") || Equals(recordId, t"Districts.Heywood") {
+        profile = 2;
+        speed = IsDefined(settings) ? Cast<Float>(settings.cityTrafficSpeed) : 50.00;
+        break;
+      };
+
+      record = record.ParentDistrict();
+      depth += 1;
+    };
+
+    // Approximate road class without replacing the game's traffic navigation:
+    // very long service legs are typically arterials, ring roads or Badlands
+    // roads. Passage waypoints naturally split difficult urban legs, so they
+    // do not accidentally receive the long-road bonus.
+    legDistance = Vector4.Distance(this.bus.GetWorldPosition(), target);
+    if legDistance > 1800.00 {
+      speed += 10.00;
+    } else {
+      if legDistance > 1000.00 {
+        speed += 5.00;
+      };
+    };
+
+    if speed > hardCeiling { speed = hardCeiling; };
+    return speed;
   }
 
   private func PrepareBusForTrafficDrive() -> Void {
