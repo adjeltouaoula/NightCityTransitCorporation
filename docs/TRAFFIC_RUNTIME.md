@@ -1,0 +1,1 @@
+The service bus requires `source/archive/pc/mod/NCTCTrafficRuntime.archive` at packaging time. The package script verifies SHA-256 `98701118d1f5a4da6ac47ca070300ec607012ccad51e91406fb657b034736a7d` and must fail if the archive is missing or changed. This is a bundled standalone NCTC compatibility resource; installing Auto Drive Enhanced is not required.
