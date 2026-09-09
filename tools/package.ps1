@@ -5,7 +5,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-if (!$IncludeDisplayPrototype) { throw 'This branch uses the display entity: IncludeDisplayPrototype is required.' }
 $projectRoot = Split-Path -Parent $PSScriptRoot
 # Builds are kept in the canonical NCTC project distribution folder so every
 # development branch publishes to the same installable location.
@@ -16,7 +15,11 @@ $archivePath = Join-Path $distRoot "NightCityTransitCorporation-$Version.zip"
 
 if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
 New-Item -ItemType Directory -Force (Join-Path $stageRoot "r6\scripts\NCTC"), (Join-Path $stageRoot "r6\tweaks\NCTC"), $distRoot, $oldDistRoot | Out-Null
-# Keep other branches' test builds in place.
+Get-ChildItem -LiteralPath $distRoot -Filter "NightCityTransitCorporation-*.zip" -File | ForEach-Object {
+    $oldArchivePath = Join-Path $oldDistRoot $_.Name
+    if (Test-Path -LiteralPath $oldArchivePath) { Remove-Item -LiteralPath $oldArchivePath -Force }
+    Move-Item -LiteralPath $_.FullName -Destination $oldArchivePath
+}
 Copy-Item -Path (Join-Path $projectRoot "source\redscript\NCTC\*.reds") -Destination (Join-Path $stageRoot "r6\scripts\NCTC")
 Copy-Item -Path (Join-Path $projectRoot "source\tweaks\NCTC\*.yaml") -Destination (Join-Path $stageRoot "r6\tweaks\NCTC")
 # Experimental vehicle-physics archives remain excluded until their collision

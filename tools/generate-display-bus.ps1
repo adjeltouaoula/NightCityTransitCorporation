@@ -1,9 +1,9 @@
-param([string]$WolvenKitPath='F:\Program Files\GOG Galaxy\Games\my mods\WolvenKit-8.20.0.zip 2201 8.20.0 2026-08-06T08-14Z xNHtNXgDX', [switch]$VanillaScreenProbe, [switch]$LargePanelProbe, [switch]$IntegratedSides)
+param([string]$WolvenKitPath='F:\Program Files\GOG Galaxy\Games\my mods\WolvenKit-8.20.0.zip 2201 8.20.0 2026-08-06T08-14Z xNHtNXgDX')
 $ErrorActionPreference='Stop'
 Get-ChildItem $WolvenKitPath -Filter '*.dll' | ForEach-Object {try {[Reflection.Assembly]::LoadFrom($_.FullName)|Out-Null}catch{}}
 if(![WolvenKit.Core.Compression.Oodle]::Load('F:\Program Files\GOG Galaxy\Games\Cyberpunk 2077\bin\x64\oo2ext_7_win64.dll')){throw 'Could not load game compression library'}
 $root=Split-Path $PSScriptRoot -Parent
-$assets=Join-Path $root 'tmp\display-entity-prototype'
+$assets=Join-Path $root 'tmp\display-prototype'
 $gamePath='F:\Program Files\GOG Galaxy\Games\Cyberpunk 2077'
 $interiorAsset='base\vehicles\special\v_mahir_mt28_coach\entities\v_mahir_mt28_coach__ext01_interior_01.ent'
 
@@ -20,7 +20,7 @@ $hash.Load()
 $archiveReader=[WolvenKit.RED4.Archive.IO.ArchiveReader]::new()
 function Read-GameAsset([string]$asset) {
   $assetId=[WolvenKit.Common.FNV1A.FNV1A64HashAlgorithm]::HashString($asset)
-  foreach($archiveFile in @(Get-ChildItem (Join-Path $gamePath 'archive\pc\mod') -Filter 'NightCityTrafficOverhaul.archive') + @(Get-ChildItem (Join-Path $gamePath 'archive\pc\content') -Filter '*.archive')) {
+  foreach($archiveFile in Get-ChildItem (Join-Path $gamePath 'archive\pc\content') -Filter '*.archive') {
     $archive=$null
     $null=$archiveReader.ReadArchive($archiveFile.FullName,$hash,[ref]$archive)
     if(!$archive.Files.ContainsKey($assetId)){continue}
@@ -38,132 +38,51 @@ function Read-GameAsset([string]$asset) {
   throw "Could not find game asset: $asset"
 }
 
-$sourceEntity='night_city_traffic_overhaul\entities\transport\v_mahir_mt28_coach_basic_01.ent'
-$sourceArchive=$null
-$null=$archiveReader.ReadArchive((Join-Path $gamePath 'archive\pc\mod\NightCityTrafficOverhaul.archive'),$hash,[ref]$sourceArchive)
-$sourceId=[WolvenKit.Common.FNV1A.FNV1A64HashAlgorithm]::HashString($sourceEntity)
-$inputStream=[IO.MemoryStream]::new()
-try {
-  $sourceArchive.ExtractFile($sourceArchive.Files[$sourceId],$inputStream)
-  $inputStream.Position=0
-  $reader=[WolvenKit.RED4.Archive.IO.CR2WReader]::new($inputStream)
-  $file=$null
-  if(($reader.ReadFile([ref]$file,$true)).ToString() -ne 'NoError'){throw 'Cannot read service entity'}
-}finally{$inputStream.Dispose()}
-if(!($file.RootChunk.Components | Where-Object {$_.Name.ToString() -eq 'deformation_rig'})){throw 'Screen parent deformation_rig is missing'}
+$file=Read-GameAsset $interiorAsset
 $package=$file.RootChunk.CompiledData.Data
 $originalCount=$package.Chunks.Count
-& (Join-Path $PSScriptRoot 'generate-display-flat-material.ps1')
-if($IntegratedSides){
-  & (Join-Path $PSScriptRoot 'generate-display-sides.ps1')
-  foreach($appearance in $file.RootChunk.Appearances){
-    $appearance.AppearanceResource=[WolvenKit.RED4.Types.CResourceAsyncReference[WolvenKit.RED4.Types.appearanceAppearanceResource]]::new('nctc\vehicles\mahir_display.app')
-  }
-}
-# Copy NCART's real screen/WorldWidget pair. Each copy is read afresh so no
-# mutable component state or CRUID is shared between displays.
-function Add-DisplayPair(
-  [string]$name,
-  [string]$item,
-  [UInt64]$id,
-  [single]$x,[single]$y,[single]$z,
-  [single]$qi,[single]$qj,[single]$qk,[single]$qr,
-  [single]$width,[single]$height
-) {
-  $metroTemplate=Read-GameAsset 'base\open_world\metro\ue_metro\entities\ue_metro_train.ent'
-  $screen=$metroTemplate.RootChunk.Components | Where-Object {$_.Name.ToString() -eq 'screen5558'} | Select-Object -First 1
-  $widget=$metroTemplate.RootChunk.Components | Where-Object {$_.Name.ToString() -eq 'dataTerm_ui5441'} | Select-Object -First 1
-  if($null -eq $screen -or $null -eq $widget){throw 'Could not locate the vanilla NCART screen component pair'}
-  $screenName="nctc_${name}_screen"
-  $screen.Name=[WolvenKit.RED4.Types.CName]$screenName
-  $screen.Mesh=[WolvenKit.RED4.Types.CResourceAsyncReference[WolvenKit.RED4.Types.CMesh]]::new('nctc\ui\display_screen.mesh')
-  $screen.Id=[WolvenKit.RED4.Types.CRUID]$id
-  $screen.LocalTransform.Position.X=[WolvenKit.RED4.Types.FixedPoint]$x
-  $screen.LocalTransform.Position.Y=[WolvenKit.RED4.Types.FixedPoint]$y
-  $screen.LocalTransform.Position.Z=[WolvenKit.RED4.Types.FixedPoint]$z
-  # The mesh is an XY unit square facing -Z. Rotate 90 degrees around X
-  # before the placement yaw, so its face points out of the bus (+Y).
-  # The interior sign faces passengers toward -Y instead.
-  $tilt=[single]0.70710678
-  if($name -eq 'interior_route'){$tilt=-$tilt}
-  $screen.LocalTransform.Orientation.I=[WolvenKit.RED4.Types.CFloat]([single]($qr*$tilt))
-  $screen.LocalTransform.Orientation.J=[WolvenKit.RED4.Types.CFloat]([single]($qk*$tilt))
-  $screen.LocalTransform.Orientation.K=[WolvenKit.RED4.Types.CFloat]([single]($qk*0.70710678))
-  $screen.LocalTransform.Orientation.R=[WolvenKit.RED4.Types.CFloat]([single]($qr*0.70710678))
-  if($LargePanelProbe -or $IntegratedSides){
-    # v12 was visible from above in game. Isolate the extra X tilt:
-    # retain placement yaw and change no mesh, scale, binding or widget data.
-    $screen.LocalTransform.Orientation.I=[WolvenKit.RED4.Types.CFloat]$qi
-    $screen.LocalTransform.Orientation.J=[WolvenKit.RED4.Types.CFloat]$qj
-    $screen.LocalTransform.Orientation.K=[WolvenKit.RED4.Types.CFloat]$qk
-    $screen.LocalTransform.Orientation.R=[WolvenKit.RED4.Types.CFloat]$qr
-  }
-  $screen.VisualScale.X=[WolvenKit.RED4.Types.CFloat]$width
-  $screen.VisualScale.Y=[WolvenKit.RED4.Types.CFloat]$height
-  $screen.VisualScale.Z=[WolvenKit.RED4.Types.CFloat][single]1
-  if($IntegratedSides){
-    # The in-game screen is XZ; the earlier XY reading was export-space.
-    $screen.VisualScale.Y=[WolvenKit.RED4.Types.CFloat][single]1
-    $screen.VisualScale.Z=[WolvenKit.RED4.Types.CFloat]$height
-  }
-  $screenParent=[WolvenKit.RED4.Types.entHardTransformBinding]::new()
-  $screenParent.BindName=[WolvenKit.RED4.Types.CName]'deformation_rig'
-  if($IntegratedSides){
-    # Match body_01's verified binding; its local position/rotation is identity.
-    $screenParent.BindName=[WolvenKit.RED4.Types.CName]'vehicle_slots'
-    $screenParent.SlotName=[WolvenKit.RED4.Types.CName]'Base'
-  }
-  $screen.ParentTransform=[WolvenKit.RED4.Types.CHandle[WolvenKit.RED4.Types.entITransformBinding]]::new($screenParent)
+$metroTemplate=Read-GameAsset 'base\open_world\metro\ue_metro\entities\ue_metro_train.ent'
 
-  $widget.Name=[WolvenKit.RED4.Types.CName]("nctc_${name}_display")
-  $widget.Id=[WolvenKit.RED4.Types.CRUID]($id+1)
-  $widget.WidgetResource=[WolvenKit.RED4.Types.CResourceAsyncReference[WolvenKit.RED4.Types.inkWidgetLibraryResource]]::new('nctc\ui\bus_display.inkwidget')
-  $widget.ItemNameToSpawn=[WolvenKit.RED4.Types.CName]$item
-  # Diagnostic control: same mesh/bindings, only the INK resource differs.
-  if($VanillaScreenProbe -and $name -eq 'interior_route'){
-    $widget.WidgetResource=[WolvenKit.RED4.Types.CResourceAsyncReference[WolvenKit.RED4.Types.inkWidgetLibraryResource]]::new('base\open_world\metro\ue_metro\ui\ue_metro_train_ui_bar.inkwidget')
-    $widget.ItemNameToSpawn=[WolvenKit.RED4.Types.CName]'Root'
-  }
-  $widget.LimitedSpawnDistanceFromVehicle=[WolvenKit.RED4.Types.CBool]$false
-  $widget.SpawnDistanceOverride=[WolvenKit.RED4.Types.CFloat][single]50
-  $widget.SceneWidgetProperties.IsAlwaysVisible=[WolvenKit.RED4.Types.CBool]$true
-  $widget.SceneWidgetProperties.IsInteractable=[WolvenKit.RED4.Types.CBool]$false
-  $widget.ScreenAreaMultiplier=[WolvenKit.RED4.Types.CFloat][single]2
-  $widget.TintColor.Red=[WolvenKit.RED4.Types.CUInt8][byte]255
-  $widget.TintColor.Green=[WolvenKit.RED4.Types.CUInt8][byte]255
-  $widget.TintColor.Blue=[WolvenKit.RED4.Types.CUInt8][byte]255
-  $widget.TintColor.Alpha=[WolvenKit.RED4.Types.CUInt8][byte]255
-  $meshBinding=[WolvenKit.RED4.Types.worlduiMeshTargetBinding]::new()
-  $meshBinding.BindName=[WolvenKit.RED4.Types.CName]$screenName
-  $widget.MeshTargetBinding=[WolvenKit.RED4.Types.CHandle[WolvenKit.RED4.Types.worlduiMeshTargetBinding]]::new($meshBinding)
-  $binding=[WolvenKit.RED4.Types.entHardTransformBinding]::new()
-  $binding.BindName=[WolvenKit.RED4.Types.CName]$screenName
-  $widget.ParentTransform=[WolvenKit.RED4.Types.CHandle[WolvenKit.RED4.Types.entITransformBinding]]::new($binding)
-  $file.RootChunk.Components.Add($screen)
-  $file.RootChunk.Components.Add($widget)
-}
+# Copy the screen pair used by NCART itself. A WorldWidget cannot render onto
+# an arbitrary physical mesh: its target needs the specialised hologram screen
+# material. This is why binding the previous prototype to interior_01 was
+# stable but invisible.
+$screen=$metroTemplate.RootChunk.Components | Where-Object {$_.Name.ToString() -eq 'screen5558'} | Select-Object -First 1
+$widget=$metroTemplate.RootChunk.Components | Where-Object {$_.Name.ToString() -eq 'dataTerm_ui5441'} | Select-Object -First 1
+if($null -eq $screen -or $null -eq $widget){throw 'Could not locate the vanilla NCART screen component pair'}
+$screen.Name=[WolvenKit.RED4.Types.CName]'nctc_route_screen'
+$screen.Id=[WolvenKit.RED4.Types.CRUID][UInt64]90170000000000
+$screen.LocalTransform.Position.X=[WolvenKit.RED4.Types.FixedPoint][single]0.45
+$screen.LocalTransform.Position.Y=[WolvenKit.RED4.Types.FixedPoint][single]4.79
+$screen.LocalTransform.Position.Z=[WolvenKit.RED4.Types.FixedPoint][single]1.93
+$screen.LocalTransform.Orientation.I=[WolvenKit.RED4.Types.CFloat][single]0
+$screen.LocalTransform.Orientation.J=[WolvenKit.RED4.Types.CFloat][single]0
+$screen.LocalTransform.Orientation.K=[WolvenKit.RED4.Types.CFloat][single]0
+$screen.LocalTransform.Orientation.R=[WolvenKit.RED4.Types.CFloat][single]1
+$screenParent=[WolvenKit.RED4.Types.entHardTransformBinding]::new()
+$screenParent.BindName=[WolvenKit.RED4.Types.CName]'deformation_rig'
+$screen.ParentTransform=[WolvenKit.RED4.Types.CHandle[WolvenKit.RED4.Types.entITransformBinding]]::new($screenParent)
 
-# Vehicle-local axes: X left/right, Y rear/front, Z up. The first pair is the
-# passenger-facing display above the windscreen. The remaining pairs cover the
-# vanilla route-number / next-stop positions outside the coach.
-if($IntegratedSides){
-  & (Join-Path $PSScriptRoot 'measure-display-planes.ps1')
-}elseif($LargePanelProbe){
-  # One panel outside the right side, facing outward (-X), clear of bodywork.
-  # Retain the known component name for the service UI lifecycle and tracing.
-  Add-DisplayPair 'right_route' 'Probe' 90170000000030 -3.50 0.00 2.00 0 0 0.7071068 0.7071068 2.00 1.00
-}else{
-Add-DisplayPair 'interior_route' 'Route' 90170000000000  0.45  4.79 1.93  0 0 0 1                 0.78 0.12
-Add-DisplayPair 'front_line'    'Line'  90170000000010  0.74  5.08 2.38  0 0 0 1                 0.25 0.12
-Add-DisplayPair 'front_route'   'Route' 90170000000020 -0.38  5.08 2.38  0 0 0 1                 0.62 0.12
-Add-DisplayPair 'right_route'   'Route' 90170000000030 -1.31 -2.65 2.20  0 0  0.7071068 0.7071068 0.72 0.12
-Add-DisplayPair 'left_route'    'Route' 90170000000040  1.31 -2.65 2.20  0 0 -0.7071068 0.7071068 0.72 0.12
-Add-DisplayPair 'rear_line'     'Line'  90170000000050  0.00 -5.10 2.30  0 0 1 0                 0.30 0.12
-}
-
+$widget.Name=[WolvenKit.RED4.Types.CName]'nctc_route_display'
+$widget.Id=[WolvenKit.RED4.Types.CRUID][UInt64]90170000000001
+$widget.WidgetResource=[WolvenKit.RED4.Types.CResourceAsyncReference[WolvenKit.RED4.Types.inkWidgetLibraryResource]]::new('nctc\ui\bus_display.inkwidget')
+$widget.ItemNameToSpawn=[WolvenKit.RED4.Types.CName]'Root'
+$widget.LimitedSpawnDistanceFromVehicle=[WolvenKit.RED4.Types.CBool]$false
+$widget.SpawnDistanceOverride=[WolvenKit.RED4.Types.CFloat][single]40
+$widget.SceneWidgetProperties.IsAlwaysVisible=[WolvenKit.RED4.Types.CBool]$true
+$widget.SceneWidgetProperties.IsInteractable=[WolvenKit.RED4.Types.CBool]$false
+$widget.ScreenAreaMultiplier=[WolvenKit.RED4.Types.CFloat][single]2
+$meshBinding=[WolvenKit.RED4.Types.worlduiMeshTargetBinding]::new()
+$meshBinding.BindName=[WolvenKit.RED4.Types.CName]'nctc_route_screen'
+$widget.MeshTargetBinding=[WolvenKit.RED4.Types.CHandle[WolvenKit.RED4.Types.worlduiMeshTargetBinding]]::new($meshBinding)
+$binding=[WolvenKit.RED4.Types.entHardTransformBinding]::new()
+$binding.BindName=[WolvenKit.RED4.Types.CName]'nctc_route_screen'
+$widget.ParentTransform=[WolvenKit.RED4.Types.CHandle[WolvenKit.RED4.Types.entITransformBinding]]::new($binding)
 # WolvenKit rebuilds compiledData from Entity + Components before writing.
 # Editing the parsed package alone is discarded by its preprocessor.
-$path=Join-Path $assets 'nctc\vehicles\mahir_display.ent'
+$file.RootChunk.Components.Add($screen)
+$file.RootChunk.Components.Add($widget)
+$path=Join-Path $assets $interiorAsset
 New-Item -ItemType Directory -Force (Split-Path $path -Parent)|Out-Null
 $stream=[IO.File]::Create($path)
 try {$writer=[WolvenKit.RED4.Archive.IO.CR2WWriter]::new($stream);$writer.WriteFile($file)}finally{$stream.Dispose()}
@@ -173,14 +92,9 @@ try {
   $check=$null
   $result=$reader.ReadFile([ref]$check,$true)
   $count=$check.RootChunk.CompiledData.Data.Chunks.Count
-  $added=12
-  if($LargePanelProbe){$added=2}
-  if($IntegratedSides){$added=12}
-  if($result.ToString() -ne 'NoError' -or $count -ne ($originalCount+$added)){throw "Bus template round-trip failed: $result count=$count expected=$($originalCount+$added)"}
+  if($result.ToString() -ne 'NoError' -or $count -ne ($originalCount+2)){throw "Bus template round-trip failed: $result count=$count expected=$($originalCount+2)"}
 }finally{$stream.Dispose()}
 $archivePath=Join-Path $root 'tmp\NCTCDisplayPrototype.archive'
-New-Item -ItemType Directory -Force (Join-Path $assets 'nctc\ui') | Out-Null
-Copy-Item -LiteralPath (Join-Path $root 'tmp\display-prototype\nctc\ui\bus_display.inkwidget') -Destination (Join-Path $assets 'nctc\ui\bus_display.inkwidget') -Force
 $stream=[IO.File]::Create($archivePath)
 try {
   $writer=[WolvenKit.RED4.Archive.IO.ArchiveWriter]::new($hash,$null)
