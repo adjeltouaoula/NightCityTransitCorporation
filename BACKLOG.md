@@ -1,5 +1,10 @@
 # NCTC backlog
 
+- **Display finish (deferred):** reproduce the vanilla interior sign's textured/relief backing and compact NEXT/filled-triangle/STOP header without leaving any original destination lettering visible. v23's partial native-letter preservation regressed (PACIFICA overlaps the dynamic stop); retain the validated full-panel layout and scrolling until a reliable replacement is verified in game.
+- **Bus pocket guide:** add an in-game NCTC guide for consulting the bus network, lines and stops; presentation and access method remain to be designed.
+- **Seated NPC passengers:** populate service buses with NPCs sitting in passenger seats.
+- **NPC stop requests and alighting:** NPCs should rarely request a stop and alight at the same time as V. Vary the number of alighting passengers according to the size of the hub; define the hub-size metric and balancing later.
+
 - **Priority — called-stop service:** an "await bus" request must reserve that exact stop as a service stop. When the bus reaches it, it must stop, open its doors, wait for boarding, then continue the line. Only unrequested intermediate stops may be passed without stopping.
 - **Abandoned call:** once V has requested a bus, add a separate distance-based cancellation/despawn rule for when V leaves the stop area. This must never be coupled to merely hiding the local interaction proposal when V walks away before choosing a line.
 - **Uninterrupted pass-through:** passage points and unrequested intermediate stops must never visibly dwell, even for a fraction of a second. Hand the traffic command to the next route target early enough that the Mahir crosses the point continuously; this must not alter the separate service-stop behaviour.
