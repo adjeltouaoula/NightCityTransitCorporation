@@ -7,20 +7,30 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
   private let minimumDistance: Float;
   private let trafficSpeedLimit: Float;
   private let trafficSpeedProfile: Int32;
+  private let forcedStartSpeed: Float;
+  private let commandGeneration: Int32;
 
-  public func Configure(bus: ref<VehicleObject>, controller: ref<NCTCServiceBusController>, target: Vector4, minimumDistance: Float, trafficSpeedLimit: Float, trafficSpeedProfile: Int32) -> ref<NCTCDeferredDriveCommand> {
+  public func Configure(bus: ref<VehicleObject>, controller: ref<NCTCServiceBusController>, target: Vector4, minimumDistance: Float, trafficSpeedLimit: Float, trafficSpeedProfile: Int32, forcedStartSpeed: Float, commandGeneration: Int32) -> ref<NCTCDeferredDriveCommand> {
     this.bus = bus;
     this.controller = controller;
     this.target = target;
     this.minimumDistance = minimumDistance;
     this.trafficSpeedLimit = trafficSpeedLimit;
     this.trafficSpeedProfile = trafficSpeedProfile;
+    this.forcedStartSpeed = forcedStartSpeed;
+    this.commandGeneration = commandGeneration;
     return this;
   }
 
   public func Call() -> Void {
     let command: ref<AIVehicleDriveToPointCommand>;
     if !IsDefined(this.bus) || !this.bus.IsAttached() || !IsDefined(this.bus.GetAIComponent()) { return; };
+    // r372n: callbacks are deferred across frames. If route state changes
+    // again before this callback fires, never submit the now-stale command.
+    if IsDefined(this.controller) && !this.controller.IsDriveGenerationCurrent(this.commandGeneration) {
+      this.controller.ReportStaleDriveCallback(this.commandGeneration);
+      return;
+    };
     // NCTC-owned traffic command. It uses the game's traffic behavior without
     // consulting ADE settings or activating the player's AutoDrive system.
     command = new AIVehicleDriveToPointCommand();
@@ -34,19 +44,25 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
     // a route command starts or ends, which can eject standing passengers.
     command.trafficTryNeighborsForStart = false;
     command.trafficTryNeighborsForEnd = false;
+    // r372n: standard service commands still use zero completion radius, but
+    // rolling handoffs can preserve the actual bus speed on the replacement
+    // command. Keep the values on the native object instead of telemetry-only.
+    command.minimumDistanceToTarget = this.minimumDistance;
+    if this.forcedStartSpeed > 0.50 { command.forcedStartSpeed = this.forcedStartSpeed; };
     // Dev telemetry: proves the exact native stopping threshold carried by
     // the command that was actually sent, rather than inferring it later
     // from ADE's global settings.
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_minimum_distance_mm", Cast<Int32>(this.minimumDistance * 1000.00));
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_speed_limit_x10", Cast<Int32>(this.trafficSpeedLimit * 10.00));
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_speed_profile", this.trafficSpeedProfile);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_forced_start_speed_mm", Cast<Int32>(this.forcedStartSpeed * 1000.00));
     command.needDriver = false;
     command.driveDownTheRoadIndefinitely = false;
     // SendCommand is the path used by Delamain while V is mounted as a
     // passenger. QueueEvent + SetInitCmd is suitable for an empty traffic
     // vehicle, but PassengerEvents can cancel that initialization on 2.3+.
     this.bus.GetAIComponent().SendCommand(command);
-    if IsDefined(this.controller) { this.controller.SetActiveRouteCommand(command); };
+    if IsDefined(this.controller) { this.controller.SetActiveRouteCommand(command, this.commandGeneration); };
   }
 }
 
@@ -60,6 +76,7 @@ public class NCTCServiceBusController extends IScriptable {
   // route handoff, so the dev log can prove whether it was replaced or left
   // alive alongside the command for the next stop.
   private let previousRouteCommand: ref<AIVehicleDriveToPointCommand>;
+  private let driveGeneration: Int32;
 
   public func Bind(bus: ref<VehicleObject>) -> Bool {
     if !IsDefined(bus) || !IsDefined(bus.GetAIComponent()) { return false; };
@@ -67,6 +84,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37214);
     return true;
   }
 
@@ -141,7 +159,9 @@ public class NCTCServiceBusController extends IScriptable {
     let callback: ref<NCTCDeferredDriveCommand>;
     let speedProfile: Int32;
     let speedLimit: Float;
+    let generation: Int32;
     if !this.IsReady() { return false; };
+    generation = this.NextDriveGeneration();
     // Every new traffic leg needs the native NoDriver -> DriverReady state
     // transition, including while V is aboard. Without it the command object
     // remains Active but the vehicle controller stays idle after a service
@@ -151,8 +171,42 @@ public class NCTCServiceBusController extends IScriptable {
     this.previousRouteCommand = this.activeRouteCommand;
     this.activeRouteCommand = null;
     speedLimit = this.ResolveTrafficSpeed(target, speedProfile);
-    callback.Configure(this.bus, this, target, minimumDistance, speedLimit, speedProfile);
+    callback.Configure(this.bus, this, target, minimumDistance, speedLimit, speedProfile, 0.00, generation);
     GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.25, false);
+    return true;
+  }
+
+  // r372n rolling passage handoff. The passage command is deliberately aimed
+  // far down the road AFTER the waypoint, so it is still pulling the Mahir
+  // forward when NCTC changes legs. Only then do we interrupt it, pulse the
+  // native driver lifecycle over separate frames, and submit the successor
+  // with the measured rolling speed.
+  public func DriveToTrafficAfterRollingPassage(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {
+    let callback: ref<NCTCDeferredDriveCommand>;
+    let noDriver: ref<AIEvent>;
+    let driverReady: ref<AIEvent>;
+    let speedProfile: Int32;
+    let speedLimit: Float;
+    let generation: Int32;
+    if !this.IsReady() { return false; };
+
+    generation = this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+    this.activeRouteCommand = null;
+
+    noDriver = new AIEvent();
+    driverReady = new AIEvent();
+    noDriver.name = n"NoDriver";
+    driverReady.name = n"DriverReady";
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.030);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_forced_start_speed_mm", Cast<Int32>(MaxF(startSpeed, 0.00) * 1000.00));
+
+    callback = new NCTCDeferredDriveCommand();
+    speedLimit = this.ResolveTrafficSpeed(target, speedProfile);
+    callback.Configure(this.bus, this, target, minimumDistance, speedLimit, speedProfile, MaxF(startSpeed, 0.00), generation);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);
     return true;
   }
 
@@ -247,7 +301,26 @@ public class NCTCServiceBusController extends IScriptable {
     GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.10);
   }
 
-  public func SetActiveRouteCommand(command: ref<AIVehicleDriveToPointCommand>) -> Void {
+  private func NextDriveGeneration() -> Int32 {
+    this.driveGeneration += 1;
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_drive_generation", this.driveGeneration);
+    return this.driveGeneration;
+  }
+
+  public func IsDriveGenerationCurrent(generation: Int32) -> Bool {
+    return Equals(generation, this.driveGeneration);
+  }
+
+  public func ReportStaleDriveCallback(generation: Int32) -> Void {
+    let quests: ref<QuestsSystem>;
+    if !this.IsReady() { return; };
+    quests = GameInstance.GetQuestsSystem(this.bus.GetGame());
+    quests.SetFact(n"nctc_dev_stale_drive_generation", generation);
+    quests.SetFact(n"nctc_dev_stale_drive_callback_id", quests.GetFact(n"nctc_dev_stale_drive_callback_id") + 1);
+  }
+
+  public func SetActiveRouteCommand(command: ref<AIVehicleDriveToPointCommand>, generation: Int32) -> Void {
+    if !this.IsDriveGenerationCurrent(generation) { return; };
     this.activeRouteCommand = command;
   }
 
@@ -552,6 +625,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let passageOrdinal: Int32;
   private let passageTarget: Vector4;
   private let passageForward: Vector4;
+  private let passageForwardRecorded: Bool;
 
   private func GetServiceBerth() -> Vector4 {
     return this.hasSurveyProfile ? this.surveyBerth : this.requestedStop;
@@ -563,7 +637,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private func GetTrafficTarget() -> Vector4 {
     let target: Vector4 = this.GetServiceBerth();
     if this.followingPassage {
-      if AbsF(this.passageForward.X) > 0.01 || AbsF(this.passageForward.Y) > 0.01 { return this.passageTarget + this.passageForward * 13.70; };
+      // r372n: a passage is not an endpoint. Aim a full 100 m down the
+      // surveyed outgoing road so the native controller has no reason to
+      // brake while the bus crosses the waypoint and the handoff zone.
+      if AbsF(this.passageForward.X) > 0.01 || AbsF(this.passageForward.Y) > 0.01 { return this.passageTarget + this.passageForward * 100.00; };
       return this.passageTarget;
     };
     if AbsF(this.surveyBerthForward.X) > 0.01 || AbsF(this.surveyBerthForward.Y) > 0.01 {
@@ -572,16 +649,23 @@ public class NCTCTransitSystem extends ScriptableSystem {
     return target;
   }
 
-  // A passage is crossed rather than served. The direction must describe the
-  // route leaving this point, not the direction in which the player happened
-  // to face while recording it. Use the next passage on this leg, or the
-  // next stop's berth when this is the last passage.
+  // A passage yaw is authored as the direction of the ROAD AFTER the
+  // waypoint. r371 discarded that information and rebuilt a vector toward the
+  // final stop; at junctions that points off the actual lane and makes the AI
+  // treat the passage as a destination. Keep the recorded road tangent when
+  // available, and use the old onward-vector calculation only as compatibility
+  // fallback for legacy yaw-less passages.
   private func ResolvePassageForward() -> Void {
     let nextPassage: Vector4;
     let ignoredRecordedForward: Vector4;
     let onwardTarget: Vector4 = this.GetServiceBerth();
     let onward: Vector4;
     if !this.followingPassage { return; };
+    this.passageForwardRecorded = AbsF(this.passageForward.X) > 0.01 || AbsF(this.passageForward.Y) > 0.01;
+    if this.passageForwardRecorded {
+      this.passageForward = Vector4.Normalize2D(this.passageForward);
+      return;
+    };
     if NCTCServiceProfiles.TryGetPassageAfter(this.GetGameInstance(), this.requestedLine, this.passageAfterStopId, this.passageOrdinal + 1, nextPassage, ignoredRecordedForward) {
       onwardTarget = nextPassage;
     };
@@ -593,6 +677,24 @@ public class NCTCTransitSystem extends ScriptableSystem {
     } else {
       this.passageForward = new Vector4(0.00, 0.00, 0.00, 0.00);
     };
+  }
+
+  // Signed distance along the surveyed outgoing passage tangent. Negative is
+  // before the waypoint, positive is after it. Lateral is the cross-track
+  // error to keep an unrelated nearby road from triggering the handoff.
+  private func GetPassageProgress(out lateral: Float) -> Float {
+    let delta: Vector4;
+    let right: Vector4;
+    if !this.followingPassage || !IsDefined(this.controller) {
+      lateral = 9999.00;
+      return -9999.00;
+    };
+    delta = this.controller.GetWorldPosition() - this.passageTarget;
+    delta.Z = 0.00;
+    delta.W = 0.00;
+    right = new Vector4(-this.passageForward.Y, this.passageForward.X, 0.00, 0.00);
+    lateral = AbsF(Vector4.Dot(delta, right));
+    return Vector4.Dot(delta, this.passageForward);
   }
 
 
@@ -848,7 +950,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.dwellPolls = 0;
       this.legPolls = 0;
       this.driveCommandSent = this.controller.DriveToTraffic(this.GetTrafficTarget(), 0.00);
-      this.PublishLoopDiagnostic(this.driveCommandSent ? 32 : 33, this.requestedStopId);
+      this.PublishLoopDiagnostic(this.driveCommandSent ? (this.followingPassage ? 41 : 32) : 33, this.requestedStopId);
       this.ScheduleDispatch(0.25);
       return;
     };
@@ -857,7 +959,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.driveCommandSent = this.controller.DriveToTraffic(this.GetTrafficTarget(), 0.00);
       this.legPolls = 0;
       this.telemetryPolls = 0;
-      this.PublishLoopDiagnostic(29, this.requestedStopId);
+      this.PublishLoopDiagnostic(this.followingPassage ? 41 : 29, this.requestedStopId);
       this.ScheduleDispatch(0.25);
       return;
     };
@@ -870,11 +972,32 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.telemetryPolls = 0;
       this.PublishRouteCommandTelemetry();
     };
-    // A passage is reached without a service stop. Switch to the next passage
-    // or the final berth before the traffic controller settles into a dwell.
-    // New passage points use the same 13.7m target compensation as berths.
-    // The 10m compatibility radius is only for an old yaw-less passage.
-    if this.followingPassage && this.controller.IsNear(this.passageTarget, (AbsF(this.passageForward.X) > 0.01 || AbsF(this.passageForward.Y) > 0.01) ? 8.00 : 15.00) {
+    // r372n: cross the passage on one long outgoing-road command. Handoff is
+    // deliberately AFTER the waypoint, while the first command still has
+    // ~80 m of corridor ahead and the bus therefore retains normal throttle.
+    if this.followingPassage && this.passageForwardRecorded {
+      let passageLateral: Float;
+      let passageProgress: Float = this.GetPassageProgress(passageLateral);
+      if passageProgress >= 20.00 && passageLateral <= 12.00 {
+        let rollingSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
+        quests.SetFact(n"nctc_dev_passage_progress_mm", Cast<Int32>(passageProgress * 1000.00));
+        quests.SetFact(n"nctc_dev_passage_lateral_mm", Cast<Int32>(passageLateral * 1000.00));
+        quests.SetFact(n"nctc_dev_passage_handoff_speed_mm", Cast<Int32>(rollingSpeed * 1000.00));
+        if !this.AdvancePassageOrDestination() {
+          this.PublishLoopDiagnostic(34, 0);
+          this.ScheduleDispatch(1.00);
+          return;
+        };
+        this.legPolls = 0;
+        this.driveCommandSent = this.controller.DriveToTrafficAfterRollingPassage(this.GetTrafficTarget(), 0.00, rollingSpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 42 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.05);
+        return;
+      };
+    };
+    // Compatibility path for an old passage with no authored yaw. This keeps
+    // r371 behavior rather than inventing an outgoing road tangent.
+    if this.followingPassage && !this.passageForwardRecorded && this.controller.IsNear(this.passageTarget, 15.00) {
       this.controller.CancelTrafficRoute();
       if !this.AdvancePassageOrDestination() {
         this.PublishLoopDiagnostic(34, 0);
@@ -928,7 +1051,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.ScheduleDispatch(0.50);
       return;
     };
-    this.ScheduleDispatch(0.50);
+    this.ScheduleDispatch(this.followingPassage ? 0.10 : 0.50);
   }
 
   private func AdvanceToNextStop() -> Bool {
@@ -965,6 +1088,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.boardingDoorWasOpen = false;
     this.legPolls = 0;
     this.passageForward = new Vector4(0.00, 0.00, 0.00, 0.00);
+    this.passageForwardRecorded = false;
     this.followingPassage = NCTCServiceProfiles.TryGetPassageAfter(this.GetGameInstance(), this.requestedLine, previousStopId, 0, this.passageTarget, this.passageForward);
     this.passageAfterStopId = previousStopId;
     this.passageOrdinal = 0;
@@ -980,10 +1104,12 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if NCTCServiceProfiles.TryGetPassageAfter(this.GetGameInstance(), this.requestedLine, this.passageAfterStopId, nextOrdinal, nextPassage, this.passageForward) {
       this.passageOrdinal = nextOrdinal;
       this.passageTarget = nextPassage;
+      this.passageForwardRecorded = false;
       this.ResolvePassageForward();
       return true;
     };
     this.followingPassage = false;
+    this.passageForwardRecorded = false;
     return true;
   }
 

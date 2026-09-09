@@ -15,6 +15,9 @@ local DELETE_RADIUS_METRES = 25.0
 -- Two stops on the same service this close are an authoring mistake, not a
 -- transfer: transfers only exist between different lines.
 local SAME_LINE_DUPLICATE_RADIUS_METRES = 10.0
+-- Re-recording the same pass-through point updates it instead of creating a
+-- second handoff a few metres later.
+local PASSAGE_DUPLICATE_RADIUS_METRES = 4.0
 
 local last_event_id = -1
 local next_sync_time = 0
@@ -35,9 +38,12 @@ local last_service_crime_suppressed_id = 0
 local last_service_calm_reaction_id = 0
 local last_sequence_probe_id = 0
 local last_profile_probe_id = 0
+local last_build_revision = -1
+local last_stale_drive_callback_id = 0
 local fact
 local deduplicate_same_line_stops
 local normalize_captures
+local normalize_passages
 local remove_orphan_captures
 local ensure_stop_ids
 local join_or_create_hub
@@ -184,6 +190,7 @@ local function load_network()
     end
   end
   local duplicates_merged = deduplicate_same_line_stops(network)
+  local passages_normalized = normalize_passages(network)
   local orphan_captures_removed = remove_orphan_captures(network)
   local captures_normalized = normalize_captures(network)
   local colors_migrated = false
@@ -196,11 +203,12 @@ local function load_network()
     end
   end
   network.revision = network.revision or 1
-  if colors_migrated or duplicates_merged or orphan_captures_removed or captures_normalized or stop_ids_assigned or capture_ids_assigned then
+  if colors_migrated or duplicates_merged or passages_normalized or orphan_captures_removed or captures_normalized or stop_ids_assigned or capture_ids_assigned then
     network.revision = network.revision + 1
     write_network(network)
     if colors_migrated then log("migrated legacy line colours into active network") end
     if duplicates_merged then log("normalized same-line duplicate stops in active network") end
+    if passages_normalized then log("merged near-identical duplicate passage points in active network") end
     if captures_normalized then log("merged legacy duplicate survey captures") end
     if orphan_captures_removed then log("removed survey captures belonging to deleted stops") end
     if stop_ids_assigned then log("assigned stable IDs to survey stops") end
@@ -265,6 +273,35 @@ end
 local function distance_squared(a, b)
   local x, y, z = a.x - b.x, a.y - b.y, a.z - b.z
   return x * x + y * y + z * z
+end
+
+normalize_passages = function(network)
+  local source = network.passages or {}
+  local merged = {}
+  local changed = false
+  local radius_squared = PASSAGE_DUPLICATE_RADIUS_METRES * PASSAGE_DUPLICATE_RADIUS_METRES
+  for _, passage in ipairs(source) do
+    local duplicate_index = nil
+    if passage.position then
+      for index, existing in ipairs(merged) do
+        if existing.line == passage.line
+          and existing.afterStopId == passage.afterStopId
+          and existing.position
+          and distance_squared(existing.position, passage.position) <= radius_squared then
+          duplicate_index = index
+          break
+        end
+      end
+    end
+    if duplicate_index then
+      merged[duplicate_index] = passage
+      changed = true
+    else
+      table.insert(merged, passage)
+    end
+  end
+  if changed then network.passages = merged end
+  return changed
 end
 
 local function next_sequence(network, line)
@@ -582,6 +619,21 @@ local function add_passage_after_selected(network, line, after_index, position, 
   local target, count = selected_stop(network, line, after_index)
   if not target then return false, count end
   network.passages = network.passages or {}
+
+  local radius_squared = PASSAGE_DUPLICATE_RADIUS_METRES * PASSAGE_DUPLICATE_RADIUS_METRES
+  for _, passage in ipairs(network.passages) do
+    if passage.line == line
+      and passage.afterStopId == target.id
+      and passage.position
+      and distance_squared(passage.position, position) <= radius_squared then
+      passage.eventId = event_id
+      passage.afterSequence = target.sequence or after_index
+      passage.position = copy_position(position)
+      passage.yaw = yaw
+      return true, count
+    end
+  end
+
   table.insert(network.passages, {
     id = "passage-" .. tostring(event_id),
     eventId = event_id,
@@ -1052,10 +1104,12 @@ local function log_service_loop(quests)
     [35] = "route loop: active drive command failed before arrival",
     [36] = "route loop: native command telemetry",
     [37] = "route loop: bus manually despawned",
-    [38] = "route loop: native stop detected; forward berth correction sent"
+    [38] = "route loop: native stop detected; forward berth correction sent",
+    [41] = "route loop: r372n outgoing corridor armed",
+    [42] = "route loop: r372n rolling post-passage handoff"
   }
   local command_extra = ""
-  if code == 29 or code == 31 or code == 32 then
+  if code == 29 or code == 31 or code == 32 or code == 41 then
     local speed_profiles = { [0] = "fallback/manual", [1] = "dense-city", [2] = "city", [3] = "outer-city", [4] = "badlands" }
     local profile_code = fact(quests, "nctc_dev_command_speed_profile")
     command_extra = " minDistance=" .. string.format("%.2fm", fact(quests, "nctc_dev_command_minimum_distance_mm") / 1000.0)
@@ -1080,6 +1134,14 @@ local function log_service_loop(quests)
       fact(quests, "nctc_dev_correction_target_x_mm") / 1000.0,
       fact(quests, "nctc_dev_correction_target_y_mm") / 1000.0,
       fact(quests, "nctc_dev_correction_target_z_mm") / 1000.0)
+  end
+  if code == 42 then
+    command_extra = " progress=" .. string.format("%.1fm", fact(quests, "nctc_dev_passage_progress_mm") / 1000.0)
+      .. " lateral=" .. string.format("%.1fm", fact(quests, "nctc_dev_passage_lateral_mm") / 1000.0)
+      .. " entrySpeed=" .. string.format("%.2f", fact(quests, "nctc_dev_passage_handoff_speed_mm") / 1000.0)
+      .. " forcedStartSpeed=" .. string.format("%.2f", fact(quests, "nctc_dev_command_forced_start_speed_mm") / 1000.0)
+      .. " generation=" .. tostring(fact(quests, "nctc_dev_drive_generation"))
+      .. string.format(" aiTarget=(%.3f, %.3f, %.3f)", ai_target_x, ai_target_y, ai_target_z)
   end
   local session = fact(quests, "nctc_dev_service_session")
   log("service #" .. tostring(session) .. " loop " .. tostring(id) .. ": L" .. tostring(line) .. " currentStopId=" .. tostring(stop_id)
@@ -1123,6 +1185,27 @@ local function log_service_calm_reaction(quests)
   log("service calm #" .. tostring(id) .. ": reaction downgraded; NCTC panic/flee suppressed")
 end
 
+local function log_stale_drive_callback(quests)
+  local id = fact(quests, "nctc_dev_stale_drive_callback_id")
+  if id < last_stale_drive_callback_id then last_stale_drive_callback_id = id - 1 end
+  if id <= last_stale_drive_callback_id then return end
+  last_stale_drive_callback_id = id
+  log("stale deferred drive callback rejected | staleGeneration="
+    .. tostring(fact(quests, "nctc_dev_stale_drive_generation"))
+    .. " currentGeneration=" .. tostring(fact(quests, "nctc_dev_drive_generation")))
+end
+
+local function log_build_revision(quests)
+  local revision = fact(quests, "nctc_dev_build_revision")
+  if revision <= 0 or revision == last_build_revision then return end
+  last_build_revision = revision
+  if revision == 37214 then
+    log("NCTC runtime build=37214 r372n generation-safe rolling handoff")
+  else
+    log("NCTC runtime build=" .. tostring(revision))
+  end
+end
+
 registerForEvent("onUpdate", function()
   local quests = Game.GetQuestsSystem()
   if not quests then return end
@@ -1130,6 +1213,8 @@ registerForEvent("onUpdate", function()
     runtime_announced = true
     print("[NCTC Survey] Runtime active; external path: " .. tostring(NETWORK_FILE))
   end
+  log_build_revision(quests)
+  log_stale_drive_callback(quests)
   log_dispatch_attempt(quests)
   log_service_loop(quests)
   log_native_command_event(quests)

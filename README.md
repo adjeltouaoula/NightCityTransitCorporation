@@ -23,3 +23,19 @@ and 72. Fast-travel terminals and NCART stations are practical anchors where
    inbound traffic lane.
 3. Create the physical NCTC terminals.
 4. Implement lines one at a time.
+
+## Dev test r372n — generation-safe rolling passage handoff
+
+This experimental build is reset from the r371 calm/adaptive-speed baseline and
+reapplies only the rolling-passage experiment plus two safeguards discovered
+from the r372m telemetry:
+
+- near-identical passage points on the same leg are merged on load;
+- re-recording the same passage updates it rather than appending a duplicate;
+- every deferred native drive command carries a monotonically increasing
+  generation; callbacks from older route decisions are rejected before
+  `SendCommand` can run;
+- the outgoing 100 m corridor and +20 m rolling handoff remain unchanged so
+  this test isolates command ownership rather than changing geometry again.
+
+Runtime marker: `NCTC runtime build=37214 r372n generation-safe rolling handoff`.
