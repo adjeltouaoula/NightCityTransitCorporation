@@ -29,9 +29,15 @@ public class NCTCBusDisplayController extends inkGameController {
   private let stopText: ref<inkText>;
   private let lineOnly: Bool;
   private let probe: Bool;
+  private let displayedStopName: String;
+  private let hasDisplayedStop: Bool;
 
   protected cb func OnInitialize() -> Bool {
     let background: ref<inkRectangle>;
+    let arrow: ref<inkRectangle>;
+    let arrowRow: Int32;
+    let arrowWidth: Float;
+    let headerStop: ref<inkText>;
     let root: ref<inkCompoundWidget> = this.GetRootWidget() as inkCompoundWidget;
     this.bus = this.GetOwnerEntity() as VehicleObject;
     // This widget is embedded only in the dedicated NCTC entity template.
@@ -58,8 +64,29 @@ public class NCTCBusDisplayController extends inkGameController {
       background.SetTintColor(new HDRColor(0.005, 0.005, 0.005, 1.00));
       background.Reparent(root);
       this.headerText = this.CreateLabel(root, 44, 0.00, 116.00);
-      this.headerText.SetSize(new Vector2(292.00, 116.00));
+      this.headerText.SetSize(new Vector2(112.00, 116.00));
+      this.headerText.SetMargin(new inkMargin(20.00, 0.00, 0.00, 0.00));
+      this.headerText.SetText("NEXT");
       this.headerText.SetTintColor(new HDRColor(2.92, 0.56, 0.56, 1.00));
+      // Rasterize a filled right-pointing triangle at canvas resolution.
+      // Bare inkShape vertexList did not render in the world-widget target.
+      // These static rows use the same verified primitive as the background.
+      arrowRow = 0;
+      while arrowRow < 28 {
+        arrowWidth = 26.00 * (1.00 - AbsF((Cast<Float>(arrowRow) + 0.50 - 14.00) / 14.00));
+        arrow = new inkRectangle();
+        arrow.SetName(n"NCTCNextStopTriangleRow");
+        arrow.SetSize(new Vector2(arrowWidth, 1.00));
+        arrow.SetMargin(new inkMargin(132.00, 44.00 + Cast<Float>(arrowRow), 0.00, 0.00));
+        arrow.SetTintColor(new HDRColor(2.92, 0.56, 0.56, 1.00));
+        arrow.Reparent(root);
+        arrowRow += 1;
+      };
+      headerStop = this.CreateLabel(root, 44, 0.00, 116.00);
+      headerStop.SetSize(new Vector2(120.00, 116.00));
+      headerStop.SetMargin(new inkMargin(158.00, 0.00, 0.00, 0.00));
+      headerStop.SetText("STOP");
+      headerStop.SetTintColor(new HDRColor(2.92, 0.56, 0.56, 1.00));
       this.stopText = this.CreateLabel(root, 100, 0.00, 116.00);
       this.stopText.SetMargin(new inkMargin(312.00, 0.00, 12.00, 0.00));
       this.stopText.SetSize(new Vector2(700.00, 116.00));
@@ -150,8 +177,14 @@ public class NCTCBusDisplayController extends inkGameController {
       this.lineText.SetText(line > 0 ? ToString(line) : "—");
     };
     if !this.lineOnly {
-      if IsDefined(this.headerText) { this.headerText.SetText("NEXT  >  STOP"); };
-      this.stopText.SetText(name);
+      if this.probe && IsDefined(this.headerText) { this.headerText.SetText("NEXT STOP"); };
+      // SetText can restart AutoScroll. Arrival/request notifications must not
+      // reset an unchanged destination; tint updates remain independent.
+      if !this.hasDisplayedStop || NotEquals(this.displayedStopName, name) {
+        this.stopText.SetText(name);
+        this.displayedStopName = name;
+        this.hasDisplayedStop = true;
+      };
       this.stopText.SetTintColor(Equals(this.quests.GetFact(n"nctc_display_stop_requested"), 1)
         ? new HDRColor(1.00, 0.55, 0.10, 1.00) : (this.probe ? new HDRColor(1.00, 1.00, 1.00, 1.00) : new HDRColor(2.92, 0.56, 0.56, 1.00)));
     };
