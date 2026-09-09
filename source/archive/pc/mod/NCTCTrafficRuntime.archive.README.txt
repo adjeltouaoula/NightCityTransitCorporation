@@ -1,0 +1,6 @@
+NCTCTrafficRuntime.archive is a required standalone runtime resource for NCTC service-bus traffic driving.
+
+Validated SHA-256:
+98701118d1f5a4da6ac47ca070300ec607012ccad51e91406fb657b034736a7d
+
+The binary archive itself is required by tools/package.ps1. Builds must fail rather than silently package without it.
