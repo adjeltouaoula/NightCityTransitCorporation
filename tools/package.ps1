@@ -22,12 +22,22 @@ Get-ChildItem -LiteralPath $distRoot -Filter "NightCityTransitCorporation-*.zip"
 }
 Copy-Item -Path (Join-Path $projectRoot "source\redscript\NCTC\*.reds") -Destination (Join-Path $stageRoot "r6\scripts\NCTC")
 Copy-Item -Path (Join-Path $projectRoot "source\tweaks\NCTC\*.yaml") -Destination (Join-Path $stageRoot "r6\tweaks\NCTC")
-# Experimental vehicle-physics archives remain excluded until their collision
-# setup is proven safe and useful.
+
+# Required native traffic behavior. Every validated autonomous-service build
+# (r371 through r372n) shipped this archive. Without it DriveToPoint commands
+# can remain Active while the Mahir never moves, so packaging must fail rather
+# than silently produce an immobile service bus.
+$trafficRuntimeArchive = Join-Path $projectRoot "source\archive\pc\mod\NCTCTrafficRuntime.archive"
+if (!(Test-Path -LiteralPath $trafficRuntimeArchive)) {
+    throw 'Missing required source\archive\pc\mod\NCTCTrafficRuntime.archive.'
+}
+New-Item -ItemType Directory -Force (Join-Path $stageRoot "archive\pc\mod") | Out-Null
+Copy-Item -LiteralPath $trafficRuntimeArchive -Destination (Join-Path $stageRoot "archive\pc\mod\NCTCTrafficRuntime.archive")
+
+# Other experimental vehicle/display archives remain opt-in until validated.
 if ($IncludeDisplayPrototype) {
     $displayArchive = Join-Path $projectRoot 'tmp\NCTCDisplayPrototype.archive'
     if (!(Test-Path -LiteralPath $displayArchive)) { throw 'Generate the display widget and bus archive first.' }
-    New-Item -ItemType Directory -Force (Join-Path $stageRoot 'archive\pc\mod') | Out-Null
     Copy-Item -LiteralPath $displayArchive -Destination (Join-Path $stageRoot 'archive\pc\mod\NCTCDisplayPrototype.archive')
 }
 if ($IncludeSurveyRuntime -and (Test-Path -LiteralPath (Join-Path $projectRoot "source\cet\nctc_survey\init.lua"))) {
