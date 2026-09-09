@@ -37,6 +37,8 @@ public class NCTCStopMappinData extends MappinScriptData {
   public let anchorLocKey: String;
   public let serviceLines: array<String>;
   public let serviceStops: array<String>;
+  public let serviceStopIndices: array<Int32>;
+  public let serviceEnabled: array<Bool>;
   public let isHub: Bool;
   public let color: Int32;
   public let serviceColors: array<Int32>;
@@ -312,6 +314,18 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
     return this.GetExternalStops();
   }
 
+  public func GetMapLines(out lines: array<String>, out colors: array<Int32>) -> Void {
+    let stops: array<NCTCStopDefinition> = this.GetNetworkStops();
+    let index: Int32 = 0;
+    while index < ArraySize(stops) {
+      if !ArrayContains(lines, stops[index].line) {
+        ArrayPush(lines, stops[index].line);
+        ArrayPush(colors, stops[index].color);
+      };
+      index += 1;
+    };
+  }
+
   private func GetExternalStopName(stopId: Int32) -> String {
     let stops: array<NCTCStopDefinition> = this.GetNetworkStops();
     let index: Int32 = 0;
@@ -481,6 +495,12 @@ public class NCTCMapMarkerSystem extends ScriptableSystem {
       markerData.anchorLocKey = anchorLocKeys[index];
       markerData.serviceLines = hubServiceLines[index];
       markerData.serviceStops = hubServiceStops[index];
+      markerData.serviceStopIndices = hubServiceStopIndices[index];
+      stopIndex = 0;
+      while stopIndex < ArraySize(markerData.serviceLines) {
+        ArrayPush(markerData.serviceEnabled, true);
+        stopIndex += 1;
+      };
       markerData.serviceColors = hubServiceColors[index];
       markerData.isHub = counts[index] > 1;
       markerData.line = lines[index];
