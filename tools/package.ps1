@@ -39,12 +39,17 @@ if ($trafficRuntimeSha256 -ne $expectedTrafficRuntimeSha256) {
 New-Item -ItemType Directory -Force (Join-Path $stageRoot "archive\pc\mod") | Out-Null
 Copy-Item -LiteralPath $trafficRuntimeArchive -Destination (Join-Path $stageRoot "archive\pc\mod\NCTCTrafficRuntime.archive")
 
-# Other experimental vehicle/display archives remain opt-in until validated.
-if ($IncludeDisplayPrototype) {
-    $displayArchive = Join-Path $projectRoot 'tmp\NCTCDisplayPrototype.archive'
-    if (!(Test-Path -LiteralPath $displayArchive)) { throw 'Generate the display widget and bus archive first.' }
-    Copy-Item -LiteralPath $displayArchive -Destination (Join-Path $stageRoot 'archive\pc\mod\NCTCDisplayPrototype.archive')
+# The dynamic route/line display is now part of the development baseline.
+# nctc_service_bus.yaml points at nctc\vehicles\mahir_display.ent, so silently
+# packaging without the generated display archive would produce a broken bus.
+# Keep the legacy switch parameter for existing local commands, but every
+# development package now requires and ships the display archive.
+$displayArchive = Join-Path $projectRoot 'tmp\NCTCDisplayPrototype.archive'
+if (!(Test-Path -LiteralPath $displayArchive)) {
+    throw 'Missing tmp\NCTCDisplayPrototype.archive. Generate the validated dynamic display assets before packaging.'
 }
+Copy-Item -LiteralPath $displayArchive -Destination (Join-Path $stageRoot 'archive\pc\mod\NCTCDisplayPrototype.archive')
+
 if ($IncludeSurveyRuntime -and (Test-Path -LiteralPath (Join-Path $projectRoot "source\cet\nctc_survey\init.lua"))) {
     New-Item -ItemType Directory -Force (Join-Path $stageRoot "bin\x64\plugins\cyber_engine_tweaks\mods\nctc_survey") | Out-Null
     Copy-Item -Path (Join-Path $projectRoot "source\cet\nctc_survey\*") -Destination (Join-Path $stageRoot "bin\x64\plugins\cyber_engine_tweaks\mods\nctc_survey")
