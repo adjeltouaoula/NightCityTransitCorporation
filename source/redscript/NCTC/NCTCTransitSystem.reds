@@ -134,7 +134,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37408);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37409);
     return true;
   }
 
@@ -763,7 +763,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
   // At H2/Cannery the road center is ~4-5 m outside the bay; r373/r374g tried
   // to erase that full lateral error in only ~10-15 m, forcing the long Mahir
   // into a sharp S-turn. First remove only 30% of the captured road offset,
-  // then let the long corridor command remove the rest over ~28 m.
+  // then let the continuous corridor command remove the rest over roughly 22-26 m.
   private func GetBerthEntryTarget() -> Vector4 {
     let forward: Vector4 = this.GetBerthForward();
     let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
@@ -773,7 +773,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
   }
 
   private func GetBerthCorridorTarget() -> Vector4 {
-    return this.GetServiceBerth() + this.GetBerthForward() * 10.00;
+    return this.GetServiceBerth() + this.GetBerthForward() * 4.00;
   }
 
   // r374g: braking target on the current road line. Preserve the signed
@@ -1270,7 +1270,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     };
 
     // Stage 1: after the shallow partial merge, aim far beyond the berth.
-    // The remaining lateral correction now has ~28 m to happen progressively.
+    // The remaining lateral correction still has roughly 22-26 m to happen progressively.
     if this.berthManeuverActive && Equals(this.berthManeuverStage, 1)
       && this.controller.IsNear(this.GetBerthEntryTarget(), 4.00) {
       this.berthManeuverStage = 2;
@@ -1281,22 +1281,11 @@ public class NCTCTransitSystem extends ScriptableSystem {
       return;
     };
 
-    // Stage 2: after the Mahir is committed to the berth corridor and the real
-    // berth is only ~10 m ahead, replace the beyond-berth pull with the actual
-    // stop point. The final command is now nearly straight, avoiding the
-    // diagonal/echelon parking seen in r373d.
-    if this.berthManeuverActive && Equals(this.berthManeuverStage, 2) {
-      let berthLateral: Float;
-      let berthLongitudinal: Float = this.GetBerthProgress(berthLateral);
-      if berthLongitudinal <= 10.00 && berthLongitudinal >= 0.50 && berthLateral <= 5.00 {
-        this.berthManeuverStage = 3;
-        this.legPolls = 0;
-        this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetServiceBerth(), AbsF(this.controller.GetCurrentSpeed()));
-        this.PublishLoopDiagnostic(this.driveCommandSent ? 45 : 33, this.requestedStopId);
-        this.ScheduleDispatch(0.05);
-        return;
-      };
-    };
+    // r374i: keep the stage-2 corridor command alive through arrival.
+    // r374h used to cancel it around 8-10 m from the berth and issue a new
+    // direct command to the exact berth. That extra native command lifecycle
+    // could visibly snap/reposition the long Mahir. The +4 m corridor target
+    // now remains authoritative until the normal 7 m stopped-near check below.
     // The AI target is offset beyond the berth. Service remains tied to the
     // real berth, where the Mahir pivot settles in one continuous approach.
     if this.controller.IsStoppedNear(this.GetServiceBerth(), 7.00) {

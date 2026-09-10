@@ -1115,8 +1115,8 @@ local function log_service_loop(quests)
     [41] = "route loop: r372n outgoing corridor armed",
     [42] = "route loop: r372n rolling post-passage handoff",
     [43] = "route loop: r374h shallow bay MERGE command sent",
-    [44] = "route loop: r373 berth CORRIDOR command sent",
-    [45] = "route loop: r373 final BERTH command sent",
+    [44] = "route loop: r374i continuous berth CORRIDOR command sent",
+    [45] = "route loop: legacy final BERTH command sent (unexpected in r374i)",
     [46] = "route loop: r374b rolling slow traffic handoff",
     [47] = "route loop: r374g road brake armed before ENTRY"
   }
@@ -1219,7 +1219,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37408 then
+  if revision == 37409 then
+    log("NCTC runtime build=37409 r374i continuous corridor, no final berth retarget")
+  elseif revision == 37408 then
     log("NCTC runtime build=37408 r374h progressive shallow berth merge on development")
   elseif revision == 37407 then
     log("NCTC runtime build=37407 r374g road brake before entry")
