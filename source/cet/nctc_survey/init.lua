@@ -1076,6 +1076,13 @@ local function log_service_loop(quests)
   local berth_longitudinal = fact(quests, "nctc_dev_loop_berth_longitudinal_mm") / 1000.0
   local berth_lateral = fact(quests, "nctc_dev_loop_berth_lateral_mm") / 1000.0
   local berth_speed = fact(quests, "nctc_dev_loop_berth_speed_mm") / 1000.0
+  local berth_stage = fact(quests, "nctc_dev_loop_berth_stage")
+  local berth_active = fact(quests, "nctc_dev_loop_berth_active")
+  local berth_heading_dot = fact(quests, "nctc_dev_loop_berth_heading_dot_x1000") / 1000.0
+  local berth_merge_lateral = fact(quests, "nctc_dev_loop_berth_merge_lateral_mm") / 1000.0
+  local berth_active_target_x = fact(quests, "nctc_dev_loop_berth_active_target_x_mm") / 1000.0
+  local berth_active_target_y = fact(quests, "nctc_dev_loop_berth_active_target_y_mm") / 1000.0
+  local berth_active_target_z = fact(quests, "nctc_dev_loop_berth_active_target_z_mm") / 1000.0
   local dwell_polls = fact(quests, "nctc_dev_loop_dwell_polls")
   local player_aboard = fact(quests, "nctc_dev_loop_player_aboard")
   local mount_request = fact(quests, "nctc_dev_loop_mount_request")
@@ -1106,10 +1113,15 @@ local function log_service_loop(quests)
     [37] = "route loop: bus manually despawned",
     [38] = "route loop: native stop detected; forward berth correction sent",
     [41] = "route loop: r372n outgoing corridor armed",
-    [42] = "route loop: r372n rolling post-passage handoff"
+    [42] = "route loop: r372n rolling post-passage handoff",
+    [43] = "route loop: r374h shallow bay MERGE command sent",
+    [44] = "route loop: r373 berth CORRIDOR command sent",
+    [45] = "route loop: r373 final BERTH command sent",
+    [46] = "route loop: r374b rolling slow traffic handoff",
+    [47] = "route loop: r374g road brake armed before ENTRY"
   }
   local command_extra = ""
-  if code == 29 or code == 31 or code == 32 or code == 41 then
+  if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then
     local speed_profiles = { [0] = "fallback/manual", [1] = "dense-city", [2] = "city", [3] = "outer-city", [4] = "badlands" }
     local profile_code = fact(quests, "nctc_dev_command_speed_profile")
     command_extra = " minDistance=" .. string.format("%.2fm", fact(quests, "nctc_dev_command_minimum_distance_mm") / 1000.0)
@@ -1142,6 +1154,14 @@ local function log_service_loop(quests)
       .. " forcedStartSpeed=" .. string.format("%.2f", fact(quests, "nctc_dev_command_forced_start_speed_mm") / 1000.0)
       .. " generation=" .. tostring(fact(quests, "nctc_dev_drive_generation"))
       .. string.format(" aiTarget=(%.3f, %.3f, %.3f)", ai_target_x, ai_target_y, ai_target_z)
+  end
+  if berth_active == 1 or code == 43 or code == 44 or code == 45 then
+    command_extra = command_extra
+      .. " bayStage=" .. tostring(berth_stage)
+      .. " headingDot=" .. string.format("%.3f", berth_heading_dot)
+      .. " mergeLat=" .. string.format("%.2fm", berth_merge_lateral)
+      .. string.format(" activeTarget=(%.3f, %.3f, %.3f)",
+        berth_active_target_x, berth_active_target_y, berth_active_target_z)
   end
   local session = fact(quests, "nctc_dev_service_session")
   log("service #" .. tostring(session) .. " loop " .. tostring(id) .. ": L" .. tostring(line) .. " currentStopId=" .. tostring(stop_id)
@@ -1199,7 +1219,25 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37218 then
+  if revision == 37408 then
+    log("NCTC runtime build=37408 r374h progressive shallow berth merge on development")
+  elseif revision == 37407 then
+    log("NCTC runtime build=37407 r374g road brake before entry")
+  elseif revision == 37406 then
+    log("NCTC runtime build=37406 r374f real traffic maxSpeed approach cap")
+  elseif revision == 37405 then
+    log("NCTC runtime build=37405 r374e approach slowdown no forced start")
+  elseif revision == 37404 then
+    log("NCTC runtime build=37404 r374d rolling approach 7ms")
+  elseif revision == 37402 then
+    log("NCTC runtime build=37402 r374b rolling approach slowdown")
+  elseif revision == 37308 then
+    log("NCTC runtime build=37308 r373h service-stop-only berth gate")
+  elseif revision == 37307 then
+    log("NCTC runtime build=37307 r373g berth maneuver telemetry")
+  elseif revision == 37306 then
+    log("NCTC runtime build=37306 r373f rebased berth corridor rolling-entry guard")
+  elseif revision == 37218 then
     log("NCTC runtime build=37218 r372r display regression rollback")
   elseif revision == 37217 then
     log("NCTC runtime build=37217 r372q vanilla arrival telemetry compile guard")
