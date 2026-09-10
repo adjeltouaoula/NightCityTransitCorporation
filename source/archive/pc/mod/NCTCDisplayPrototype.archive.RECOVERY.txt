@@ -1,3 +1,6 @@
-Recovered from the validated r374h test package on 2026-09-10.
-The binary NCTCDisplayPrototype.archive is intentionally versioned alongside NCTCTrafficRuntime.archive so development branches and clean clones do not depend on tmp/ state.
-Expected SHA-256: e2083bc777c3a1cbf21f401be82dca2b5fed33bfcdb2749ad7a84d3bb0411591
+Restored from the validated NightCityTransitCorporation-0.3.0-devkit-display-stops-and-lines build on 2026-09-10.
+This is the exact NCTCDisplayPrototype.archive from the known-good build where the Mahir external route/stop displays had the validated placement and orientation.
+Expected size: 1613824 bytes
+Expected SHA-256: 09a8fb10c2e027b2250c1ec647f8c3d466129bea907f5421771795093ae37d0a
+Expected Git blob SHA-1: 2ab2e52c5d287caa2b08c8e1354ec35c33010b68
+Do not replace this archive with a generated/prototype archive unless the replacement has been validated in-game.
