@@ -1198,14 +1198,14 @@ local function log_service_loop(quests)
     [52] = "route loop: r374w ROLLING EXIT ATTACK",
     [53] = "route loop: r374w 3-to-1 rolling REJOIN",
     [54] = "route loop: r374w direct departure stall recovery",
-    [60] = "route loop: r375a bay entry ray",
-    [61] = "route loop: r375a final parking target",
-    [62] = "route loop: r375a parked in bay",
-    [63] = "route loop: r375a bay exit/rejoin",
-    [64] = "route loop: r375a intermediate bay skipped",
-    [65] = "route loop: r375a entry retry",
-    [66] = "route loop: r375a parking retry",
-    [67] = "route loop: r375a exit retry"
+    [60] = "route loop: r375b bay entry ray",
+    [61] = "route loop: r375b early progress parking target",
+    [62] = "route loop: r375b physically parked in bay",
+    [63] = "route loop: r375b bay exit/rejoin",
+    [64] = "route loop: r375b intermediate bay skipped",
+    [65] = "route loop: r375b entry retry",
+    [66] = "route loop: r375b one-shot parking correction",
+    [67] = "route loop: r375b exit retry"
   }
   local command_extra = ""
   if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then
@@ -1251,7 +1251,8 @@ local function log_service_loop(quests)
       .. " departureProgress=" .. string.format("%.1fm", fact(quests, "nctc_dev_departure_progress_mm") / 1000.0)
       .. " departureSpeed=" .. string.format("%.2f", fact(quests, "nctc_dev_departure_speed_mm") / 1000.0)
   end
-  if code == 29 or code == 30 or code == 36 or code == 43 or code == 47 or code == 48 or code == 49 or code == 50 or code == 51 or code == 52 or code == 53 or code == 54 then
+  if code == 29 or code == 30 or code == 36 or code == 43 or code == 47 or code == 48 or code == 49 or code == 50 or code == 51 or code == 52 or code == 53 or code == 54
+    or code == 60 or code == 61 or code == 62 or code == 63 or code == 64 or code == 65 or code == 66 or code == 67 then
     command_extra = command_extra
       .. " hasBay=" .. tostring(has_bay)
       .. " bayLen=" .. string.format("%.2fm", bay_length)
@@ -1345,7 +1346,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37501 then
+  if revision == 37502 then
+    log("NCTC runtime build=37502 r375b early-progress parking + physical bay arrival")
+  elseif revision == 37501 then
     log("NCTC runtime build=37501 r375a fresh bay parking reset")
   elseif revision == 37422 then
     log("NCTC runtime build=37422 r374v calibrated narrow-bay geometry + departure recovery")

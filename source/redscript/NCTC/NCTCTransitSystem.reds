@@ -136,7 +136,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37501);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37502);
     return true;
   }
 
@@ -1439,13 +1439,16 @@ public class NCTCTransitSystem extends ScriptableSystem {
       let widthTolerance: Float = ClampF(this.GetBayWidth() * 0.75, 1.80, 2.60);
       if bayProgress >= 0.00 { this.bayParkingWasEntered = true; };
 
-      // STOP: once the front half has genuinely entered and converged toward
-      // the centreline, replace the long ray exactly once with the final berth.
+      // r375b: the r375a log proved that waiting for lateral convergence makes
+      // the switch happen at 60% on H2, after P2 on Cannery, and never at all
+      // on Delamain. P1/P2 already give us a trustworthy longitudinal frame,
+      // so begin braking at a fixed early progress and let the final target
+      // pull the remaining lateral error out while there is still road length.
       if Equals(this.bayParkingStage, 1) {
-        if bayProgress >= bayLength * 0.25 && AbsF(bayLateral) <= widthTolerance {
+        if bayProgress >= bayLength * 0.22 {
           this.bayParkingStage = 2;
           this.bayParkingRetryCount = 0;
-          this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetServiceBerth(), MaxF(MinF(currentSpeed, 3.50), 1.50), 3.50);
+          this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetServiceBerth(), MaxF(MinF(currentSpeed, 3.00), 1.25), 3.00);
           this.PublishLoopDiagnostic(this.driveCommandSent ? 61 : 33, this.requestedStopId);
           this.ScheduleDispatch(0.10);
           return;
@@ -1460,8 +1463,14 @@ public class NCTCTransitSystem extends ScriptableSystem {
       };
 
       if Equals(this.bayParkingStage, 2) {
-        if this.controller.IsStoppedNear(this.GetServiceBerth(), 4.50)
-          || (this.controller.IsRouteCommandSuccessful() && this.controller.IsNear(this.GetServiceBerth(), 6.00)) {
+        // Parking is a PHYSICAL bay state, not an exact-point state. r375a H2
+        // stopped straight and safely inside P1/P2 but 9.2 m beyond the 65%
+        // reference, so a 4.5/6 m radius could never finish the maneuver.
+        let parkedInsideBay: Bool = currentSpeed <= 0.50
+          && bayProgress >= bayLength * 0.35
+          && bayProgress <= bayLength + 1.50
+          && AbsF(bayLateral) <= ClampF(this.GetBayWidth() * 1.20, 2.50, 4.00);
+        if parkedInsideBay {
           this.controller.ArriveAtStop();
           this.arrived = true;
           this.bayParkingActive = false;
@@ -1474,9 +1483,13 @@ public class NCTCTransitSystem extends ScriptableSystem {
           this.ScheduleDispatch(0.25);
           return;
         };
-        if this.controller.IsRouteCommandFailed() && this.bayParkingRetryCount < 1 {
+        // If the native command has already settled outside the physical bay,
+        // allow one slow correction. Never spin indefinitely around the point.
+        if (this.controller.IsRouteCommandFailed()
+          || (this.controller.IsRouteCommandSuccessful() && currentSpeed <= 0.50))
+          && this.bayParkingRetryCount < 1 {
           this.bayParkingRetryCount += 1;
-          this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetServiceBerth(), 1.50, 3.00);
+          this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetServiceBerth(), 1.00, 2.00);
           this.PublishLoopDiagnostic(this.driveCommandSent ? 66 : 33, this.requestedStopId);
         };
         this.ScheduleDispatch(0.10);
