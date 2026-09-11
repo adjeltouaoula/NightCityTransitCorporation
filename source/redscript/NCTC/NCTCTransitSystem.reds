@@ -134,7 +134,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37416);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37417);
     return true;
   }
 
@@ -844,7 +844,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.departureStart = this.controller.GetWorldPosition();
     this.departureForward = forward;
     this.departureExitPoint = this.GetBayExitPoint();
-    this.departureRoadTarget = this.departureExitPoint + forward * 8.00;
+    this.departureRoadTarget = this.departureExitPoint + forward * 2.00;
     this.departureManeuverActive = true;
     if IsDefined(quests) {
       quests.SetFact(n"nctc_dev_departure_target_x_mm", Cast<Int32>(this.departureRoadTarget.X * 1000.00));
@@ -959,7 +959,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private func PublishBerthOccupancyProbe(quests: ref<QuestsSystem>) -> Void {
     let entry: Vector4; let exit: Vector4; let center: Vector4; let forward: Vector4; let halfLength: Float;
     if !IsDefined(quests) { return; };
-    if this.serviceStopId <= 0 || !this.HasServiceBay() {
+    if this.requestedStopId <= 0 || !this.HasServiceBay() {
       quests.SetFact(n"nctc_dev_service_berth_stop_id", 0);
       quests.SetFact(n"nctc_dev_service_bay_half_length_mm", 0);
       return;
@@ -967,7 +967,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     entry = this.GetBayEntryPoint(); exit = this.GetBayExitPoint();
     center = entry + (exit - entry) * 0.50; forward = this.GetBayForward();
     halfLength = Vector4.Distance(entry, exit) * 0.50;
-    quests.SetFact(n"nctc_dev_service_berth_stop_id", this.serviceStopId);
+    quests.SetFact(n"nctc_dev_service_berth_stop_id", this.requestedStopId);
     quests.SetFact(n"nctc_dev_service_berth_x_mm", Cast<Int32>(center.X * 1000.00));
     quests.SetFact(n"nctc_dev_service_berth_y_mm", Cast<Int32>(center.Y * 1000.00));
     quests.SetFact(n"nctc_dev_service_berth_z_mm", Cast<Int32>(center.Z * 1000.00));
@@ -1289,7 +1289,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       let departureSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
       quests.SetFact(n"nctc_dev_departure_progress_mm", Cast<Int32>(departureProgress * 1000.00));
       quests.SetFact(n"nctc_dev_departure_speed_mm", Cast<Int32>(departureSpeed * 1000.00));
-      if departureProgress >= 2.00 || this.controller.IsNear(this.departureRoadTarget, 2.50) {
+      if departureProgress >= -0.50 || this.controller.IsNear(this.departureExitPoint, 2.50) {
         this.departureManeuverActive = false; this.legPolls = 0;
         this.driveCommandSent = this.controller.DriveToTrafficAfterRollingPassage(this.GetTrafficTarget(), 0.00, departureSpeed);
         this.PublishLoopDiagnostic(this.driveCommandSent ? 49 : 33, this.requestedStopId);
@@ -1351,9 +1351,8 @@ public class NCTCTransitSystem extends ScriptableSystem {
     };
     // r374m: occupied bay => remain in traffic mode and serve from the road.
     if !this.followingPassage && this.HasServiceBay() && !this.berthBypassActive
-      && Equals(this.requestedStopId, this.serviceStopId)
-      && this.controller.IsNear(this.GetServiceBerth(), 60.00)
-      && Equals(quests.GetFact(n"nctc_dev_berth_occupancy_stop_id"), this.serviceStopId)
+      && this.controller.IsNear(this.GetBayEntryPoint(), 70.00)
+      && Equals(quests.GetFact(n"nctc_dev_berth_occupancy_stop_id"), this.requestedStopId)
       && Equals(quests.GetFact(n"nctc_dev_berth_occupied"), 1) {
       this.berthBypassActive = true;
       this.approachSlowdownApplied = false;
@@ -1363,11 +1362,11 @@ public class NCTCTransitSystem extends ScriptableSystem {
     };
 
     if !this.followingPassage && this.HasServiceBay() && !this.berthManeuverActive
-      && !this.berthBypassActive && Equals(this.requestedStopId, this.serviceStopId)
+      && !this.berthBypassActive
       && !this.approachSlowdownApplied {
       let bayEntryDistance: Float = Vector4.Distance(this.controller.GetWorldPosition(), this.GetBayEntryPoint());
       let brakeSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
-      if bayEntryDistance <= 55.00 && bayEntryDistance >= 18.00 && brakeSpeed > 8.00 {
+      if bayEntryDistance <= 70.00 && bayEntryDistance >= 24.00 && brakeSpeed > 8.00 {
         this.approachSlowdownApplied = true; this.legPolls = 0;
         this.driveCommandSent = this.controller.DriveToTrafficAtSpeed(this.GetTrafficTarget(), 0.00, brakeSpeed, 7.00);
         this.PublishLoopDiagnostic(this.driveCommandSent ? 47 : 33, this.requestedStopId);
@@ -1378,10 +1377,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
     // r374o: one-point stop = road stop; two-point stop = authored bay.
     if !this.followingPassage && this.HasServiceBay() && !this.berthManeuverActive
       && !this.berthBypassActive
-      && Equals(this.requestedStopId, this.serviceStopId)
-      && this.controller.IsNear(this.GetBayEntryPoint(), 22.00)
+      && this.controller.IsNear(this.GetBayEntryPoint(), 32.00)
       && (AbsF(this.controller.GetCurrentSpeed()) >= 1.50 || this.approachSlowdownApplied)
-      && AbsF(this.controller.GetCurrentSpeed()) <= 8.00 {
+      && AbsF(this.controller.GetCurrentSpeed()) <= 8.50 {
       let berthEntrySpeed: Float = AbsF(this.controller.GetCurrentSpeed());
       let berthEntryLateral: Float;
       let berthEntryLongitudinal: Float = this.GetBerthProgress(berthEntryLateral);
@@ -1389,16 +1387,46 @@ public class NCTCTransitSystem extends ScriptableSystem {
         let berthForward: Vector4 = this.GetBerthForward();
         let berthRight: Vector4 = new Vector4(-berthForward.Y, berthForward.X, 0.00, 0.00);
         let berthDelta: Vector4 = this.GetServiceBerth() - this.controller.GetWorldPosition();
+        let berthDirectTarget: Vector4;
         this.berthMergeSignedLateral = Vector4.Dot(berthDelta, berthRight);
         this.berthManeuverActive = true;
         this.berthManeuverStage = 2;
         this.approachSlowdownApplied = false;
         this.legPolls = 0;
-        this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBerthCorridorTarget(), berthEntrySpeed);
+        berthDirectTarget = Equals(this.requestedStopId, this.serviceStopId) ? this.GetBerthCorridorTarget() : this.GetBayExitPoint() + berthForward * 2.00;
+        this.driveCommandSent = this.controller.DriveToBerthDirect(berthDirectTarget, berthEntrySpeed);
         this.PublishLoopDiagnostic(this.driveCommandSent ? 43 : 33, this.requestedStopId);
         this.ScheduleDispatch(0.05);
         return;
       };
+    };
+
+    if this.berthManeuverActive && this.HasServiceBay() && !Equals(this.requestedStopId, this.serviceStopId) {
+      let bayExitForward: Vector4 = this.GetBayForward();
+      let bayExitPoint: Vector4 = this.GetBayExitPoint();
+      let bayExitProgress: Float = Vector4.Dot(this.controller.GetWorldPosition() - bayExitPoint, bayExitForward);
+      let bayExitSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
+      if bayExitProgress >= -0.50 || this.controller.IsNear(bayExitPoint, 2.50) {
+        this.berthManeuverActive = false;
+        this.berthManeuverStage = 0;
+        this.approachSlowdownApplied = false;
+        this.legPolls = 0;
+        if !this.AdvanceToNextStop() {
+          this.PublishLoopDiagnostic(34, 0);
+          this.ScheduleDispatch(1.00);
+          return;
+        };
+        this.driveCommandSent = this.controller.DriveToTrafficAfterRollingPassage(this.GetTrafficTarget(), 0.00, bayExitSpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 49 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.05);
+        return;
+      };
+      if this.controller.IsRouteCommandFailed() {
+        this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBayExitPoint() + bayExitForward * 2.00, bayExitSpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 43 : 33, this.requestedStopId);
+      };
+      this.ScheduleDispatch(0.10);
+      return;
     };
 
     // r374m: keep the single corridor command alive through arrival.
