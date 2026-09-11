@@ -134,7 +134,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37410);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37411);
     return true;
   }
 
@@ -733,7 +733,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let approachBrakeTarget: Vector4;
   // r374h: signed road offset captured once when the slow bay merge begins.
   // Keeping this fixed prevents the virtual merge target from drifting as the
-  // bus changes heading. r374j also reuses the captured road line to arc back
+  // bus changes heading. r374k also reuses the captured road line to arc back
   // out of the bay immediately on departure.
   private let berthMergeSignedLateral: Float;
   private let departureManeuverActive: Bool;
@@ -764,16 +764,13 @@ public class NCTCTransitSystem extends ScriptableSystem {
     return new Vector4(0.00, 0.00, 0.00, 0.00);
   }
 
-  // r374j: put the FRONT of the Mahir into the bay early, then spend the
-  // remaining distance straightening the rear. r374h kept 70% of the road
-  // offset at its first target, so most lateral correction happened too late.
-  // Keep only 35% now: roughly 65% of the road-to-bay offset is removed before
-  // the bus reaches 12 m before the berth, leaving a long gentle alignment.
+  // r374k: keep the successful early-nose entry, but delay ALIGN until the rear
+  // is much farther into the bay. Keep 35% lateral residue at 6 m before berth.
   private func GetBerthEntryTarget() -> Vector4 {
     let forward: Vector4 = this.GetBerthForward();
     let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
     return this.GetServiceBerth()
-      - forward * 12.00
+      - forward * 6.00
       - right * this.berthMergeSignedLateral * 0.35;
   }
 
@@ -781,20 +778,21 @@ public class NCTCTransitSystem extends ScriptableSystem {
     return this.GetServiceBerth() + this.GetBerthForward() * 4.00;
   }
 
-  // r374j departure: start turning toward the road immediately. The entry
-  // maneuver already measured the road line relative to the berth axis, so
-  // reuse that signed offset instead of asking traffic navigation to snap the
-  // parked bus back onto a lane. The direct target remains well ahead so the
-  // rolling handoff can happen while the Mahir is still moving.
+  // r374k departure: steer out hard from the bus actual stopped position.
+  // Target roughly twice the measured road offset, capped at 6 m.
   private func ArmDepartureManeuver() -> Void {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
     let forward: Vector4 = this.GetBerthForward();
     let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
+    let exitLateral: Float;
     this.departureStart = this.controller.GetWorldPosition();
     this.departureForward = forward;
-    this.departureRoadTarget = this.GetServiceBerth()
-      + forward * 14.00
-      - right * this.berthMergeSignedLateral;
+    exitLateral = -this.berthMergeSignedLateral * 2.00;
+    if exitLateral > 6.00 { exitLateral = 6.00; };
+    if exitLateral < -6.00 { exitLateral = -6.00; };
+    this.departureRoadTarget = this.departureStart
+      + forward * 10.00
+      + right * exitLateral;
     this.departureManeuverActive = true;
     if IsDefined(quests) {
       quests.SetFact(n"nctc_dev_departure_target_x_mm", Cast<Int32>(this.departureRoadTarget.X * 1000.00));
@@ -1169,7 +1167,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       quests.SetFact(n"nctc_passenger_departure_requested", 0);
       quests.SetFact(n"nctc_service_bus_at_stop", 0);
       this.controller.ClosePassengerDoor();
-      // The called stop has now been served. r374j first leaves the bay with a
+      // The called stop has now been served. r374k first leaves the bay with a
       // direct arc toward the road line measured on entry. This lets the Mahir
       // steer immediately from rest instead of asking traffic mode to relocate
       // a parked off-lane vehicle.
@@ -1199,11 +1197,11 @@ public class NCTCTransitSystem extends ScriptableSystem {
       return;
     };
 
-    // r374j: while leaving a served bay, keep the direct departure arc active
-    // for the first eight metres. Then hand off while rolling to normal traffic
+    // r374k: keep the stronger direct departure arc through roughly nine metres.
+    // Then hand off while rolling to normal traffic
     // navigation, using the same generation-safe lifecycle as passage points.
     if this.departureManeuverActive {
-      if this.GetDepartureProgress() >= 8.00 || this.controller.IsNear(this.departureRoadTarget, 5.00) {
+      if this.GetDepartureProgress() >= 9.00 || this.controller.IsNear(this.departureRoadTarget, 2.50) {
         let departureProgress: Float = this.GetDepartureProgress();
         let departureSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
         quests.SetFact(n"nctc_dev_departure_progress_mm", Cast<Int32>(departureProgress * 1000.00));
@@ -1291,7 +1289,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       };
     };
 
-    // r374j early-nose berth entry. The only authored point remains the real
+    // r374k early-nose berth entry. The only authored point remains the real
     // berth. Its yaw plus the captured road offset puts most of the lateral
     // movement into the first part of the bay, then leaves the rest of the
     // approach for the rear to follow and the Mahir to straighten.
@@ -1310,14 +1308,13 @@ public class NCTCTransitSystem extends ScriptableSystem {
         let berthForward: Vector4 = this.GetBerthForward();
         let berthRight: Vector4 = new Vector4(-berthForward.Y, berthForward.X, 0.00, 0.00);
         let berthDelta: Vector4 = this.GetServiceBerth() - this.controller.GetWorldPosition();
-        // Capture the ROAD offset once. r374j keeps only 35% at the first
-        // target: the nose enters early, while the remaining 35% is removed
-        // progressively as the rear follows into the bay.
+        // Capture the ROAD offset once. r374k keeps the same early entry but delays
+        // the final ALIGN so the nose does not swing back out of the bay.
         this.berthMergeSignedLateral = Vector4.Dot(berthDelta, berthRight);
         this.berthManeuverActive = true;
         this.approachSlowdownApplied = false;
         this.legPolls = 0;
-        if berthEntryLongitudinal > 12.00 {
+        if berthEntryLongitudinal > 8.00 {
           this.berthManeuverStage = 1;
           this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBerthEntryTarget(), berthEntrySpeed);
           this.PublishLoopDiagnostic(this.driveCommandSent ? 43 : 33, this.requestedStopId);
@@ -1336,7 +1333,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     // offset remains at this point, so the final approach should become nearly
     // parallel rather than staying diagonal until the stop.
     if this.berthManeuverActive && Equals(this.berthManeuverStage, 1)
-      && this.controller.IsNear(this.GetBerthEntryTarget(), 4.00) {
+      && this.controller.IsNear(this.GetBerthEntryTarget(), 2.50) {
       this.berthManeuverStage = 2;
       this.legPolls = 0;
       this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBerthCorridorTarget(), AbsF(this.controller.GetCurrentSpeed()));
@@ -1358,7 +1355,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
         this.arrived = true;
         this.berthManeuverActive = false;
         this.berthManeuverStage = 0;
-        // Keep berthMergeSignedLateral through dwell: r374j reuses the measured
+        // Keep berthMergeSignedLateral through dwell: r374k reuses the measured
         // road line for the immediate departure arc. AdvanceToNextStop resets it
         // only after departureRoadTarget has been captured.
         this.approachSlowdownApplied = false;

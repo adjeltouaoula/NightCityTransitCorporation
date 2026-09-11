@@ -1114,13 +1114,13 @@ local function log_service_loop(quests)
     [38] = "route loop: native stop detected; forward berth correction sent",
     [41] = "route loop: r372n outgoing corridor armed",
     [42] = "route loop: r372n rolling post-passage handoff",
-    [43] = "route loop: r374j early-nose bay ENTRY command sent",
-    [44] = "route loop: r374j rear-follow ALIGN corridor command sent",
-    [45] = "route loop: legacy final BERTH command sent (unexpected in r374j)",
+    [43] = "route loop: r374k continuous early-nose ENTRY command sent",
+    [44] = "route loop: r374k late ALIGN corridor command sent",
+    [45] = "route loop: legacy final BERTH command sent (unexpected in r374k)",
     [46] = "route loop: r374b rolling slow traffic handoff",
     [47] = "route loop: r374g road brake armed before ENTRY",
-    [48] = "route loop: r374j immediate departure ARC sent",
-    [49] = "route loop: r374j rolling departure handoff to traffic"
+    [48] = "route loop: r374k strong immediate departure ARC sent",
+    [49] = "route loop: r374k late rolling departure handoff to traffic"
   }
   local command_extra = ""
   if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then
@@ -1230,7 +1230,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37410 then
+  if revision == 37411 then
+    log("NCTC runtime build=37411 r374k late align + stronger departure arc")
+  elseif revision == 37410 then
     log("NCTC runtime build=37410 r374j early bay entry + immediate departure arc")
   elseif revision == 37409 then
     log("NCTC runtime build=37409 r374i continuous corridor, no final berth retarget")
