@@ -770,7 +770,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let passageForwardRecorded: Bool;
 
   private func HasServiceBay() -> Bool {
-    return this.hasSurveyProfile && this.hasSurveyBerth2 && Vector4.Distance(this.surveyBerth, this.surveyBerth2) >= 12.00;
+    return this.hasSurveyProfile && this.hasSurveyBerth2 && Vector4.Distance(this.surveyBerth, this.surveyBerth2) > 1.00;
   }
 
   private func GetBayForward() -> Vector4 {
