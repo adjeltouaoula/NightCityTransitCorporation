@@ -1,0 +1,139 @@
+name: r376a spline CR2W POC
+
+on:
+  push:
+    branches:
+      - automation/r376a-spline-cr2w-poc
+
+jobs:
+  poc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build native worldSplineNode sector and round-trip it
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r376a-poc"
+          mkdir -p "$WORK"
+          cd "$WORK"
+          dotnet new console --framework net10.0 --force
+          dotnet add package WolvenKit.RED4 --version 9.0.1
+          cat > Program.cs <<'CS'
+          using System.Text;
+          using WolvenKit.RED4.Archive.Buffer;
+          using WolvenKit.RED4.Archive.CR2W;
+          using WolvenKit.RED4.Archive.IO;
+          using WolvenKit.RED4.Types;
+          using static WolvenKit.RED4.Types.Enums;
+
+          static Vector3 V3(float x, float y, float z) => new() { X = x, Y = y, Z = z };
+          static Vector4 V4(float x, float y, float z, float w = 0f) => new() { X = x, Y = y, Z = z, W = w };
+
+          static SplinePoint Point(float x, float y, float z, uint id)
+          {
+              return new SplinePoint
+              {
+                  Position = V3(x, y, z),
+                  Id = id,
+                  AutomaticTangents = true,
+                  ContinuousTangents = true
+              };
+          }
+
+          const string nodeRefText = "$/nctc/bays/h2/arrival_spline";
+          NodeRef nodeRef = nodeRefText;
+
+          // H2 P1/P2 geometry, expressed locally around P1 for the spline node.
+          // This is only a serialization POC, not yet the final driving curve.
+          var spline = new Spline
+          {
+              Looped = false,
+              Reversed = false,
+              HasDirection = true
+          };
+          spline.Points.Add(Point(0.0f, 20.0f, 0.0f, 1));
+          spline.Points.Add(Point(0.0f, 8.0f, 0.0f, 2));
+          spline.Points.Add(Point(0.0f, -8.0f, 0.0f, 3));
+          spline.Points.Add(Point(0.0f, -20.0f, 0.0f, 4));
+
+          var splineNode = new worldSplineNode
+          {
+              SplineData = new CHandle<Spline>(spline)
+          };
+
+          var sector = new worldStreamingSector
+          {
+              Version = 62,
+              Level = 0,
+              Category = worldStreamingSectorCategory.Exterior
+          };
+          sector.VariantIndices.Add(0);
+          sector.Nodes.Add(new CHandle<worldNode>(splineNode));
+          sector.NodeRefs.Add(nodeRef);
+
+          var nodeData = new worldNodeDataBuffer();
+          nodeData.Add(new worldNodeData
+          {
+              Id = 1,
+              NodeIndex = 0,
+              Position = V4(-2161.015f, -1012.713f, 7.851f),
+              Orientation = new Quaternion { R = 1.0f },
+              Scale = V3(1.0f, 1.0f, 1.0f),
+              Pivot = V3(-2161.015f, -1012.713f, 7.851f),
+              QuestPrefabRefHash = nodeRef,
+              MaxStreamingDistance = 250.0f,
+              UkFloat1 = 300.0f,
+              Uk10 = 1024,
+              Uk11 = 512
+          });
+          sector.NodeData = new DataBuffer();
+          sector.NodeData.Data = nodeData;
+          sector.NodeData.Buffer.Parent = sector;
+          sector.NodeData.Buffer.ParentTypes.Add("worldStreamingSector.transforms");
+
+          var cr2w = new CR2WFile { RootChunk = sector };
+          var output = Path.Combine(Environment.CurrentDirectory, "h2_arrival_poc.streamingsector");
+          using (var fs = File.Create(output))
+          using (var writer = new CR2WWriter(fs))
+          {
+              writer.WriteFile(cr2w);
+          }
+
+          using var input = File.OpenRead(output);
+          using var reader = new CR2WReader(input, Encoding.UTF8, false);
+          var result = reader.ReadFile(out var parsed);
+          if (result != EFileReadErrorCodes.NoError || parsed is null)
+              throw new Exception($"CR2W read-back failed: {result}");
+          if (parsed.RootChunk is not worldStreamingSector parsedSector)
+              throw new Exception($"Unexpected root: {parsed.RootChunk?.GetType().FullName}");
+          if (parsedSector.Nodes.Count != 1)
+              throw new Exception($"Expected 1 world node, got {parsedSector.Nodes.Count}");
+          if (parsedSector.Nodes[0].Chunk is not worldSplineNode parsedSplineNode)
+              throw new Exception("Round-trip node is not worldSplineNode");
+          if (parsedSplineNode.SplineData.Chunk is null)
+              throw new Exception("SplineData missing after round-trip");
+          if (parsedSplineNode.SplineData.Chunk.Points.Count != 4)
+              throw new Exception($"Expected 4 spline points, got {parsedSplineNode.SplineData.Chunk.Points.Count}");
+          if (parsedSector.NodeRefs.Count != 1)
+              throw new Exception($"Expected 1 NodeRef, got {parsedSector.NodeRefs.Count}");
+
+          Console.WriteLine("POC_OK");
+          Console.WriteLine($"file={output}");
+          Console.WriteLine($"size={new FileInfo(output).Length}");
+          Console.WriteLine($"nodeRef={parsedSector.NodeRefs[0]}");
+          Console.WriteLine($"points={parsedSplineNode.SplineData.Chunk.Points.Count}");
+          CS
+          dotnet run -c Release
+          test -s h2_arrival_poc.streamingsector
+          sha256sum h2_arrival_poc.streamingsector | tee h2_arrival_poc.streamingsector.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r376a-spline-cr2w-poc
+          path: |
+            ${{ runner.temp }}/r376a-poc/h2_arrival_poc.streamingsector
+            ${{ runner.temp }}/r376a-poc/h2_arrival_poc.streamingsector.sha256
+          compression-level: 0
