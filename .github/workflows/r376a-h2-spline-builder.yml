@@ -1,0 +1,98 @@
+name: r376a H2 native spline builder
+
+on:
+  push:
+    branches:
+      - automation/r376a-h2-spline-builder
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: ${{ !contains(github.event.head_commit.message, '[r376a-built]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch r376a source and generate H2 spline JSON
+        run: python3 tools/r376a_builder.py
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install WolvenKit CLI 9.0.1
+        run: dotnet tool install --global WolvenKit.CLI --version 9.0.1
+
+      - name: Compile streaming resources
+        shell: bash
+        run: |
+          set -euxo pipefail
+          wolvenkit.cli convert -d build/raw/nctc/h2/h2_bay.streamingsector.json
+          wolvenkit.cli convert -d build/raw/nctc/h2/h2_bay.streamingblock.json
+          find build/raw -maxdepth 5 -type f -printf '%p %s bytes\n'
+          mkdir -p build/archive_input/nctc/h2 build/out
+          cp build/raw/nctc/h2/h2_bay.streamingsector build/archive_input/nctc/h2/
+          cp build/raw/nctc/h2/h2_bay.streamingblock build/archive_input/nctc/h2/
+          wolvenkit.cli pack -p build/archive_input -o build/out
+          ARCHIVE="$(find build/out -maxdepth 1 -type f -name '*.archive' | head -n1)"
+          test -n "$ARCHIVE"
+          cp "$ARCHIVE" build/NCTCBaySplinePrototype.archive
+          ls -lh build/NCTCBaySplinePrototype.archive
+
+      - name: Persist clean r376a source artifacts on builder branch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp build/NCTCBaySplinePrototype.archive source/archive/pc/mod/NCTCBaySplinePrototype.archive
+          cp build/NCTCBaySplinePrototype.archive.xl source/archive/pc/mod/NCTCBaySplinePrototype.archive.xl
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add source/redscript/NCTC/NCTCTransitSystem.reds source/archive/pc/mod/NCTCBaySplinePrototype.archive source/archive/pc/mod/NCTCBaySplinePrototype.archive.xl
+          git commit -m 'feat: r376a H2 native spline prototype [r376a-built]'
+          git push origin HEAD:automation/r376a-h2-spline-builder
+
+      - name: Package devkit
+        shell: bash
+        run: |
+          set -euxo pipefail
+          PKG=build/package
+          mkdir -p "$PKG/r6/scripts/NCTC" "$PKG/r6/tweaks/NCTC" "$PKG/archive/pc/mod"
+          mkdir -p "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+          mkdir -p "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger"
+          cp source/redscript/NCTC/*.reds "$PKG/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$PKG/r6/tweaks/NCTC/"
+          cp source/archive/pc/mod/*.archive "$PKG/archive/pc/mod/"
+          cp source/archive/pc/mod/NCTCBaySplinePrototype.archive.xl "$PKG/archive/pc/mod/"
+          cp source/cet/nctc_survey/init.lua "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_survey/nctc_network.default.json "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_survey/nctc_survey_settings.json "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_passenger/init.lua "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp README.md THIRD_PARTY_NOTICES.md "$PKG/"
+          cat > "$PKG/NCTC_BUILD_INFO.txt" <<'EOF'
+          NCTC r376a H2 native spline prototype
+          Runtime: 37601
+          Base: r375b
+          Scope: H2 bay only
+          Entry: AIVehicleOnSplineCommand -> $/03_night_city/#nctc/#h2_bay_entry
+          Exit:  AIVehicleOnSplineCommand -> $/03_night_city/#nctc/#h2_bay_exit
+          Delamain/Cannery: unchanged r375b fallback; do not evaluate them in this prototype.
+          EOF
+          cd "$PKG"
+          zip -qr ../NightCityTransitCorporation-0.3.0-devkit-r376a-h2-native-spline-prototype-development.zip .
+          cd ..
+          sha256sum NightCityTransitCorporation-0.3.0-devkit-r376a-h2-native-spline-prototype-development.zip > NightCityTransitCorporation-0.3.0-devkit-r376a-h2-native-spline-prototype-development.zip.sha256
+          sha256sum package/archive/pc/mod/NCTCDisplayPrototype.archive > display.sha256
+
+      - name: Upload devkit
+        uses: actions/upload-artifact@v4
+        with:
+          name: r376a-devkit
+          path: |
+            build/NightCityTransitCorporation-0.3.0-devkit-r376a-h2-native-spline-prototype-development.zip
+            build/NightCityTransitCorporation-0.3.0-devkit-r376a-h2-native-spline-prototype-development.zip.sha256
+            build/display.sha256
