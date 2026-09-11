@@ -1107,6 +1107,7 @@ local function log_service_loop(quests)
   local berth_active = fact(quests, "nctc_dev_loop_berth_active")
   local berth_heading_dot = fact(quests, "nctc_dev_loop_berth_heading_dot_x1000") / 1000.0
   local berth_merge_lateral = fact(quests, "nctc_dev_loop_berth_merge_lateral_mm") / 1000.0
+  local berth_gate_road_lateral = fact(quests, "nctc_dev_loop_berth_gate_road_lateral_mm") / 1000.0
   local berth_active_target_x = fact(quests, "nctc_dev_loop_berth_active_target_x_mm") / 1000.0
   local berth_active_target_y = fact(quests, "nctc_dev_loop_berth_active_target_y_mm") / 1000.0
   local berth_active_target_z = fact(quests, "nctc_dev_loop_berth_active_target_z_mm") / 1000.0
@@ -1147,14 +1148,14 @@ local function log_service_loop(quests)
     [38] = "route loop: native stop detected; forward berth correction sent",
     [41] = "route loop: r372n outgoing corridor armed",
     [42] = "route loop: r372n rolling post-passage handoff",
-    [43] = "route loop: r374r ENTRY_GATE direct command sent",
-    [44] = "route loop: r374r entry gate -> bay corridor/rejoin handoff",
+    [43] = "route loop: r374s early POINT1_GATE direct command sent",
+    [44] = "route loop: r374s Point1 gate -> bay corridor handoff",
     [45] = "route loop: legacy final BERTH command sent (unexpected in r374m)",
     [46] = "route loop: r374b rolling slow traffic handoff",
-    [47] = "route loop: legacy road brake (unexpected in r374r)",
-    [48] = "route loop: r374r direct road-rejoin departure",
-    [49] = "route loop: r374r traffic handoff after road rejoin",
-    [50] = "route loop: r374r native Vehicle overlap -> stay on road"
+    [47] = "route loop: legacy road brake (unexpected in r374s)",
+    [48] = "route loop: r374s local-gate road rejoin departure",
+    [49] = "route loop: r374s traffic handoff after local road rejoin",
+    [50] = "route loop: r374s native Vehicle overlap -> stay on road"
   }
   local command_extra = ""
   if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then
@@ -1211,6 +1212,7 @@ local function log_service_loop(quests)
       .. " bayStage=" .. tostring(berth_stage)
       .. " headingDot=" .. string.format("%.3f", berth_heading_dot)
       .. " mergeLat=" .. string.format("%.2fm", berth_merge_lateral)
+      .. " gateRoadLat=" .. string.format("%.2fm", berth_gate_road_lateral)
       .. string.format(" activeTarget=(%.3f, %.3f, %.3f)",
         berth_active_target_x, berth_active_target_y, berth_active_target_z)
   end
@@ -1292,7 +1294,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37418 then
+  if revision == 37419 then
+    log("NCTC runtime build=37419 r374s early Point1 gate + local road rejoin")
+  elseif revision == 37418 then
     log("NCTC runtime build=37418 r374r entry-gate + native bay overlap + road rejoin")
   elseif revision == 37417 then
     log("NCTC runtime build=37417 r374q bay geometry independent from service state")
