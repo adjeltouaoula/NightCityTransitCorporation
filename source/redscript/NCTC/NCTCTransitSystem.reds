@@ -134,7 +134,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37411);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37412);
     return true;
   }
 
@@ -1314,7 +1314,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
         this.berthManeuverActive = true;
         this.approachSlowdownApplied = false;
         this.legPolls = 0;
-        if berthEntryLongitudinal > 8.00 {
+        if berthEntryLongitudinal > 12.00 {
           this.berthManeuverStage = 1;
           this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBerthEntryTarget(), berthEntrySpeed);
           this.PublishLoopDiagnostic(this.driveCommandSent ? 43 : 33, this.requestedStopId);
@@ -1328,20 +1328,23 @@ public class NCTCTransitSystem extends ScriptableSystem {
       };
     };
 
-    // Stage 1: once the nose has entered, aim beyond the berth and let the
-    // rear follow while steering unwinds. Only 35% of the original lateral
-    // offset remains at this point, so the final approach should become nearly
-    // parallel rather than staying diagonal until the stop.
-    if this.berthManeuverActive && Equals(this.berthManeuverStage, 1)
-      && this.controller.IsNear(this.GetBerthEntryTarget(), 2.50) {
-      this.berthManeuverStage = 2;
-      this.legPolls = 0;
-      this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBerthCorridorTarget(), AbsF(this.controller.GetCurrentSpeed()));
-      this.PublishLoopDiagnostic(this.driveCommandSent ? 44 : 33, this.requestedStopId);
-      this.ScheduleDispatch(0.05);
-      return;
+    // r374l rolling bay handoff. Do NOT let the first direct command arrive at
+    // its virtual ENTRY target: DriveToPoint brakes for that point and caused
+    // the visible hesitation before ALIGN. While the Mahir is still rolling,
+    // replace it about 12 m before the real berth with the final corridor
+    // target. The first target therefore shapes the early nose-in arc only.
+    if this.berthManeuverActive && Equals(this.berthManeuverStage, 1) {
+      let rollingAlignLateral: Float;
+      let rollingAlignLongitudinal: Float = this.GetBerthProgress(rollingAlignLateral);
+      if rollingAlignLongitudinal <= 12.00 {
+        this.berthManeuverStage = 2;
+        this.legPolls = 0;
+        this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBerthCorridorTarget(), AbsF(this.controller.GetCurrentSpeed()));
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 44 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.05);
+        return;
+      };
     };
-
     // r374i: keep the stage-2 corridor command alive through arrival.
     // r374h used to cancel it around 8-10 m from the berth and issue a new
     // direct command to the exact berth. That extra native command lifecycle
