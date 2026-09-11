@@ -1,0 +1,81 @@
+name: r374v-packager
+on:
+  push:
+    branches: ["automation/r374v-packager"]
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build devkit package
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=package
+          rm -rf "$OUT"
+          mkdir -p "$OUT/r6/scripts/NCTC" "$OUT/r6/tweaks/NCTC" \
+                   "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey" \
+                   "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" \
+                   "$OUT/archive/pc/mod"
+          cp source/redscript/NCTC/*.reds "$OUT/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$OUT/r6/tweaks/NCTC/"
+          cp source/cet/nctc_survey/* "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_passenger/* "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp source/archive/pc/mod/NCTCDisplayPrototype.archive "$OUT/archive/pc/mod/"
+          cp source/archive/pc/mod/NCTCTrafficRuntime.archive "$OUT/archive/pc/mod/"
+          cp README.md THIRD_PARTY_NOTICES.md "$OUT/"
+          cat > "$OUT/NCTC_BUILD_INFO.txt" <<'EOF'
+          Night City Transit Corporation devkit
+          Build: r374v calibrated narrow-bay geometry
+          Runtime: 37422
+          Source commit: e50bf78403351b83a6dc323c83d80a9488f21a61
+          Branch: experiment/r374v-calibrated-narrow-bay
+
+          BAY WIDTH
+          - Uses Bay Width A/B measurements stored per stop in the active nctc_network.json.
+          - H2, Delamain and Cannery therefore use their measured physical widths without hard-coded stop IDs.
+          - Missing width data falls back to 2.90 m for compatibility.
+
+          ENTRY
+          - Removes r374t's 1.5-2.4 m lateral overshoot completely.
+          - First entry target stays on the bay centreline.
+          - Direct control begins from a 5-6:1 run-in derived from the real road-to-bay lateral offset.
+          - Counter-steer/track handoffs use width-scaled centreline tolerances.
+
+          EXIT
+          - Exit attack is limited by measured bay width, so the pivot is not thrown through the curb/outer edge.
+          - Road rejoin uses an approximately 3:1 longitudinal taper based on the measured road lateral offset.
+          - Native traffic handoff remains forbidden until the bus reaches the explicit road rejoin target.
+
+          DEPARTURE RECOVERY
+          - Service-stop departure starts with a 1.5 m/s direct-mode kick.
+          - If a direct departure command stays at <=0.4 m/s for about two seconds, NCTC reissues a centreline recovery target.
+          - Recovery never switches to native traffic while the bus is still in/deep around the bay.
+
+          OCCUPANCY
+          - Native Vehicle overlap logic is unchanged from the working r374r/r374s path.
+          EOF
+          ZIP=NightCityTransitCorporation-0.3.0-devkit-r374v-calibrated-narrow-bay-development.zip
+          (cd "$OUT" && zip -qr "../$ZIP" .)
+          sha256sum "$ZIP" | tee "$ZIP.sha256"
+          sha256sum "$OUT/archive/pc/mod/NCTCDisplayPrototype.archive" | tee display.sha256
+          git hash-object "$OUT/r6/scripts/NCTC/NCTCTransitSystem.reds" | tee transit.blob
+          git hash-object "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/init.lua" | tee cet.blob
+          grep -q '37422' "$OUT/r6/scripts/NCTC/NCTCTransitSystem.reds"
+          grep -q 'TryGetBayWidth' "$OUT/r6/scripts/NCTC/NCTCTransitSystem.reds"
+          grep -q 'bay_width_' "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/init.lua"
+          grep -q 'departureStallPolls' "$OUT/r6/scripts/NCTC/NCTCTransitSystem.reds"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r374v-devkit
+          path: |
+            NightCityTransitCorporation-0.3.0-devkit-r374v-calibrated-narrow-bay-development.zip
+            NightCityTransitCorporation-0.3.0-devkit-r374v-calibrated-narrow-bay-development.zip.sha256
+            display.sha256
+            transit.blob
+            cet.blob
+          if-no-files-found: error
