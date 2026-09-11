@@ -369,6 +369,13 @@ public class NCTCSettings extends ScriptableSystem {
   public let editBayPoint2: Bool = false;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Toggle Bay Point editor")
+  @runtimeProperty("ModSettings.description", "Developer-only shortcut. Switches NumPad 3 between Bay Point 1 and Bay Point 2.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let toggleBayPointEditorKey: EInputKey = EInputKey.IK_NumPad0;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Remove Bay Point 2")
   @runtimeProperty("ModSettings.description", "One-shot action. Removes only Bay Point 2 from the selected stop, keeps Bay Point 1, then resets to OFF.")
   @runtimeProperty("ModSettings.category", "Developer mode")
@@ -528,6 +535,7 @@ public class NCTCSettings extends ScriptableSystem {
     if Equals(event.GetKey(), this.nextExistingLineKey) { this.CycleExistingLine(true); return; };
     if Equals(event.GetKey(), this.previousSurveyStopKey) { this.CycleSurveyStop(false); return; };
     if Equals(event.GetKey(), this.nextSurveyStopKey) { this.CycleSurveyStop(true); return; };
+    if Equals(event.GetKey(), this.toggleBayPointEditorKey) { this.ToggleBayPointEditor(); return; };
     if Equals(event.GetKey(), this.addManualStopKey) { this.RecordManualStop(); return; };
     if Equals(event.GetKey(), this.deleteNearestStopKey) { this.DeleteNearestStop(); return; };
     if Equals(event.GetKey(), this.moveSelectedStopKey) { this.MoveSelectedStop(); return; };
@@ -536,6 +544,13 @@ public class NCTCSettings extends ScriptableSystem {
     if Equals(event.GetKey(), this.despawnServiceBusKey) {
       if NCTCTransitSystem.Get(this.GetGameInstance()).DespawnServiceBus() { NCTCSettings.Notify(this.GetGameInstance(), "NCTC service bus despawned"); };
     };
+  }
+
+  private func ToggleBayPointEditor() -> Void {
+    this.editBayPoint2 = !this.editBayPoint2;
+    this.lastBayPoint2EditMode = this.editBayPoint2;
+    this.PublishSurveySettings();
+    NCTCSettings.Notify(this.GetGameInstance(), this.editBayPoint2 ? "NCTC - Editing Bay Point 2" : "NCTC - Editing Bay Point 1");
   }
 
   private func RemoveSelectedBayPoint2() -> Void {

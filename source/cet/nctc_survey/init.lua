@@ -1270,6 +1270,7 @@ local function scan_service_berth_occupancy(quests, delta_time)
   local bz = fact(quests, "nctc_dev_service_berth_z_mm") / 1000.0
   local fx = fact(quests, "nctc_dev_service_berth_forward_x_mm") / 1000.0
   local fy = fact(quests, "nctc_dev_service_berth_forward_y_mm") / 1000.0
+  local bay_half_length = fact(quests, "nctc_dev_service_bay_half_length_mm") / 1000.0
   local flen = math.sqrt(fx*fx + fy*fy)
   if flen < 0.50 then return end
   fx, fy = fx/flen, fy/flen
@@ -1302,7 +1303,8 @@ local function scan_service_berth_occupancy(quests, delta_time)
               local dx, dy, dz = pos.x-bx, pos.y-by, pos.z-bz
               local longitudinal = dx*fx + dy*fy
               local lateral = dx*rx + dy*ry
-              if math.abs(longitudinal) <= 8.50 and math.abs(lateral) <= 2.60 and math.abs(dz) <= 2.50 then
+              local half_length = bay_half_length > 1.0 and bay_half_length or 8.50
+              if math.abs(longitudinal) <= (half_length + 0.75) and math.abs(lateral) <= 2.60 and math.abs(dz) <= 2.50 then
                 occupied, occupant, olong, olat = 1, rid, longitudinal, lateral
                 break
               end
@@ -1329,7 +1331,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37414 then
+  if revision == 37415 then
+    log("NCTC runtime build=37415 r374o two-point bay geometry + authored exit handoff")
+  elseif revision == 37414 then
     log("NCTC runtime build=37414 r374n dual-point bay authoring")
   elseif revision == 37413 then
     log("NCTC runtime build=37413 r374m single bay arc + native lane recovery + occupied-bay road stop")
