@@ -1,0 +1,93 @@
+name: r374o-toggle-builder
+on:
+  push:
+    branches:
+      - automation/r374o-safe-bay-editor-builder
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch NumPad0 bay-point toggle
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('source/redscript/NCTC/NCTCSettings.reds')
+          s = p.read_text()
+          needle = '''  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Edit Bay Point 2")
+  @runtimeProperty("ModSettings.description", "OFF: NumPad 3 creates/updates Bay Point 1 (the existing berth). ON: NumPad 3 creates/updates Bay Point 2, the second end of a bus bay.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let editBayPoint2: Bool = false;
+'''
+          replacement = needle + '''
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Switch Bay Point 1 / 2")
+  @runtimeProperty("ModSettings.description", "Developer shortcut. NumPad 0 toggles which bay point NumPad 3 records.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let toggleBayPointKey: EInputKey = EInputKey.IK_NumPad0;
+'''
+          assert needle in s
+          s = s.replace(needle, replacement, 1)
+
+          keyneedle = '''    if Equals(event.GetKey(), this.nextSurveyStopKey) { this.CycleSurveyStop(true); return; };
+'''
+          keyreplacement = keyneedle + '''    if Equals(event.GetKey(), this.toggleBayPointKey) { this.ToggleBayPointEditor(); return; };
+'''
+          assert keyneedle in s
+          s = s.replace(keyneedle, keyreplacement, 1)
+
+          methodneedle = '''  private func RemoveSelectedBayPoint2() -> Void {
+'''
+          method = '''  private func ToggleBayPointEditor() -> Void {
+    this.editBayPoint2 = !this.editBayPoint2;
+    this.lastBayPoint2EditMode = this.editBayPoint2;
+    this.PublishSurveySettings();
+    NCTCSettings.Notify(this.GetGameInstance(), this.editBayPoint2 ? "NCTC - Editing Bay Point 2" : "NCTC - Editing Bay Point 1");
+  }
+
+'''
+          assert methodneedle in s
+          s = s.replace(methodneedle, method + methodneedle, 1)
+          p.write_text(s)
+
+          p = Path('source/redscript/NCTC/NCTCTransitSystem.reds')
+          s = p.read_text()
+          assert 'nctc_dev_build_revision", 37414' in s
+          s = s.replace('nctc_dev_build_revision", 37414', 'nctc_dev_build_revision", 37415', 1)
+          p.write_text(s)
+
+          p = Path('source/cet/nctc_survey/init.lua')
+          s = p.read_text()
+          old = '''  if revision == 37414 then
+    log("NCTC runtime build=37414 r374n dual-point bay authoring")
+  elseif revision == 37413 then'''
+          new = '''  if revision == 37415 then
+    log("NCTC runtime build=37415 r374o NumPad0 bay-point toggle")
+  elseif revision == 37414 then
+    log("NCTC runtime build=37414 r374n dual-point bay authoring")
+  elseif revision == 37413 then'''
+          assert old in s
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+          grep -q 'toggleBayPointKey: EInputKey = EInputKey.IK_NumPad0' source/redscript/NCTC/NCTCSettings.reds
+          grep -q 'ToggleBayPointEditor' source/redscript/NCTC/NCTCSettings.reds
+          grep -q 'nctc_dev_build_revision", 37415' source/redscript/NCTC/NCTCTransitSystem.reds
+      - name: Commit patch
+        shell: bash
+        run: |
+          rm -f .github/workflows/r374o-safe-bay-editor-builder.yml .github/workflows/r374o-toggle-builder.yml
+          git config user.name 'NCTC build bot'
+          git config user.email 'nctc-build-bot@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat: r374o add NumPad0 bay point toggle'
+          git push origin HEAD:automation/r374o-safe-bay-editor-builder
