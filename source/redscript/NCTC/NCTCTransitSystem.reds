@@ -134,7 +134,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37417);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37418);
     return true;
   }
 
@@ -746,6 +746,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let followingPassage: Bool;
   private let berthManeuverActive: Bool;
   private let berthManeuverStage: Int32;
+  // r374r: true only after the bus actually crosses the authored bay entry.
+  // This prevents the departure path from being used when an entry was missed.
+  private let berthWasEntered: Bool;
   // r374m: latched once a foreign vehicle is detected inside the authored bay.
   // The stop is then served from the traffic lane and no direct bay command
   // is allowed for the remainder of that stop.
@@ -830,21 +833,80 @@ public class NCTCTransitSystem extends ScriptableSystem {
       - right * this.berthMergeSignedLateral * 0.35;
   }
 
-  // r374o: Point 1/2 define the real bay axis. One continuous direct command
-  // aims four metres beyond the 65% service point, with no virtual retarget.
+  // Point 1/2 define the real bay axis. The service target remains deep in
+  // the bay, but r374r first aims at a short lead point just inside Point 1.
+  // The handoff happens at the entry gate (not mid-bay), so the nose enters
+  // early and the steering can unwind along the bay instead of cutting a
+  // straight chord from the road to the deep service target.
   private func GetBerthCorridorTarget() -> Vector4 {
     let forward: Vector4 = this.GetBerthForward();
     return this.GetServiceBerth() + forward * 4.00;
   }
 
-  // r374o: leave through the authored bay exit before native traffic resumes.
+  private func GetBayEntryLeadTarget() -> Vector4 {
+    let entry: Vector4 = this.GetBayEntryPoint();
+    let forward: Vector4 = this.GetBayForward();
+    let length: Float = Vector4.Distance(this.GetBayEntryPoint(), this.GetBayExitPoint());
+    let lead: Float = ClampF(length * 0.28, 7.00, 10.00);
+    return entry + forward * lead;
+  }
+
+  // Positive means the entry gate is still ahead of the bus.
+  private func GetBayEntryProgress(out lateral: Float) -> Float {
+    let forward: Vector4 = this.GetBayForward();
+    let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
+    let delta: Vector4 = this.GetBayEntryPoint() - this.controller.GetWorldPosition();
+    lateral = AbsF(Vector4.Dot(delta, right));
+    return Vector4.Dot(delta, forward);
+  }
+
+  // Reuse the road-side offset measured when the bus leaves traffic for the
+  // bay.  The target is capped so a curved/diagonal bay such as Delamain does
+  // not ask the long Mahir to jump an entire lane in one steering input.
+  private func GetBayRoadRejoinTarget() -> Vector4 {
+    let forward: Vector4 = this.GetBayForward();
+    let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
+    let roadLateral: Float = ClampF(-this.berthMergeSignedLateral * 0.55, -6.00, 6.00);
+    return this.GetBayExitPoint() + forward * 6.00 + right * roadLateral;
+  }
+
+  // Native physics overlap is authoritative for bay occupancy. TargetingSystem
+  // does not reliably enumerate parked traffic vehicles.
+  private func IsBayOccupiedByVehicle() -> Bool {
+    let spatial: ref<SpatialQueriesSystem>;
+    let result: TraceResult;
+    let dimensions: Vector4;
+    let rotation: EulerAngles;
+    let entry: Vector4;
+    let exit: Vector4;
+    let center: Vector4;
+    let forward: Vector4;
+    let length: Float;
+    if !this.HasServiceBay() { return false; };
+    spatial = GameInstance.GetSpatialQueriesSystem(this.GetGameInstance());
+    if !IsDefined(spatial) { return false; };
+    entry = this.GetBayEntryPoint();
+    exit = this.GetBayExitPoint();
+    forward = this.GetBayForward();
+    length = Vector4.Distance(entry, exit);
+    center = entry + (exit - entry) * 0.50;
+    center.Z += 1.25;
+    // Overlap() takes half extents. Keep the box tight laterally so traffic
+    // running beside the bay is not mistaken for a parked vehicle in it.
+    dimensions = new Vector4(2.40, length * 0.50 + 0.75, 1.75, 0.00);
+    rotation = Quaternion.ToEulerAngles(Quaternion.BuildFromDirectionVector(forward));
+    return spatial.Overlap(dimensions, center, rotation, n"Vehicle", result);
+  }
+
+  // Leave on a shallow arc toward the road-side envelope measured at entry.
+  // Traffic only resumes once the pivot is actually near that envelope.
   private func ArmDepartureManeuver() -> Void {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
     let forward: Vector4 = this.GetBayForward();
     this.departureStart = this.controller.GetWorldPosition();
     this.departureForward = forward;
     this.departureExitPoint = this.GetBayExitPoint();
-    this.departureRoadTarget = this.departureExitPoint + forward * 2.00;
+    this.departureRoadTarget = this.GetBayRoadRejoinTarget();
     this.departureManeuverActive = true;
     if IsDefined(quests) {
       quests.SetFact(n"nctc_dev_departure_target_x_mm", Cast<Int32>(this.departureRoadTarget.X * 1000.00));
@@ -883,8 +945,12 @@ public class NCTCTransitSystem extends ScriptableSystem {
   }
 
   private func GetActiveBerthTarget() -> Vector4 {
-    if Equals(this.berthManeuverStage, 1) { return this.GetBerthEntryTarget(); };
-    if Equals(this.berthManeuverStage, 2) { return this.GetBerthCorridorTarget(); };
+    if Equals(this.berthManeuverStage, 1) { return this.GetBayEntryLeadTarget(); };
+    if Equals(this.berthManeuverStage, 2) {
+      return Equals(this.requestedStopId, this.serviceStopId)
+        ? this.GetBerthCorridorTarget()
+        : this.GetBayRoadRejoinTarget();
+    };
     return this.GetServiceBerth();
   }
 
@@ -1133,6 +1199,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.departureRequested = false;
     this.berthManeuverActive = false;
     this.berthManeuverStage = 0;
+    this.berthWasEntered = false;
     this.berthBypassActive = false;
     this.berthMergeSignedLateral = 0.00;
     this.departureManeuverActive = false;
@@ -1178,6 +1245,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.boardingDoorWasOpen = false;
     this.departureRequested = false;
     this.departureManeuverActive = false;
+    this.berthWasEntered = false;
     this.berthBypassActive = false;
     this.legPolls = 0;
     GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_passenger_departure_requested", 0);
@@ -1254,7 +1322,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       quests.SetFact(n"nctc_passenger_departure_requested", 0);
       quests.SetFact(n"nctc_service_bus_at_stop", 0);
       this.controller.ClosePassengerDoor();
-      let leaveBayDirect: Bool = this.HasServiceBay() && !this.berthBypassActive;
+      let leaveBayDirect: Bool = this.HasServiceBay() && !this.berthBypassActive && this.berthWasEntered;
       if leaveBayDirect { this.ArmDepartureManeuver(); } else { this.departureManeuverActive = false; };
       this.serviceStopId = 0;
       if !this.AdvanceToNextStop() {
@@ -1289,7 +1357,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       let departureSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
       quests.SetFact(n"nctc_dev_departure_progress_mm", Cast<Int32>(departureProgress * 1000.00));
       quests.SetFact(n"nctc_dev_departure_speed_mm", Cast<Int32>(departureSpeed * 1000.00));
-      if departureProgress >= -0.50 || this.controller.IsNear(this.departureExitPoint, 2.50) {
+      if this.controller.IsNear(this.departureRoadTarget, 3.00) {
         this.departureManeuverActive = false; this.legPolls = 0;
         this.driveCommandSent = this.controller.DriveToTrafficAfterRollingPassage(this.GetTrafficTarget(), 0.00, departureSpeed);
         this.PublishLoopDiagnostic(this.driveCommandSent ? 49 : 33, this.requestedStopId);
@@ -1349,64 +1417,92 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.ScheduleDispatch(0.25);
       return;
     };
-    // r374m: occupied bay => remain in traffic mode and serve from the road.
-    if !this.followingPassage && this.HasServiceBay() && !this.berthBypassActive
-      && this.controller.IsNear(this.GetBayEntryPoint(), 70.00)
-      && Equals(quests.GetFact(n"nctc_dev_berth_occupancy_stop_id"), this.requestedStopId)
-      && Equals(quests.GetFact(n"nctc_dev_berth_occupied"), 1) {
-      this.berthBypassActive = true;
-      this.approachSlowdownApplied = false;
-      this.berthManeuverActive = false;
-      this.berthManeuverStage = 0;
-      this.PublishLoopDiagnostic(50, this.requestedStopId);
-    };
-
-    if !this.followingPassage && this.HasServiceBay() && !this.berthManeuverActive
-      && !this.berthBypassActive
-      && !this.approachSlowdownApplied {
+    // r374r: native physics overlap is the source of truth for occupied bays.
+    // Probe only while the bus is still safely before Point 1 so the NCTC bus
+    // itself cannot overlap the query box and become a false positive.
+    if !this.followingPassage && this.HasServiceBay() && !this.berthManeuverActive && !this.berthBypassActive {
       let bayEntryDistance: Float = Vector4.Distance(this.controller.GetWorldPosition(), this.GetBayEntryPoint());
-      let brakeSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
-      if bayEntryDistance <= 70.00 && bayEntryDistance >= 24.00 && brakeSpeed > 8.00 {
-        this.approachSlowdownApplied = true; this.legPolls = 0;
-        this.driveCommandSent = this.controller.DriveToTrafficAtSpeed(this.GetTrafficTarget(), 0.00, brakeSpeed, 7.00);
-        this.PublishLoopDiagnostic(this.driveCommandSent ? 47 : 33, this.requestedStopId);
-        this.ScheduleDispatch(0.05); return;
+      if bayEntryDistance <= 85.00 && bayEntryDistance >= 18.00 {
+        let bayOccupied: Bool = this.IsBayOccupiedByVehicle();
+        quests.SetFact(n"nctc_dev_berth_occupancy_stop_id", this.requestedStopId);
+        quests.SetFact(n"nctc_dev_berth_occupied", bayOccupied ? 1 : 0);
+        if bayOccupied {
+          this.berthBypassActive = true;
+          this.approachSlowdownApplied = false;
+          this.berthManeuverActive = false;
+          this.berthManeuverStage = 0;
+          this.berthWasEntered = false;
+          this.PublishLoopDiagnostic(50, this.requestedStopId);
+        };
       };
     };
 
-    // r374o: one-point stop = road stop; two-point stop = authored bay.
+    // r374r ENTRY_GATE. Do not wait for the traffic controller to slow down:
+    // useTraffic=true was observed to re-accelerate to ~15 m/s.  Hand control
+    // to the direct bay driver once the road has converged toward Point 1.
     if !this.followingPassage && this.HasServiceBay() && !this.berthManeuverActive
-      && !this.berthBypassActive
-      && this.controller.IsNear(this.GetBayEntryPoint(), 32.00)
-      && (AbsF(this.controller.GetCurrentSpeed()) >= 1.50 || this.approachSlowdownApplied)
-      && AbsF(this.controller.GetCurrentSpeed()) <= 8.50 {
-      let berthEntrySpeed: Float = AbsF(this.controller.GetCurrentSpeed());
-      let berthEntryLateral: Float;
-      let berthEntryLongitudinal: Float = this.GetBerthProgress(berthEntryLateral);
-      if berthEntryLongitudinal > 0.50 {
+      && !this.berthBypassActive {
+      let entryLateral: Float;
+      let entryLongitudinal: Float = this.GetBayEntryProgress(entryLateral);
+      let entryDistance: Float = Vector4.Distance(this.controller.GetWorldPosition(), this.GetBayEntryPoint());
+      if entryLongitudinal > 0.50
+        && entryDistance <= 42.00
+        && (entryLateral <= 18.50 || entryDistance <= 25.00) {
         let berthForward: Vector4 = this.GetBerthForward();
         let berthRight: Vector4 = new Vector4(-berthForward.Y, berthForward.X, 0.00, 0.00);
         let berthDelta: Vector4 = this.GetServiceBerth() - this.controller.GetWorldPosition();
-        let berthDirectTarget: Vector4;
+        let berthEntrySpeed: Float = MinF(AbsF(this.controller.GetCurrentSpeed()), 7.00);
         this.berthMergeSignedLateral = Vector4.Dot(berthDelta, berthRight);
         this.berthManeuverActive = true;
-        this.berthManeuverStage = 2;
+        this.berthManeuverStage = 1;
+        this.berthWasEntered = false;
         this.approachSlowdownApplied = false;
         this.legPolls = 0;
-        berthDirectTarget = Equals(this.requestedStopId, this.serviceStopId) ? this.GetBerthCorridorTarget() : this.GetBayExitPoint() + berthForward * 2.00;
-        this.driveCommandSent = this.controller.DriveToBerthDirect(berthDirectTarget, berthEntrySpeed);
+        this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBayEntryLeadTarget(), berthEntrySpeed);
         this.PublishLoopDiagnostic(this.driveCommandSent ? 43 : 33, this.requestedStopId);
         this.ScheduleDispatch(0.05);
         return;
       };
     };
 
-    if this.berthManeuverActive && this.HasServiceBay() && !Equals(this.requestedStopId, this.serviceStopId) {
-      let bayExitForward: Vector4 = this.GetBayForward();
-      let bayExitPoint: Vector4 = this.GetBayExitPoint();
-      let bayExitProgress: Float = Vector4.Dot(this.controller.GetWorldPosition() - bayExitPoint, bayExitForward);
-      let bayExitSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
-      if bayExitProgress >= -0.50 || this.controller.IsNear(bayExitPoint, 2.50) {
+    // Cross Point 1 on the short lead target, then continue on the same bay
+    // axis. The target change is at the entry gate rather than mid-bay, which
+    // preserves one smooth physical maneuver while avoiding the old zigzag.
+    if this.berthManeuverActive && Equals(this.berthManeuverStage, 1) && this.HasServiceBay() {
+      let entryForward: Vector4 = this.GetBayForward();
+      let entryRight: Vector4 = new Vector4(-entryForward.Y, entryForward.X, 0.00, 0.00);
+      let entryDelta: Vector4 = this.controller.GetWorldPosition() - this.GetBayEntryPoint();
+      let entered: Float = Vector4.Dot(entryDelta, entryForward);
+      let entryCrossTrack: Float = AbsF(Vector4.Dot(entryDelta, entryRight));
+      let entrySpeed: Float = MinF(AbsF(this.controller.GetCurrentSpeed()), 7.00);
+      if entered >= -1.50 && entryCrossTrack <= 6.00 {
+        let corridorTarget: Vector4;
+        this.berthWasEntered = true;
+        this.berthManeuverStage = 2;
+        this.legPolls = 0;
+        corridorTarget = Equals(this.requestedStopId, this.serviceStopId)
+          ? this.GetBerthCorridorTarget()
+          : this.GetBayRoadRejoinTarget();
+        this.driveCommandSent = this.controller.DriveToBerthDirect(corridorTarget, entrySpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 44 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.05);
+        return;
+      };
+      if this.controller.IsRouteCommandFailed() {
+        this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBayEntryLeadTarget(), entrySpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 43 : 33, this.requestedStopId);
+      };
+      this.ScheduleDispatch(0.05);
+      return;
+    };
+
+    // A pass-through bay rejoins the measured road-side envelope before native
+    // traffic resumes. A service stop keeps the corridor command alive until
+    // the normal service-point arrival check below.
+    if this.berthManeuverActive && Equals(this.berthManeuverStage, 2)
+      && this.HasServiceBay() && !Equals(this.requestedStopId, this.serviceStopId) {
+      let rejoinSpeed: Float = MinF(AbsF(this.controller.GetCurrentSpeed()), 7.00);
+      if this.controller.IsNear(this.GetBayRoadRejoinTarget(), 3.00) {
         this.berthManeuverActive = false;
         this.berthManeuverStage = 0;
         this.approachSlowdownApplied = false;
@@ -1416,14 +1512,14 @@ public class NCTCTransitSystem extends ScriptableSystem {
           this.ScheduleDispatch(1.00);
           return;
         };
-        this.driveCommandSent = this.controller.DriveToTrafficAfterRollingPassage(this.GetTrafficTarget(), 0.00, bayExitSpeed);
+        this.driveCommandSent = this.controller.DriveToTrafficAfterRollingPassage(this.GetTrafficTarget(), 0.00, rejoinSpeed);
         this.PublishLoopDiagnostic(this.driveCommandSent ? 49 : 33, this.requestedStopId);
         this.ScheduleDispatch(0.05);
         return;
       };
       if this.controller.IsRouteCommandFailed() {
-        this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBayExitPoint() + bayExitForward * 2.00, bayExitSpeed);
-        this.PublishLoopDiagnostic(this.driveCommandSent ? 43 : 33, this.requestedStopId);
+        this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBayRoadRejoinTarget(), rejoinSpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 44 : 33, this.requestedStopId);
       };
       this.ScheduleDispatch(0.10);
       return;
@@ -1519,6 +1615,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.approachCommandSent = false;
     this.berthManeuverActive = false;
     this.berthManeuverStage = 0;
+    this.berthWasEntered = false;
     this.berthBypassActive = false;
     this.berthMergeSignedLateral = 0.00;
     this.approachSlowdownApplied = false;
