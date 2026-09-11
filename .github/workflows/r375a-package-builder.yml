@@ -1,0 +1,50 @@
+name: r375a exact package
+
+on:
+  push:
+    branches:
+      - automation/r375a-package-builder
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 7d1db77789779a23a2445af5c2e96a4958400e80
+      - name: Build installable devkit
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/nctc-r375a"
+          mkdir -p "$ROOT/archive/pc/mod" "$ROOT/r6/scripts/NCTC" "$ROOT/r6/tweaks/NCTC"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger"
+          cp source/archive/pc/mod/*.archive "$ROOT/archive/pc/mod/"
+          cp source/redscript/NCTC/*.reds "$ROOT/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$ROOT/r6/tweaks/NCTC/"
+          cp source/cet/nctc_survey/init.lua "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_survey/nctc_network.default.json "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_survey/nctc_survey_settings.json "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_passenger/* "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp README.md THIRD_PARTY_NOTICES.md "$ROOT/"
+          cat > "$ROOT/NCTC_BUILD_INFO.txt" <<'EOF'
+          Night City Transit Corporation
+          Devkit: r375a fresh bay parking reset
+          Runtime build: 37501
+          Branch: experiment/r375a-fresh-bay-parking-reset
+          Commit: 7d1db77789779a23a2445af5c2e96a4958400e80
+          Scope: fresh served-stop bay parking controller; intermediate bay parking intentionally disabled for isolation.
+          EOF
+          test ! -e "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+          test "$(git hash-object "$ROOT/r6/scripts/NCTC/NCTCTransitSystem.reds")" = "6ae9c088965ec12927fb100835361f2a3184b81a"
+          test "$(git hash-object "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/init.lua")" = "964d53c6fbaf4cfdcae54b6bf2c837faff72d595"
+          test "$(sha256sum "$ROOT/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')" = "09a8fb10c2e027b2250c1ec647f8c3d466129bea907f5421771795093ae37d0a"
+          cd "$ROOT"
+          zip -qr "$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r375a-fresh-bay-parking-reset-development.zip" .
+          unzip -t "$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r375a-fresh-bay-parking-reset-development.zip"
+          sha256sum "$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r375a-fresh-bay-parking-reset-development.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r375a-package
+          path: ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r375a-fresh-bay-parking-reset-development.zip
+          compression-level: 0
