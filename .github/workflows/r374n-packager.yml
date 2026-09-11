@@ -1,0 +1,58 @@
+name: r374n-packager
+on:
+  push:
+    branches: ["automation/r374n-packager"]
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build devkit package
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=package
+          rm -rf "$OUT"
+          mkdir -p "$OUT/r6/scripts/NCTC" "$OUT/r6/tweaks/NCTC" \
+                   "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey" \
+                   "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" \
+                   "$OUT/archive/pc/mod"
+          cp source/redscript/NCTC/*.reds "$OUT/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$OUT/r6/tweaks/NCTC/"
+          cp source/cet/nctc_survey/* "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_passenger/* "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp source/archive/pc/mod/NCTCDisplayPrototype.archive "$OUT/archive/pc/mod/"
+          cp source/archive/pc/mod/NCTCTrafficRuntime.archive "$OUT/archive/pc/mod/"
+          cp README.md THIRD_PARTY_NOTICES.md "$OUT/"
+          cat > "$OUT/NCTC_BUILD_INFO.txt" <<'EOF'
+          Night City Transit Corporation devkit
+          Build: r374n dual-point bay authoring
+          Runtime: 37414
+          Source commit: 200735d573817e2be14a32e32fd223772d80929e
+          Branch: experiment/r374n-dual-point-bay-authoring
+
+          AUTHORING SCOPE
+          - Bay Point 1 is the existing berth capture.
+          - Mod Settings > Developer mode > Edit Bay Point 2 OFF: NumPad 3 creates/updates Bay Point 1.
+          - Edit Bay Point 2 ON: NumPad 3 creates/updates Bay Point 2.
+          - Remove Bay Point 2 is a one-shot action visible while editing Point 2.
+          - Existing captures without berth2 remain valid.
+          - berth2 is persisted in nctc_network.json and published to REDscript facts for the next driving phase.
+
+          IMPORTANT
+          This build validates authoring/schema UX first. Driving behavior remains the r374m experiment and is not the target of this test.
+          EOF
+          ZIP=NightCityTransitCorporation-0.3.0-devkit-r374n-dual-point-bay-authoring-development.zip
+          (cd "$OUT" && zip -qr "../$ZIP" .)
+          sha256sum "$ZIP" | tee "$ZIP.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r374n-devkit
+          path: |
+            NightCityTransitCorporation-0.3.0-devkit-r374n-dual-point-bay-authoring-development.zip
+            NightCityTransitCorporation-0.3.0-devkit-r374n-dual-point-bay-authoring-development.zip.sha256
+          if-no-files-found: error
