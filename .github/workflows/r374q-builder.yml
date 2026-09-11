@@ -1,0 +1,47 @@
+name: r374q-builder
+on:
+  push:
+    branches: [automation/r374q-builder]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: automation/r374q-builder
+      - name: Patch bay geometry only
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('source/redscript/NCTC/NCTCTransitSystem.reds')
+          s = p.read_text()
+          s = s.replace('SetFact(n"nctc_dev_build_revision", 37416);', 'SetFact(n"nctc_dev_build_revision", 37417);')
+          s = s.replace('this.departureRoadTarget = this.departureExitPoint + forward * 8.00;', 'this.departureRoadTarget = this.departureExitPoint + forward * 2.00;')
+          s = s.replace('''    if this.serviceStopId <= 0 || !this.HasServiceBay() {\n      quests.SetFact(n"nctc_dev_service_berth_stop_id", 0);\n      quests.SetFact(n"nctc_dev_service_bay_half_length_mm", 0);\n      return;\n    };\n''', '''    if this.requestedStopId <= 0 || !this.HasServiceBay() {\n      quests.SetFact(n"nctc_dev_service_berth_stop_id", 0);\n      quests.SetFact(n"nctc_dev_service_bay_half_length_mm", 0);\n      return;\n    };\n''')
+          s = s.replace('quests.SetFact(n"nctc_dev_service_berth_stop_id", this.serviceStopId);', 'quests.SetFact(n"nctc_dev_service_berth_stop_id", this.requestedStopId);')
+          s = s.replace('''    if !this.followingPassage && this.HasServiceBay() && !this.berthBypassActive\n      && Equals(this.requestedStopId, this.serviceStopId)\n      && this.controller.IsNear(this.GetServiceBerth(), 60.00)\n      && Equals(quests.GetFact(n"nctc_dev_berth_occupancy_stop_id"), this.serviceStopId)\n''', '''    if !this.followingPassage && this.HasServiceBay() && !this.berthBypassActive\n      && this.controller.IsNear(this.GetBayEntryPoint(), 70.00)\n      && Equals(quests.GetFact(n"nctc_dev_berth_occupancy_stop_id"), this.requestedStopId)\n''')
+          s = s.replace('''    if !this.followingPassage && this.HasServiceBay() && !this.berthManeuverActive\n      && !this.berthBypassActive && Equals(this.requestedStopId, this.serviceStopId)\n      && !this.approachSlowdownApplied {\n      let bayEntryDistance: Float = Vector4.Distance(this.controller.GetWorldPosition(), this.GetBayEntryPoint());\n      let brakeSpeed: Float = AbsF(this.controller.GetCurrentSpeed());\n      if bayEntryDistance <= 55.00 && bayEntryDistance >= 18.00 && brakeSpeed > 8.00 {\n''', '''    if !this.followingPassage && this.HasServiceBay() && !this.berthManeuverActive\n      && !this.berthBypassActive\n      && !this.approachSlowdownApplied {\n      let bayEntryDistance: Float = Vector4.Distance(this.controller.GetWorldPosition(), this.GetBayEntryPoint());\n      let brakeSpeed: Float = AbsF(this.controller.GetCurrentSpeed());\n      if bayEntryDistance <= 70.00 && bayEntryDistance >= 24.00 && brakeSpeed > 8.00 {\n''')
+          old = '''    if !this.followingPassage && this.HasServiceBay() && !this.berthManeuverActive\n      && !this.berthBypassActive\n      && Equals(this.requestedStopId, this.serviceStopId)\n      && this.controller.IsNear(this.GetBayEntryPoint(), 22.00)\n      && (AbsF(this.controller.GetCurrentSpeed()) >= 1.50 || this.approachSlowdownApplied)\n      && AbsF(this.controller.GetCurrentSpeed()) <= 8.00 {\n      let berthEntrySpeed: Float = AbsF(this.controller.GetCurrentSpeed());\n      let berthEntryLateral: Float;\n      let berthEntryLongitudinal: Float = this.GetBerthProgress(berthEntryLateral);\n      if berthEntryLongitudinal > 0.50 {\n        let berthForward: Vector4 = this.GetBerthForward();\n        let berthRight: Vector4 = new Vector4(-berthForward.Y, berthForward.X, 0.00, 0.00);\n        let berthDelta: Vector4 = this.GetServiceBerth() - this.controller.GetWorldPosition();\n        this.berthMergeSignedLateral = Vector4.Dot(berthDelta, berthRight);\n        this.berthManeuverActive = true;\n        this.berthManeuverStage = 2;\n        this.approachSlowdownApplied = false;\n        this.legPolls = 0;\n        this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBerthCorridorTarget(), berthEntrySpeed);\n        this.PublishLoopDiagnostic(this.driveCommandSent ? 43 : 33, this.requestedStopId);\n        this.ScheduleDispatch(0.05);\n        return;\n      };\n    };\n'''
+          new = '''    if !this.followingPassage && this.HasServiceBay() && !this.berthManeuverActive\n      && !this.berthBypassActive\n      && this.controller.IsNear(this.GetBayEntryPoint(), 32.00)\n      && (AbsF(this.controller.GetCurrentSpeed()) >= 1.50 || this.approachSlowdownApplied)\n      && AbsF(this.controller.GetCurrentSpeed()) <= 8.50 {\n      let berthEntrySpeed: Float = AbsF(this.controller.GetCurrentSpeed());\n      let berthEntryLateral: Float;\n      let berthEntryLongitudinal: Float = this.GetBerthProgress(berthEntryLateral);\n      if berthEntryLongitudinal > 0.50 {\n        let berthForward: Vector4 = this.GetBerthForward();\n        let berthRight: Vector4 = new Vector4(-berthForward.Y, berthForward.X, 0.00, 0.00);\n        let berthDelta: Vector4 = this.GetServiceBerth() - this.controller.GetWorldPosition();\n        let berthDirectTarget: Vector4;\n        this.berthMergeSignedLateral = Vector4.Dot(berthDelta, berthRight);\n        this.berthManeuverActive = true;\n        this.berthManeuverStage = 2;\n        this.approachSlowdownApplied = false;\n        this.legPolls = 0;\n        berthDirectTarget = Equals(this.requestedStopId, this.serviceStopId) ? this.GetBerthCorridorTarget() : this.GetBayExitPoint() + berthForward * 2.00;\n        this.driveCommandSent = this.controller.DriveToBerthDirect(berthDirectTarget, berthEntrySpeed);\n        this.PublishLoopDiagnostic(this.driveCommandSent ? 43 : 33, this.requestedStopId);\n        this.ScheduleDispatch(0.05);\n        return;\n      };\n    };\n\n    if this.berthManeuverActive && this.HasServiceBay() && !Equals(this.requestedStopId, this.serviceStopId) {\n      let bayExitForward: Vector4 = this.GetBayForward();\n      let bayExitPoint: Vector4 = this.GetBayExitPoint();\n      let bayExitProgress: Float = Vector4.Dot(this.controller.GetWorldPosition() - bayExitPoint, bayExitForward);\n      let bayExitSpeed: Float = AbsF(this.controller.GetCurrentSpeed());\n      if bayExitProgress >= -0.50 || this.controller.IsNear(bayExitPoint, 2.50) {\n        this.berthManeuverActive = false;\n        this.berthManeuverStage = 0;\n        this.approachSlowdownApplied = false;\n        this.legPolls = 0;\n        if !this.AdvanceToNextStop() {\n          this.PublishLoopDiagnostic(34, 0);\n          this.ScheduleDispatch(1.00);\n          return;\n        };\n        this.driveCommandSent = this.controller.DriveToTrafficAfterRollingPassage(this.GetTrafficTarget(), 0.00, bayExitSpeed);\n        this.PublishLoopDiagnostic(this.driveCommandSent ? 49 : 33, this.requestedStopId);\n        this.ScheduleDispatch(0.05);\n        return;\n      };\n      if this.controller.IsRouteCommandFailed() {\n        this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBayExitPoint() + bayExitForward * 2.00, bayExitSpeed);\n        this.PublishLoopDiagnostic(this.driveCommandSent ? 43 : 33, this.requestedStopId);\n      };\n      this.ScheduleDispatch(0.10);\n      return;\n    };\n'''
+          if old not in s:
+              raise SystemExit('entry block not found')
+          s = s.replace(old, new)
+          s = s.replace('if departureProgress >= 2.00 || this.controller.IsNear(this.departureRoadTarget, 2.50) {', 'if departureProgress >= -0.50 || this.controller.IsNear(this.departureExitPoint, 2.50) {')
+          p.write_text(s)
+
+          p = Path('source/cet/nctc_survey/init.lua')
+          s = p.read_text()
+          old = '''  if revision == 37416 then\n    log("NCTC runtime build=37416 r374p fresh bay facts + geometry diagnostics")\n'''
+          new = '''  if revision == 37417 then\n    log("NCTC runtime build=37417 r374q bay geometry independent from service state")\n  elseif revision == 37416 then\n    log("NCTC runtime build=37416 r374p fresh bay facts + geometry diagnostics")\n'''
+          if old not in s:
+              raise SystemExit('build block not found')
+          p.write_text(s.replace(old, new))
+      - name: Commit patch
+        run: |
+          git config user.name "NCTC build bot"
+          git config user.email "nctc-build-bot@users.noreply.github.com"
+          git add source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_survey/init.lua
+          git commit -m "fix: r374q decouple bay geometry from service state"
+          git push origin HEAD:automation/r374q-builder
