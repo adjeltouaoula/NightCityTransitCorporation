@@ -1,0 +1,109 @@
+name: r374o-safe-bay-editor-builder
+on:
+  push:
+    branches: [automation/r374o-safe-bay-editor-builder]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch safe bay editor
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('source/redscript/NCTC/NCTCSettings.reds')
+          s = p.read_text()
+          old = '''  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Remove Bay Point 2")
+  @runtimeProperty("ModSettings.description", "One-shot action. Removes only Bay Point 2 from the selected stop, keeps Bay Point 1, then resets to OFF.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let removeBayPoint2: Bool = false;
+'''
+          new = '''  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Remove Bay Point 2")
+  @runtimeProperty("ModSettings.description", "Developer-only shortcut. Removes only Bay Point 2 from the selected stop and keeps Bay Point 1.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let removeBayPoint2Key: EInputKey = EInputKey.IK_NumPad0;
+'''
+          assert old in s
+          s = s.replace(old, new)
+          s = s.replace('''\n  private let lastBayPoint2EditMode: Bool;\n''', '\n')
+          s = s.replace('''    this.RegisterSettings();\n    this.lastBayPoint2EditMode = this.editBayPoint2;\n    this.PublishSurveySettings();''', '''    this.RegisterSettings();\n    this.PublishSurveySettings();''')
+          old_change = '''  public func OnModSettingsChange() -> Void {
+    if this.developerMode && NotEquals(this.editBayPoint2, this.lastBayPoint2EditMode) {
+      this.lastBayPoint2EditMode = this.editBayPoint2;
+      NCTCSettings.Notify(this.GetGameInstance(), this.editBayPoint2 ? "NCTC - Editing Bay Point 2" : "NCTC - Editing Bay Point 1");
+    };
+    if this.developerMode && this.removeBayPoint2 {
+      this.removeBayPoint2 = false;
+      this.RemoveSelectedBayPoint2();
+    };
+    this.PublishSurveySettings();
+    this.UpdateDeveloperVisibility();
+    if this.developerMode { this.NotifySelectedSurveyStop(); };
+  }
+'''
+          new_change = '''  public func OnModSettingsChange() -> Void {
+    // Keep this callback side-effect-light. In particular, never mutate the
+    // Mod Settings variable list (or another setting value) in response to
+    // editBayPoint2 changing; doing so can invalidate the native settings UI
+    // while it is closing.
+    this.PublishSurveySettings();
+    this.UpdateDeveloperVisibility();
+    if this.developerMode { this.NotifySelectedSurveyStop(); };
+  }
+'''
+          assert old_change in s
+          s = s.replace(old_change, new_change)
+          dyn = '''      else if Equals(variable.GetName(), n"removeBayPoint2") { variable.SetVisible(this.developerMode && this.editBayPoint2); };
+'''
+          assert dyn in s
+          s = s.replace(dyn, '')
+          needle = '''    if Equals(event.GetKey(), this.nextSurveyStopKey) { this.CycleSurveyStop(true); return; };
+'''
+          insert = needle + '''    if Equals(event.GetKey(), this.removeBayPoint2Key) { this.RemoveSelectedBayPoint2(); return; };
+'''
+          assert needle in s
+          s = s.replace(needle, insert, 1)
+          p.write_text(s)
+
+          p = Path('source/redscript/NCTC/NCTCTransitSystem.reds')
+          s = p.read_text()
+          assert 'nctc_dev_build_revision", 37414' in s
+          s = s.replace('nctc_dev_build_revision", 37414', 'nctc_dev_build_revision", 37415', 1)
+          p.write_text(s)
+
+          p = Path('source/cet/nctc_survey/init.lua')
+          s = p.read_text()
+          old = '''  if revision == 37414 then
+    log("NCTC runtime build=37414 r374n dual-point bay authoring")
+  elseif revision == 37413 then'''
+          new = '''  if revision == 37415 then
+    log("NCTC runtime build=37415 r374o safe dual-point bay editor")
+  elseif revision == 37414 then
+    log("NCTC runtime build=37414 r374n dual-point bay authoring")
+  elseif revision == 37413 then'''
+          assert old in s
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+          grep -q 'removeBayPoint2Key: EInputKey = EInputKey.IK_NumPad0' source/redscript/NCTC/NCTCSettings.reds
+          grep -q 'nctc_dev_build_revision", 37415' source/redscript/NCTC/NCTCTransitSystem.reds
+          ! grep -q 'lastBayPoint2EditMode' source/redscript/NCTC/NCTCSettings.reds
+          ! grep -q 'SetVisible(this.developerMode && this.editBayPoint2)' source/redscript/NCTC/NCTCSettings.reds
+      - name: Commit safe editor
+        shell: bash
+        run: |
+          rm -f .github/workflows/r374o-safe-bay-editor-builder.yml
+          git config user.name 'NCTC build bot'
+          git config user.email 'nctc-build-bot@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: r374o make dual-point bay editor settings-safe'
+          git push origin HEAD:automation/r374o-safe-bay-editor-builder
