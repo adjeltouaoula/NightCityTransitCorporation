@@ -1,0 +1,50 @@
+name: r375b exact package
+
+on:
+  push:
+    branches:
+      - automation/r375b-package-builder
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9df8683326cd859edb60465391ce0b1ce56d227d
+      - name: Build installable devkit
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/nctc-r375b"
+          mkdir -p "$ROOT/archive/pc/mod" "$ROOT/r6/scripts/NCTC" "$ROOT/r6/tweaks/NCTC"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger"
+          cp source/archive/pc/mod/*.archive "$ROOT/archive/pc/mod/"
+          cp source/redscript/NCTC/*.reds "$ROOT/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$ROOT/r6/tweaks/NCTC/"
+          cp source/cet/nctc_survey/init.lua "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_survey/nctc_network.default.json "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_survey/nctc_survey_settings.json "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_passenger/* "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp README.md THIRD_PARTY_NOTICES.md "$ROOT/"
+          cat > "$ROOT/NCTC_BUILD_INFO.txt" <<'EOF'
+          Night City Transit Corporation
+          Devkit: r375b early-progress parking + physical bay arrival
+          Runtime build: 37502
+          Branch: experiment/r375b-early-progress-physical-bay-arrival
+          Commit: 9df8683326cd859edb60465391ce0b1ce56d227d
+          Scope: switch from entry ray to parking at 22% bay progress; physical P1/P2 parking envelope; one-shot correction if native command settles outside.
+          EOF
+          test ! -e "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+          test "$(git hash-object "$ROOT/r6/scripts/NCTC/NCTCTransitSystem.reds")" = "83c5eed96505ab0c2999b792872dfc7d51457953"
+          test "$(git hash-object "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/init.lua")" = "0bca676ecb5d8443e0aeafbb3b22acec3d55edcd"
+          test "$(sha256sum "$ROOT/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')" = "09a8fb10c2e027b2250c1ec647f8c3d466129bea907f5421771795093ae37d0a"
+          cd "$ROOT"
+          zip -qr "$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r375b-early-progress-physical-bay-arrival-development.zip" .
+          unzip -t "$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r375b-early-progress-physical-bay-arrival-development.zip"
+          sha256sum "$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r375b-early-progress-physical-bay-arrival-development.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r375b-package
+          path: ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r375b-early-progress-physical-bay-arrival-development.zip
+          compression-level: 0
