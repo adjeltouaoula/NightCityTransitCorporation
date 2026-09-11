@@ -32,13 +32,13 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          wolvenkit.cli convert -d build/raw/nctc/h2/h2_bay.streamingsector.json
-          wolvenkit.cli convert -d build/raw/nctc/h2/h2_bay.streamingblock.json
+          cp77tools convert -d build/raw/nctc/h2/h2_bay.streamingsector.json
+          cp77tools convert -d build/raw/nctc/h2/h2_bay.streamingblock.json
           find build/raw -maxdepth 5 -type f -printf '%p %s bytes\n'
           mkdir -p build/archive_input/nctc/h2 build/out
           cp build/raw/nctc/h2/h2_bay.streamingsector build/archive_input/nctc/h2/
           cp build/raw/nctc/h2/h2_bay.streamingblock build/archive_input/nctc/h2/
-          wolvenkit.cli pack -p build/archive_input -o build/out
+          cp77tools pack -p build/archive_input -o build/out
           ARCHIVE="$(find build/out -maxdepth 1 -type f -name '*.archive' | head -n1)"
           test -n "$ARCHIVE"
           cp "$ARCHIVE" build/NCTCBaySplinePrototype.archive
