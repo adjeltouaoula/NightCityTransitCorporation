@@ -118,6 +118,47 @@ public class NCTCDeferredBerthDriveCommand extends DelayCallback {
 }
 
 
+public class NCTCDeferredSplineDriveCommand extends DelayCallback {
+  private let bus: wref<VehicleObject>;
+  private let controller: wref<NCTCServiceBusController>;
+  private let splinePath: String;
+  private let startSpeed: Float;
+  private let stopAtPathEnd: Bool;
+  private let commandGeneration: Int32;
+
+  public func Configure(bus: ref<VehicleObject>, controller: ref<NCTCServiceBusController>, splinePath: String, startSpeed: Float, stopAtPathEnd: Bool, commandGeneration: Int32) -> ref<NCTCDeferredSplineDriveCommand> {
+    this.bus = bus;
+    this.controller = controller;
+    this.splinePath = splinePath;
+    this.startSpeed = startSpeed;
+    this.stopAtPathEnd = stopAtPathEnd;
+    this.commandGeneration = commandGeneration;
+    return this;
+  }
+
+  public func Call() -> Void {
+    let command: ref<AIVehicleOnSplineCommand>;
+    if !IsDefined(this.bus) || !this.bus.IsAttached() || !IsDefined(this.bus.GetAIComponent()) { return; };
+    if IsDefined(this.controller) && !this.controller.IsDriveGenerationCurrent(this.commandGeneration) {
+      this.controller.ReportStaleDriveCallback(this.commandGeneration);
+      return;
+    };
+    command = new AIVehicleOnSplineCommand();
+    command.splineRef = CreateNodeRef(this.splinePath);
+    command.secureTimeOut = 120.00;
+    command.driveBackwards = false;
+    command.reverseSpline = false;
+    command.startFromClosest = true;
+    command.stopAtPathEnd = this.stopAtPathEnd;
+    command.needDriver = false;
+    command.useKinematic = false;
+    if this.startSpeed > 0.50 { command.forcedStartSpeed = this.startSpeed; };
+    this.bus.GetAIComponent().SendCommand(command);
+    if IsDefined(this.controller) { this.controller.SetActiveSplineCommand(command, this.commandGeneration); };
+  }
+}
+
+
 // NCTC owns the native autonomous command lifecycle. V remains an ordinary
 // passenger and no player AutoDrive system participates in service routing.
 public class NCTCServiceBusController extends IScriptable {
@@ -128,6 +169,7 @@ public class NCTCServiceBusController extends IScriptable {
   // route handoff, so the dev log can prove whether it was replaced or left
   // alive alongside the command for the next stop.
   private let previousRouteCommand: ref<AIVehicleDriveToPointCommand>;
+  private let activeSplineCommand: ref<AIVehicleOnSplineCommand>;
   private let driveGeneration: Int32;
 
   public func Bind(bus: ref<VehicleObject>) -> Bool {
@@ -136,7 +178,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37502);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37601);
     return true;
   }
 
@@ -317,6 +359,32 @@ public class NCTCServiceBusController extends IScriptable {
     return true;
   }
 
+  // r376a: H2 bay motion is a native continuous spline. Unlike
+  // DriveToPoint, the intermediate curve points are geometry, not destinations.
+  public func DriveOnBaySpline(splinePath: String, startSpeed: Float, stopAtPathEnd: Bool) -> Bool {
+    let callback: ref<NCTCDeferredSplineDriveCommand>;
+    let noDriver: ref<AIEvent>;
+    let driverReady: ref<AIEvent>;
+    let generation: Int32;
+    if !this.IsReady() { return false; };
+    generation = this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleOnSplineCommand", false, true);
+    this.activeRouteCommand = null;
+    this.activeSplineCommand = null;
+    noDriver = new AIEvent();
+    driverReady = new AIEvent();
+    noDriver.name = n"NoDriver";
+    driverReady.name = n"DriverReady";
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.030);
+    callback = new NCTCDeferredSplineDriveCommand();
+    callback.Configure(this.bus, this, splinePath, MaxF(startSpeed, 0.00), stopAtPathEnd, generation);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);
+    return true;
+  }
+
   // Adaptive NCTC service speed. The game district supplies the zone profile
   // while long uninterrupted legs receive a small arterial/highway bonus.
   // This only changes the per-command traffic target: vehicle physics and the
@@ -431,6 +499,29 @@ public class NCTCServiceBusController extends IScriptable {
     this.activeRouteCommand = command;
   }
 
+  public func SetActiveSplineCommand(command: ref<AIVehicleOnSplineCommand>, generation: Int32) -> Void {
+    if !this.IsDriveGenerationCurrent(generation) { return; };
+    this.activeSplineCommand = command;
+  }
+
+  public func IsSplineCommandSuccessful() -> Bool {
+    return IsDefined(this.activeSplineCommand) && Equals(this.activeSplineCommand.state, AICommandState.Success);
+  }
+
+  public func IsSplineCommandFailed() -> Bool {
+    if !IsDefined(this.activeSplineCommand) { return false; };
+    return Equals(this.activeSplineCommand.state, AICommandState.Failure)
+      || Equals(this.activeSplineCommand.state, AICommandState.Cancelled)
+      || Equals(this.activeSplineCommand.state, AICommandState.Interrupted);
+  }
+
+  public func GetSplineCommandStatusCode() -> Int32 {
+    if !IsDefined(this.activeSplineCommand) { return 0; };
+    if Equals(this.activeSplineCommand.state, AICommandState.Success) { return 2; };
+    if this.IsSplineCommandFailed() { return 3; };
+    return 1;
+  }
+
   public func IsRouteCommandSuccessful() -> Bool {
     return IsDefined(this.activeRouteCommand) && Equals(this.activeRouteCommand.state, AICommandState.Success);
   }
@@ -469,12 +560,14 @@ public class NCTCServiceBusController extends IScriptable {
   public func CancelTrafficRoute() -> Void {
     if this.IsReady() {
       this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+      this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleOnSplineCommand", false, true);
     };
   }
 
   public func ArriveAtStop() -> Void {
     if !this.IsReady() { return; };
     this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleOnSplineCommand", false, true);
   }
 
   // The Mahir coach door is stateful. The old working prototype did not rely
@@ -1268,6 +1361,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if this.arrived {
       quests.SetFact(n"nctc_service_bus_at_stop", 1);
       this.controller.KeepPassengerDoorOpen();
+      if Equals(this.requestedStopId, 70) && this.HasServiceBay() && this.bayParkingWasEntered {
+        this.ScheduleDispatch(0.25);
+        return;
+      };
       boarded = this.controller.IsPlayerAboard()
         || Equals(quests.GetFact(n"nctc_passenger_departure_requested"), 1);
       // Always leave enough time for the door animation to be visible.
@@ -1328,7 +1425,11 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.telemetryPolls += 1;
     if this.telemetryPolls >= 10 {
       this.telemetryPolls = 0;
-      this.PublishRouteCommandTelemetry();
+      if this.bayParkingActive && Equals(this.bayParkingStage, 10) {
+        this.PublishLoopDiagnostic(71, this.requestedStopId);
+      } else {
+        this.PublishRouteCommandTelemetry();
+      };
     };
     // r372n: cross the passage on one long outgoing-road command. Handoff is
     // deliberately AFTER the waypoint, while the first command still has
@@ -1406,123 +1507,52 @@ public class NCTCTransitSystem extends ScriptableSystem {
       };
     };
 
-    // ENTRY: capture the real road centreline locally and issue ONE long direct
-    // ray through the bay. No P1 target, no overshoot, no counter-target.
+    // r376a H2-ONLY NATIVE SPLINE ARRIVAL POC.
+    // All r375 DriveToPoint bay trajectory stages are intentionally removed.
     if !this.followingPassage && this.HasServiceBay() && !this.bayParkingActive
-      && !this.bayParkingBypass && Equals(this.requestedStopId, this.serviceStopId) {
+      && !this.bayParkingBypass && Equals(this.requestedStopId, this.serviceStopId)
+      && Equals(this.requestedStopId, 70) {
       let entryLateral: Float;
       let entryLongitudinal: Float = this.GetBayEntryProgress(entryLateral);
       if entryLongitudinal > 0.50 && entryLongitudinal <= 24.00 && entryLateral <= 12.00 {
-        let forward: Vector4 = this.GetBayForward();
-        let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
-        let roadDelta: Vector4 = this.controller.GetWorldPosition() - this.GetBayEntryPoint();
         let entrySpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 6.00), 2.00);
-        this.bayParkingRoadLateral = Vector4.Dot(roadDelta, right);
-        this.bayParkingEntryTarget = this.GetBayParkingEntryTarget();
-        this.bayParkingRoadTarget = this.GetBayParkingRoadTarget();
         this.bayParkingActive = true;
-        this.bayParkingStage = 1;
-        this.bayParkingWasEntered = false;
+        this.bayParkingStage = 10;
+        this.bayParkingWasEntered = true;
         this.bayParkingRetryCount = 0;
-        this.driveCommandSent = this.controller.DriveToBerthDirect(this.bayParkingEntryTarget, entrySpeed, 6.00);
-        this.PublishLoopDiagnostic(this.driveCommandSent ? 60 : 33, this.requestedStopId);
+        this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/arrival_spline", entrySpeed, true);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 68 : 33, this.requestedStopId);
         this.ScheduleDispatch(0.10);
         return;
       };
     };
 
-    if this.bayParkingActive && this.HasServiceBay() {
-      let bayLateral: Float;
-      let bayProgress: Float = this.GetBayProgress(bayLateral);
-      let bayLength: Float = Vector4.Distance(this.GetBayEntryPoint(), this.GetBayExitPoint());
-      let currentSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
-      let widthTolerance: Float = ClampF(this.GetBayWidth() * 0.75, 1.80, 2.60);
-      if bayProgress >= 0.00 { this.bayParkingWasEntered = true; };
-
-      // r375b: the r375a log proved that waiting for lateral convergence makes
-      // the switch happen at 60% on H2, after P2 on Cannery, and never at all
-      // on Delamain. P1/P2 already give us a trustworthy longitudinal frame,
-      // so begin braking at a fixed early progress and let the final target
-      // pull the remaining lateral error out while there is still road length.
-      if Equals(this.bayParkingStage, 1) {
-        if bayProgress >= bayLength * 0.22 {
-          this.bayParkingStage = 2;
-          this.bayParkingRetryCount = 0;
-          this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetServiceBerth(), MaxF(MinF(currentSpeed, 3.00), 1.25), 3.00);
-          this.PublishLoopDiagnostic(this.driveCommandSent ? 61 : 33, this.requestedStopId);
-          this.ScheduleDispatch(0.10);
-          return;
-        };
-        if this.controller.IsRouteCommandFailed() && this.bayParkingRetryCount < 1 {
-          this.bayParkingRetryCount += 1;
-          this.driveCommandSent = this.controller.DriveToBerthDirect(this.bayParkingEntryTarget, MaxF(MinF(currentSpeed, 6.00), 2.00), 6.00);
-          this.PublishLoopDiagnostic(this.driveCommandSent ? 65 : 33, this.requestedStopId);
-        };
-        this.ScheduleDispatch(0.10);
+    if this.bayParkingActive && Equals(this.bayParkingStage, 10) {
+      if this.controller.IsSplineCommandSuccessful() {
+        this.controller.ArriveAtStop();
+        this.arrived = true;
+        this.bayParkingActive = false;
+        this.bayParkingStage = 0;
+        this.driveCommandSent = false;
+        this.dwellPolls = 0;
+        quests.SetFact(n"nctc_service_bus_at_stop", 1);
+        this.PublishLoopDiagnostic(69, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
         return;
       };
-
-      if Equals(this.bayParkingStage, 2) {
-        // Parking is a PHYSICAL bay state, not an exact-point state. r375a H2
-        // stopped straight and safely inside P1/P2 but 9.2 m beyond the 65%
-        // reference, so a 4.5/6 m radius could never finish the maneuver.
-        let parkedInsideBay: Bool = currentSpeed <= 0.50
-          && bayProgress >= bayLength * 0.35
-          && bayProgress <= bayLength + 1.50
-          && AbsF(bayLateral) <= ClampF(this.GetBayWidth() * 1.20, 2.50, 4.00);
-        if parkedInsideBay {
-          this.controller.ArriveAtStop();
-          this.arrived = true;
-          this.bayParkingActive = false;
-          this.bayParkingStage = 0;
-          this.driveCommandSent = false;
-          this.dwellPolls = 0;
-          quests.SetFact(n"nctc_service_bus_at_stop", 1);
-          this.controller.KeepPassengerDoorOpen();
-          this.PublishLoopDiagnostic(62, this.requestedStopId);
-          this.ScheduleDispatch(0.25);
-          return;
-        };
-        // If the native command has already settled outside the physical bay,
-        // allow one slow correction. Never spin indefinitely around the point.
-        if (this.controller.IsRouteCommandFailed()
-          || (this.controller.IsRouteCommandSuccessful() && currentSpeed <= 0.50))
-          && this.bayParkingRetryCount < 1 {
-          this.bayParkingRetryCount += 1;
-          this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetServiceBerth(), 1.00, 2.00);
-          this.PublishLoopDiagnostic(this.driveCommandSent ? 66 : 33, this.requestedStopId);
-        };
-        this.ScheduleDispatch(0.10);
+      if this.controller.IsSplineCommandFailed() {
+        this.bayParkingStage = 11;
+        this.PublishLoopDiagnostic(70, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
         return;
       };
+      this.ScheduleDispatch(0.10);
+      return;
+    };
 
-      // EXIT: one direct ray from the parked berth to the locally captured road
-      // line. Advance route state only after the bus is physically back out.
-      if Equals(this.bayParkingStage, 3) {
-        if (bayProgress >= bayLength + 2.00 && this.controller.IsNear(this.bayParkingRoadTarget, 6.00))
-          || (this.controller.IsRouteCommandSuccessful() && this.controller.IsNear(this.bayParkingRoadTarget, 7.00)) {
-          let rollingSpeed: Float = currentSpeed;
-          this.bayParkingActive = false;
-          this.bayParkingStage = 0;
-          this.bayParkingRetryCount = 0;
-          if !this.AdvanceToNextStop() {
-            this.PublishLoopDiagnostic(34, 0);
-            this.ScheduleDispatch(1.00);
-            return;
-          };
-          this.driveCommandSent = this.controller.DriveToTrafficAfterRollingPassage(this.GetTrafficTarget(), 0.00, rollingSpeed);
-          this.PublishLoopDiagnostic(this.driveCommandSent ? 63 : 33, this.requestedStopId);
-          this.ScheduleDispatch(0.05);
-          return;
-        };
-        if this.controller.IsRouteCommandFailed() && this.bayParkingRetryCount < 1 {
-          this.bayParkingRetryCount += 1;
-          this.driveCommandSent = this.controller.DriveToBerthDirect(this.bayParkingRoadTarget, MaxF(MinF(currentSpeed, 5.00), 2.00), 5.00);
-          this.PublishLoopDiagnostic(this.driveCommandSent ? 67 : 33, this.requestedStopId);
-        };
-        this.ScheduleDispatch(0.10);
-        return;
-      };
+    if this.bayParkingActive && Equals(this.bayParkingStage, 11) {
+      this.ScheduleDispatch(0.25);
+      return;
     };
 
     // Road-stop / occupied-bay fallback remains native traffic.
