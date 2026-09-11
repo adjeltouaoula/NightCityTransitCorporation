@@ -1202,6 +1202,8 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.dwellPolls = 0;
     this.boardingDoorWasOpen = false;
     this.departureRequested = false;
+    this.bayParkingActive = false;
+    this.bayParkingStage = 0;
     this.bayParkingWasEntered = false;
     this.bayParkingBypass = false;
     this.bayParkingRoadLateral = 0.00;
@@ -1524,7 +1526,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
         this.arrived = true;
         this.bayParkingActive = false;
         this.bayParkingStage = 0;
-            this.driveCommandSent = false;
+        this.driveCommandSent = false;
         this.dwellPolls = 0;
         quests.SetFact(n"nctc_service_bus_at_stop", 1);
         this.controller.KeepPassengerDoorOpen();
