@@ -17,60 +17,45 @@ jobs:
           fetch-depth: 0
 
       - name: Apply r374l rolling bay handoff
-        shell: python
         run: |
+          python - <<'PY'
           from pathlib import Path
 
           transit = Path('source/redscript/NCTC/NCTCTransitSystem.reds')
           s = transit.read_text()
 
-          def one(old, new, label):
-              global s
-              count = s.count(old)
+          def replace_one(text, old, new, label):
+              count = text.count(old)
               if count != 1:
                   raise SystemExit(f'{label}: expected 1 occurrence, found {count}')
-              s = s.replace(old, new, 1)
+              return text.replace(old, new, 1)
 
-          one('SetFact(n"nctc_dev_build_revision", 37411);',
-              'SetFact(n"nctc_dev_build_revision", 37412);',
-              'build revision')
-          one('if berthEntryLongitudinal > 8.00 {',
-              'if berthEntryLongitudinal > 12.00 {',
-              'stage-1 threshold')
+          s = replace_one(s, 'SetFact(n"nctc_dev_build_revision", 37411);', 'SetFact(n"nctc_dev_build_revision", 37412);', 'build revision')
+          s = replace_one(s, 'if berthEntryLongitudinal > 8.00 {', 'if berthEntryLongitudinal > 12.00 {', 'stage-1 threshold')
 
-          old_stage = '''    // Stage 1: once the nose has entered, aim beyond the berth and let the
-    // rear follow while steering unwinds. Only 35% of the original lateral
-    // offset remains at this point, so the final approach should become nearly
-    // parallel rather than staying diagonal until the stop.
-    if this.berthManeuverActive && Equals(this.berthManeuverStage, 1)
-      && this.controller.IsNear(this.GetBerthEntryTarget(), 2.50) {
-      this.berthManeuverStage = 2;
-      this.legPolls = 0;
-      this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBerthCorridorTarget(), AbsF(this.controller.GetCurrentSpeed()));
-      this.PublishLoopDiagnostic(this.driveCommandSent ? 44 : 33, this.requestedStopId);
-      this.ScheduleDispatch(0.05);
-      return;
-    };
-'''
-          new_stage = '''    // r374l rolling bay handoff. Do NOT let the first direct command arrive at
-    // its virtual ENTRY target: DriveToPoint brakes for that point and caused
-    // the visible hesitation before ALIGN. While the Mahir is still rolling,
-    // replace it about 12 m before the real berth with the final corridor
-    // target. The first target therefore shapes the early nose-in arc only.
-    if this.berthManeuverActive && Equals(this.berthManeuverStage, 1) {
-      let rollingAlignLateral: Float;
-      let rollingAlignLongitudinal: Float = this.GetBerthProgress(rollingAlignLateral);
-      if rollingAlignLongitudinal <= 12.00 {
-        this.berthManeuverStage = 2;
-        this.legPolls = 0;
-        this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBerthCorridorTarget(), AbsF(this.controller.GetCurrentSpeed()));
-        this.PublishLoopDiagnostic(this.driveCommandSent ? 44 : 33, this.requestedStopId);
-        this.ScheduleDispatch(0.05);
-        return;
-      };
-    };
-'''
-          one(old_stage, new_stage, 'rolling stage handoff')
+          stage_start = s.index('    // Stage 1: once the nose has entered, aim beyond the berth and let the')
+          stage_end = s.index('    // r374i: keep the stage-2 corridor command alive through arrival.', stage_start)
+          new_stage = '\n'.join([
+              '    // r374l rolling bay handoff. Do NOT let the first direct command arrive at',
+              '    // its virtual ENTRY target: DriveToPoint brakes for that point and caused',
+              '    // the visible hesitation before ALIGN. While the Mahir is still rolling,',
+              '    // replace it about 12 m before the real berth with the final corridor',
+              '    // target. The first target therefore shapes the early nose-in arc only.',
+              '    if this.berthManeuverActive && Equals(this.berthManeuverStage, 1) {',
+              '      let rollingAlignLateral: Float;',
+              '      let rollingAlignLongitudinal: Float = this.GetBerthProgress(rollingAlignLateral);',
+              '      if rollingAlignLongitudinal <= 12.00 {',
+              '        this.berthManeuverStage = 2;',
+              '        this.legPolls = 0;',
+              '        this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBerthCorridorTarget(), AbsF(this.controller.GetCurrentSpeed()));',
+              '        this.PublishLoopDiagnostic(this.driveCommandSent ? 44 : 33, this.requestedStopId);',
+              '        this.ScheduleDispatch(0.05);',
+              '        return;',
+              '      };',
+              '    };',
+              '',
+          ])
+          s = s[:stage_start] + new_stage + s[stage_end:]
           transit.write_text(s)
 
           logger = Path('source/cet/nctc_survey/init.lua')
@@ -83,21 +68,12 @@ jobs:
               ('[49] = "route loop: r374k late rolling departure handoff to traffic"', '[49] = "route loop: r374l late rolling departure handoff to traffic"'),
           ]
           for old, new in replacements:
-              if t.count(old) != 1:
-                  raise SystemExit(f'logger replacement failed: {old}')
-              t = t.replace(old, new, 1)
-          old_build = '''  if revision == 37411 then
-    log("NCTC runtime build=37411 r374k late align + stronger departure arc")
-'''
-          new_build = '''  if revision == 37412 then
-    log("NCTC runtime build=37412 r374l rolling bay handoff, no entry hesitation")
-  elseif revision == 37411 then
-    log("NCTC runtime build=37411 r374k late align + stronger departure arc")
-'''
-          if t.count(old_build) != 1:
-              raise SystemExit('logger build marker replacement failed')
-          t = t.replace(old_build, new_build, 1)
+              t = replace_one(t, old, new, 'logger label')
+          old_build = '  if revision == 37411 then\n    log("NCTC runtime build=37411 r374k late align + stronger departure arc")\n'
+          new_build = '  if revision == 37412 then\n    log("NCTC runtime build=37412 r374l rolling bay handoff, no entry hesitation")\n  elseif revision == 37411 then\n    log("NCTC runtime build=37411 r374k late align + stronger departure arc")\n'
+          t = replace_one(t, old_build, new_build, 'logger build marker')
           logger.write_text(t)
+          PY
 
       - name: Validate patch
         run: |
