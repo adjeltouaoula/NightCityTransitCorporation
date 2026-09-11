@@ -1,0 +1,58 @@
+name: r376a exact package
+
+on:
+  push:
+    branches:
+      - automation/r376a-package-builder
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 94fb86b8c77399173466cb25a29735051d2fcf9f
+      - name: Build installable devkit
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/nctc-r376a"
+          mkdir -p "$ROOT/archive/pc/mod" "$ROOT/r6/scripts/NCTC" "$ROOT/r6/tweaks/NCTC"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger"
+          cp source/archive/pc/mod/* "$ROOT/archive/pc/mod/"
+          cp source/redscript/NCTC/*.reds "$ROOT/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$ROOT/r6/tweaks/NCTC/"
+          cp source/cet/nctc_survey/init.lua "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_survey/nctc_network.default.json "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_survey/nctc_survey_settings.json "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_passenger/* "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp README.md THIRD_PARTY_NOTICES.md "$ROOT/"
+          cat > "$ROOT/NCTC_BUILD_INFO.txt" <<'EOF'
+          Night City Transit Corporation
+          Devkit: r376a H2 native spline arrival POC
+          Runtime build: 37601
+          Branch: experiment/r376a-h2-native-spline-arrival
+          Commit: 94fb86b8c77399173466cb25a29735051d2fcf9f
+          Scope: H2 served-stop ARRIVAL ONLY using AIVehicleOnSplineCommand and a custom worldSplineNode. r375 DriveToPoint bay trajectory removed from this path. Successful arrival intentionally remains parked for isolation; departure spline is not part of r376a.
+          Spline NodeRef: $/nctc/bays/h2/arrival_spline
+          EOF
+          test ! -e "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+          test "$(git hash-object "$ROOT/r6/scripts/NCTC/NCTCTransitSystem.reds")" = "479c8652822adee5550babb6c61f536e064b75af"
+          test "$(git hash-object "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/init.lua")" = "08f6f0df2a4be8a0ba0133eec43aeda557e6e68b"
+          test "$(git hash-object "$ROOT/archive/pc/mod/NCTCH2Spline.archive")" = "ff0be26fb781cf5f2aaf9dd75ce5b668f777a0f6"
+          test "$(git hash-object "$ROOT/archive/pc/mod/NCTCH2Spline.archive.xl")" = "6e934a5637bfe3300832eea2fef179386576c5e1"
+          test "$(sha256sum "$ROOT/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')" = "09a8fb10c2e027b2250c1ec647f8c3d466129bea907f5421771795093ae37d0a"
+          grep -q 'runtime build=37601' "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/init.lua"
+          grep -q 'AIVehicleOnSplineCommand' "$ROOT/r6/scripts/NCTC/NCTCTransitSystem.reds"
+          grep -q '\$/nctc/bays/h2/arrival_spline' "$ROOT/r6/scripts/NCTC/NCTCTransitSystem.reds"
+          grep -q 'nctc\\bays\\h2\\all.streamingblock' "$ROOT/archive/pc/mod/NCTCH2Spline.archive.xl"
+          cd "$ROOT"
+          zip -qr "$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376a-h2-native-spline-arrival-development.zip" .
+          unzip -t "$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376a-h2-native-spline-arrival-development.zip"
+          sha256sum "$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376a-h2-native-spline-arrival-development.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r376a-package
+          path: ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r376a-h2-native-spline-arrival-development.zip
+          compression-level: 0
