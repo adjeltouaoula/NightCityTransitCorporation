@@ -1,0 +1,67 @@
+name: r374o-packager
+on:
+  push:
+    branches: ["automation/r374o-packager"]
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build devkit package
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=package
+          rm -rf "$OUT"
+          mkdir -p "$OUT/r6/scripts/NCTC" "$OUT/r6/tweaks/NCTC" \
+                   "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey" \
+                   "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" \
+                   "$OUT/archive/pc/mod"
+          cp source/redscript/NCTC/*.reds "$OUT/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$OUT/r6/tweaks/NCTC/"
+          cp source/cet/nctc_survey/* "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_passenger/* "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp source/archive/pc/mod/NCTCDisplayPrototype.archive "$OUT/archive/pc/mod/"
+          cp source/archive/pc/mod/NCTCTrafficRuntime.archive "$OUT/archive/pc/mod/"
+          cp README.md THIRD_PARTY_NOTICES.md "$OUT/"
+          cat > "$OUT/NCTC_BUILD_INFO.txt" <<'EOF'
+          Night City Transit Corporation devkit
+          Build: r374o two-point bay geometry
+          Runtime: 37415
+          Source commit: ece83e9365b863c090e10be55cbac70783e2ec91
+          Branch: experiment/r374o-two-point-bay-geometry
+
+          BAY MODEL
+          - One Bay Point only: ROAD STOP. Bus stays in native traffic.
+          - Bay Point 1 + Bay Point 2: BUS BAY. The two captures are the physical endpoints.
+          - NCTC automatically resolves which endpoint is entry and which is exit from the captured travel direction.
+          - Passenger stop position is calculated at 65% of the authored bay length.
+          - Entry uses one continuous direct target; no ENTRY->ALIGN retarget.
+          - Approach slowdown remains native traffic-aware until the real bay entrance.
+          - Departure stays direct through the authored exit and 8 m beyond it; traffic handoff occurs only after crossing the exit by 2 m.
+          - This avoids native traffic recovery from deep inside the bay, which caused teleportation in r374m.
+
+          OCCUPANCY
+          - CET now scans the full oriented Point1<->Point2 bay rectangle.
+          - Any foreign vehicle inside marks the bay unavailable for that service stop.
+          - Occupied bay: bus remains on the road and serves the stop from traffic mode.
+
+          AUTHORING UX
+          - NumPad 0 toggles Bay Point 1 / Bay Point 2 editing.
+          - NumPad 3 records/updates whichever Bay Point is selected.
+          - Mod Settings toggle remains available as a visible fallback/state control.
+          EOF
+          ZIP=NightCityTransitCorporation-0.3.0-devkit-r374o-two-point-bay-geometry-development.zip
+          (cd "$OUT" && zip -qr "../$ZIP" .)
+          sha256sum "$ZIP" | tee "$ZIP.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r374o-devkit
+          path: |
+            NightCityTransitCorporation-0.3.0-devkit-r374o-two-point-bay-geometry-development.zip
+            NightCityTransitCorporation-0.3.0-devkit-r374o-two-point-bay-geometry-development.zip.sha256
+          if-no-files-found: error
