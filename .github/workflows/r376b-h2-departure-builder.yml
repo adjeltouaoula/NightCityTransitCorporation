@@ -1,0 +1,423 @@
+name: r376b H2 native spline departure builder
+
+on:
+  push:
+    branches:
+      - automation/r376b-h2-departure-builder
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Verify validated r376a base
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object source/redscript/NCTC/NCTCTransitSystem.reds)" = "479c8652822adee5550babb6c61f536e064b75af"
+          test "$(git hash-object source/cet/nctc_survey/init.lua)" = "08f6f0df2a4be8a0ba0133eec43aeda557e6e68b"
+          test "$(git hash-object source/archive/pc/mod/NCTCH2Spline.archive)" = "ff0be26fb781cf5f2aaf9dd75ce5b668f777a0f6"
+          test "$(git hash-object source/archive/pc/mod/NCTCH2Spline.archive.xl)" = "6e934a5637bfe3300832eea2fef179386576c5e1"
+          test "$(sha256sum source/archive/pc/mod/NCTCDisplayPrototype.archive | awk '{print $1}')" = "09a8fb10c2e027b2250c1ec647f8c3d466129bea907f5421771795093ae37d0a"
+
+      - name: Generate H2 departure worldSplineNode archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r376b-world"
+          RAW="$WORK/NCTCH2Departure"
+          OUT="$WORK/out"
+          mkdir -p "$WORK/src" "$RAW/nctc/bays/h2/departure/sectors" "$OUT"
+          cd "$WORK/src"
+          dotnet new console --framework net10.0 --force
+          dotnet add package WolvenKit.RED4 --version 9.0.1
+          cat > Program.cs <<'CS'
+          using System.Text;
+          using WolvenKit.RED4.Archive.Buffer;
+          using WolvenKit.RED4.Archive.CR2W;
+          using WolvenKit.RED4.Archive.IO;
+          using WolvenKit.RED4.Types;
+          using static WolvenKit.RED4.Types.Enums;
+
+          static Vector3 V3(float x, float y, float z) => new() { X = x, Y = y, Z = z };
+          static Vector4 V4(float x, float y, float z, float w = 0f) => new() { X = x, Y = y, Z = z, W = w };
+          static Box Box4(float minX, float minY, float minZ, float maxX, float maxY, float maxZ) => new()
+          {
+              Min = V4(minX, minY, minZ), Max = V4(maxX, maxY, maxZ)
+          };
+          static SplinePoint Point(float x, float y, float z, uint id) => new()
+          {
+              Position = V3(x, y, z), Id = id, AutomaticTangents = true, ContinuousTangents = true
+          };
+          static void WriteAndRoundTrip(string path, RedBaseClass root, Type expectedType)
+          {
+              var file = new CR2WFile { RootChunk = root };
+              using (var fs = File.Create(path))
+              using (var writer = new CR2WWriter(fs)) writer.WriteFile(file);
+              using var input = File.OpenRead(path);
+              using var reader = new CR2WReader(input, Encoding.UTF8, false);
+              var result = reader.ReadFile(out var parsed);
+              if (result != EFileReadErrorCodes.NoError || parsed is null) throw new Exception($"readback failed {path}: {result}");
+              if (parsed.RootChunk.GetType() != expectedType) throw new Exception($"unexpected root {parsed.RootChunk.GetType()} for {path}");
+          }
+
+          const string nodeRefText = "$/nctc/bays/h2/departure_spline";
+          const string sectorDepotPath = "nctc\\bays\\h2\\departure\\sectors\\h2_departure.streamingsector";
+          NodeRef nodeRef = nodeRefText;
+
+          // H2 departure only. Local coordinates are relative to the same P1
+          // origin as the validated arrival spline. The first 12-14 m stay on
+          // the bay axis; lateral merge begins only around/after P2, then the
+          // last segment is straight on the normal road lane.
+          var spline = new Spline { Looped = false, Reversed = false, HasDirection = true };
+          spline.Points.Add(Point(-0.45f, -17.20f, 0.0f, 1));
+          spline.Points.Add(Point(-0.65f, -23.00f, 0.0f, 2));
+          spline.Points.Add(Point(-0.90f, -29.00f, 0.0f, 3));
+          spline.Points.Add(Point(-0.80f, -33.00f, 0.0f, 4));
+          spline.Points.Add(Point( 0.20f, -37.00f, 0.0f, 5));
+          spline.Points.Add(Point( 2.00f, -41.00f, 0.0f, 6));
+          spline.Points.Add(Point( 3.50f, -45.50f, 0.0f, 7));
+          spline.Points.Add(Point( 4.10f, -50.00f, 0.0f, 8));
+          spline.Points.Add(Point( 4.15f, -62.00f, 0.0f, 9));
+
+          var splineNode = new worldSplineNode { SplineData = new CHandle<Spline>(spline) };
+          var sector = new worldStreamingSector { Version = 62, Level = 0, Category = worldStreamingSectorCategory.Exterior };
+          sector.VariantIndices.Add(0);
+          sector.Nodes.Add(new CHandle<worldNode>(splineNode));
+          sector.NodeRefs.Add(nodeRef);
+          var nodeData = new worldNodeDataBuffer();
+          nodeData.Add(new worldNodeData
+          {
+              Id = 1, NodeIndex = 0,
+              Position = V4(-2161.015f, -1012.713f, 7.851f),
+              Orientation = new Quaternion { R = 1.0f },
+              Scale = V3(1.0f, 1.0f, 1.0f),
+              Pivot = V3(-2161.015f, -1012.713f, 7.851f),
+              Bounds = Box4(-2170f, -1080f, 5f, -2150f, -1025f, 12f),
+              QuestPrefabRefHash = nodeRef,
+              MaxStreamingDistance = 250.0f, UkFloat1 = 300.0f, Uk10 = 1024, Uk11 = 512
+          });
+          sector.NodeData = new DataBuffer();
+          sector.NodeData.Data = nodeData;
+          sector.NodeData.Buffer.Parent = sector;
+          sector.NodeData.Buffer.ParentTypes.Add("worldStreamingSector.transforms");
+
+          var block = new worldStreamingBlock();
+          block.Descriptors.Add(new worldStreamingSectorDescriptor
+          {
+              Data = new CResourceAsyncReference<worldStreamingSector>((ResourcePath)sectorDepotPath),
+              StreamingBox = Box4(-2220f, -1150f, 0f, -2100f, -1000f, 30f),
+              NumNodeRanges = 1,
+              Level = 0,
+              Category = worldStreamingSectorCategory.Exterior
+          });
+
+          var root = Environment.GetEnvironmentVariable("RAW_ROOT") ?? throw new Exception("RAW_ROOT missing");
+          var sectorPath = Path.Combine(root, "nctc", "bays", "h2", "departure", "sectors", "h2_departure.streamingsector");
+          var blockPath = Path.Combine(root, "nctc", "bays", "h2", "departure", "all.streamingblock");
+          Directory.CreateDirectory(Path.GetDirectoryName(sectorPath)!);
+          WriteAndRoundTrip(sectorPath, sector, typeof(worldStreamingSector));
+          WriteAndRoundTrip(blockPath, block, typeof(worldStreamingBlock));
+
+          using var verify = File.OpenRead(sectorPath);
+          using var rr = new CR2WReader(verify, Encoding.UTF8, false);
+          if (rr.ReadFile(out var parsedSectorFile) != EFileReadErrorCodes.NoError) throw new Exception("sector verify failed");
+          var parsedSector = (worldStreamingSector)parsedSectorFile!.RootChunk;
+          var parsedSplineNode = parsedSector.Nodes[0].Chunk as worldSplineNode ?? throw new Exception("not spline node");
+          if (parsedSplineNode.SplineData.Chunk?.Points.Count != 9) throw new Exception("wrong departure spline point count");
+          if (parsedSector.NodeRefs.Count != 1) throw new Exception("missing departure node ref");
+          Console.WriteLine($"R376B_WORLD_OK nodeRef={parsedSector.NodeRefs[0]} points={parsedSplineNode.SplineData.Chunk.Points.Count}");
+          CS
+          RAW_ROOT="$RAW" dotnet run -c Release
+          dotnet tool install WolvenKit.CLI --version 9.0.1 --tool-path "$WORK/tools"
+          "$WORK/tools/cp77tools" pack "$RAW" -o "$OUT"
+          test -s "$OUT/NCTCH2Departure.archive"
+          cp "$OUT/NCTCH2Departure.archive" "$GITHUB_WORKSPACE/source/archive/pc/mod/NCTCH2Departure.archive"
+          cat > "$GITHUB_WORKSPACE/source/archive/pc/mod/NCTCH2Departure.archive.xl" <<'YAML'
+          streaming:
+            blocks:
+              - nctc\bays\h2\departure\all.streamingblock
+          YAML
+
+      - name: Patch r376b controller and diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          transit_path = Path('source/redscript/NCTC/NCTCTransitSystem.reds')
+          s = transit_path.read_text()
+          def once(old, new, label):
+              global s
+              n = s.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected 1 match, got {n}')
+              s = s.replace(old, new, 1)
+
+          once('GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37601);',
+               'GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37602);',
+               'runtime')
+
+          marker = '''  // r374e: generation-safe traffic replacement, but unlike r372n the
+'''
+          method = '''  // r376b: the spline has already completed successfully, so no native
+  // interrupt is needed. Pulse the ordinary driver lifecycle and hand the
+  // measured rolling speed back to the traffic navigator.
+  public func DriveToTrafficAfterSpline(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {
+    let callback: ref<NCTCDeferredDriveCommand>;
+    let noDriver: ref<AIEvent>;
+    let driverReady: ref<AIEvent>;
+    let speedProfile: Int32;
+    let speedLimit: Float;
+    let generation: Int32;
+    if !this.IsReady() { return false; };
+    generation = this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.activeRouteCommand = null;
+    this.activeSplineCommand = null;
+    noDriver = new AIEvent();
+    driverReady = new AIEvent();
+    noDriver.name = n"NoDriver";
+    driverReady.name = n"DriverReady";
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.030);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_forced_start_speed_mm", Cast<Int32>(MaxF(startSpeed, 0.00) * 1000.00));
+    callback = new NCTCDeferredDriveCommand();
+    speedLimit = this.ResolveTrafficSpeed(target, speedProfile);
+    callback.Configure(this.bus, this, target, minimumDistance, speedLimit, speedProfile, MaxF(startSpeed, 0.00), generation);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);
+    return true;
+  }
+
+'''
+          once(marker, method + marker, 'insert traffic-after-spline')
+
+          hold = '''      if Equals(this.requestedStopId, 70) && this.HasServiceBay() && this.bayParkingWasEntered {
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+'''
+          once(hold, '', 'remove r376a arrival hold')
+
+          old_leave = '''      if leaveBayDirect {
+        let exitSpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 5.00), 2.00);
+        this.bayParkingActive = true;
+        this.bayParkingStage = 3;
+        this.bayParkingRetryCount = 0;
+        this.bayParkingRoadTarget = this.GetBayParkingRoadTarget();
+        this.driveCommandSent = this.controller.DriveToBerthDirect(this.bayParkingRoadTarget, exitSpeed, 5.00);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 63 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.10);
+        return;
+      };
+'''
+          new_leave = '''      if leaveBayDirect {
+        let exitSpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 5.00), 2.00);
+        this.bayParkingActive = true;
+        this.bayParkingRetryCount = 0;
+        if Equals(this.requestedStopId, 70) {
+          this.bayParkingStage = 12;
+          this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/departure_spline", exitSpeed, false);
+          this.PublishLoopDiagnostic(this.driveCommandSent ? 72 : 33, this.requestedStopId);
+          this.ScheduleDispatch(0.10);
+          return;
+        };
+        this.bayParkingStage = 3;
+        this.bayParkingRoadTarget = this.GetBayParkingRoadTarget();
+        this.driveCommandSent = this.controller.DriveToBerthDirect(this.bayParkingRoadTarget, exitSpeed, 5.00);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 63 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.10);
+        return;
+      };
+'''
+          once(old_leave, new_leave, 'H2 departure arm')
+
+          old_tel = '''      if this.bayParkingActive && Equals(this.bayParkingStage, 10) {
+        this.PublishLoopDiagnostic(71, this.requestedStopId);
+      } else {
+        this.PublishRouteCommandTelemetry();
+      };
+'''
+          new_tel = '''      if this.bayParkingActive && Equals(this.bayParkingStage, 10) {
+        this.PublishLoopDiagnostic(71, this.requestedStopId);
+      } else {
+        if this.bayParkingActive && Equals(this.bayParkingStage, 12) {
+          this.PublishLoopDiagnostic(73, this.requestedStopId);
+        } else {
+          this.PublishRouteCommandTelemetry();
+        };
+      };
+'''
+          once(old_tel, new_tel, 'departure telemetry')
+
+          stage11 = '''    if this.bayParkingActive && Equals(this.bayParkingStage, 11) {
+      this.ScheduleDispatch(0.25);
+      return;
+    };
+
+'''
+          departure = '''    if this.bayParkingActive && Equals(this.bayParkingStage, 12) {
+      if this.controller.IsSplineCommandSuccessful() {
+        let rollingSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
+        if !this.AdvanceToNextStop() {
+          this.PublishLoopDiagnostic(34, 0);
+          this.ScheduleDispatch(1.00);
+          return;
+        };
+        this.legPolls = 0;
+        this.bayParkingActive = false;
+        this.bayParkingStage = 0;
+        this.driveCommandSent = this.controller.DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, rollingSpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 74 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.05);
+        return;
+      };
+      if this.controller.IsSplineCommandFailed() {
+        this.bayParkingStage = 13;
+        this.PublishLoopDiagnostic(75, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      this.ScheduleDispatch(0.10);
+      return;
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 13) {
+      this.ScheduleDispatch(0.25);
+      return;
+    };
+
+'''
+          once(stage11, stage11 + departure, 'departure state machine')
+          transit_path.write_text(s)
+
+          cet_path = Path('source/cet/nctc_survey/init.lua')
+          c = cet_path.read_text()
+          old_codes = '''    [68] = "route loop: r376a H2 native spline armed",
+    [69] = "route loop: r376a H2 native spline reached path end",
+    [70] = "route loop: r376a H2 native spline FAILED",
+    [71] = "route loop: r376a H2 native spline active telemetry"
+'''
+          new_codes = '''    [68] = "route loop: r376a H2 native spline armed",
+    [69] = "route loop: r376a H2 native spline reached path end",
+    [70] = "route loop: r376a H2 native spline FAILED",
+    [71] = "route loop: r376a H2 native spline active telemetry",
+    [72] = "route loop: r376b H2 native departure spline armed",
+    [73] = "route loop: r376b H2 native departure spline active telemetry",
+    [74] = "route loop: r376b H2 spline exit -> native traffic handoff",
+    [75] = "route loop: r376b H2 native departure spline FAILED"
+'''
+          if c.count(old_codes) != 1: raise SystemExit('CET codes match failed')
+          c = c.replace(old_codes, new_codes, 1)
+          old_list = 'or code == 60 or code == 61 or code == 62 or code == 63 or code == 64 or code == 65 or code == 66 or code == 67 or code == 68 or code == 69 or code == 70 or code == 71 then'
+          new_list = 'or code == 60 or code == 61 or code == 62 or code == 63 or code == 64 or code == 65 or code == 66 or code == 67 or code == 68 or code == 69 or code == 70 or code == 71 or code == 72 or code == 73 or code == 74 or code == 75 then'
+          if c.count(old_list) != 1: raise SystemExit('CET bay-code list match failed')
+          c = c.replace(old_list, new_list, 1)
+          old_build = '''  if revision == 37601 then
+    log("NCTC runtime build=37601 r376a H2 native spline arrival POC")
+'''
+          new_build = '''  if revision == 37602 then
+    log("NCTC runtime build=37602 r376b H2 native spline arrival + departure")
+  elseif revision == 37601 then
+    log("NCTC runtime build=37601 r376a H2 native spline arrival POC")
+'''
+          if c.count(old_build) != 1: raise SystemExit('CET build marker match failed')
+          c = c.replace(old_build, new_build, 1)
+          cet_path.write_text(c)
+          PY
+
+      - name: Verify r376b source scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'nctc_dev_build_revision.*, 37602' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q '\$/nctc/bays/h2/arrival_spline' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q '\$/nctc/bays/h2/departure_spline' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'r376b H2 native spline arrival + departure' source/cet/nctc_survey/init.lua
+          test "$(git hash-object source/archive/pc/mod/NCTCH2Spline.archive)" = "ff0be26fb781cf5f2aaf9dd75ce5b668f777a0f6"
+          test "$(git hash-object source/archive/pc/mod/NCTCH2Spline.archive.xl)" = "6e934a5637bfe3300832eea2fef179386576c5e1"
+          test -s source/archive/pc/mod/NCTCH2Departure.archive
+          test -s source/archive/pc/mod/NCTCH2Departure.archive.xl
+          test "$(sha256sum source/archive/pc/mod/NCTCDisplayPrototype.archive | awk '{print $1}')" = "09a8fb10c2e027b2250c1ec647f8c3d466129bea907f5421771795093ae37d0a"
+
+      - name: Create clean experimental commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="$RUNNER_TEMP/r376b-stage"
+          mkdir -p "$STAGE/source/redscript/NCTC" "$STAGE/source/cet/nctc_survey" "$STAGE/source/archive/pc/mod"
+          cp source/redscript/NCTC/NCTCTransitSystem.reds "$STAGE/source/redscript/NCTC/"
+          cp source/cet/nctc_survey/init.lua "$STAGE/source/cet/nctc_survey/"
+          cp source/archive/pc/mod/NCTCH2Departure.archive "$STAGE/source/archive/pc/mod/"
+          cp source/archive/pc/mod/NCTCH2Departure.archive.xl "$STAGE/source/archive/pc/mod/"
+          git reset --hard
+          git clean -fd
+          git switch -C experiment/r376b-h2-native-spline-departure 857c92b7068a4b7bf026bfbb9b9712884f154090
+          cp "$STAGE/source/redscript/NCTC/NCTCTransitSystem.reds" source/redscript/NCTC/NCTCTransitSystem.reds
+          cp "$STAGE/source/cet/nctc_survey/init.lua" source/cet/nctc_survey/init.lua
+          cp "$STAGE/source/archive/pc/mod/NCTCH2Departure.archive" source/archive/pc/mod/NCTCH2Departure.archive
+          cp "$STAGE/source/archive/pc/mod/NCTCH2Departure.archive.xl" source/archive/pc/mod/NCTCH2Departure.archive.xl
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_survey/init.lua source/archive/pc/mod/NCTCH2Departure.archive source/archive/pc/mod/NCTCH2Departure.archive.xl
+          git commit -m "feat: r376b H2 native spline departure"
+          git push origin HEAD:refs/heads/experiment/r376b-h2-native-spline-departure
+          echo "CLEAN_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "TRANSIT_BLOB=$(git hash-object source/redscript/NCTC/NCTCTransitSystem.reds)" >> "$GITHUB_ENV"
+          echo "CET_BLOB=$(git hash-object source/cet/nctc_survey/init.lua)" >> "$GITHUB_ENV"
+          echo "DEPARTURE_ARCHIVE_BLOB=$(git hash-object source/archive/pc/mod/NCTCH2Departure.archive)" >> "$GITHUB_ENV"
+
+      - name: Build installable r376b package
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/nctc-r376b"
+          mkdir -p "$ROOT/archive/pc/mod" "$ROOT/r6/scripts/NCTC" "$ROOT/r6/tweaks/NCTC"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger"
+          cp source/archive/pc/mod/*.archive "$ROOT/archive/pc/mod/"
+          cp source/archive/pc/mod/*.archive.xl "$ROOT/archive/pc/mod/"
+          cp source/redscript/NCTC/*.reds "$ROOT/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$ROOT/r6/tweaks/NCTC/"
+          cp source/cet/nctc_survey/init.lua "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_survey/nctc_network.default.json "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_survey/nctc_survey_settings.json "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_passenger/* "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp README.md THIRD_PARTY_NOTICES.md "$ROOT/"
+          cat > "$ROOT/NCTC_BUILD_INFO.txt" <<EOF
+          Night City Transit Corporation
+          Devkit: r376b H2 native spline arrival + departure
+          Runtime build: 37602
+          Branch: experiment/r376b-h2-native-spline-departure
+          Commit: $CLEAN_SHA
+          Scope: H2 only. r376a validated arrival spline is unchanged. r376b adds a separate native worldSplineNode for departure and hands rolling speed back to native traffic after the spline completes.
+          EOF
+          test ! -e "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+          test "$(git hash-object "$ROOT/r6/scripts/NCTC/NCTCTransitSystem.reds")" = "$TRANSIT_BLOB"
+          test "$(git hash-object "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/init.lua")" = "$CET_BLOB"
+          test "$(git hash-object "$ROOT/archive/pc/mod/NCTCH2Spline.archive")" = "ff0be26fb781cf5f2aaf9dd75ce5b668f777a0f6"
+          test "$(git hash-object "$ROOT/archive/pc/mod/NCTCH2Departure.archive")" = "$DEPARTURE_ARCHIVE_BLOB"
+          test "$(sha256sum "$ROOT/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')" = "09a8fb10c2e027b2250c1ec647f8c3d466129bea907f5421771795093ae37d0a"
+          cd "$ROOT"
+          ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376b-h2-native-spline-departure-development.zip"
+          zip -qr "$ZIP" .
+          unzip -t "$ZIP"
+          sha256sum "$ZIP" | tee "$RUNNER_TEMP/r376b.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r376b-h2-native-spline-departure
+          path: |
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r376b-h2-native-spline-departure-development.zip
+            ${{ runner.temp }}/r376b.sha256
+          compression-level: 0
