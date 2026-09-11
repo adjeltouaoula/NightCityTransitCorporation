@@ -1,0 +1,69 @@
+name: r374u-calibration-packager
+on:
+  push:
+    branches: ["automation/r374u-calibration-packager"]
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build devkit package
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=package
+          rm -rf "$OUT"
+          mkdir -p "$OUT/r6/scripts/NCTC" "$OUT/r6/tweaks/NCTC" \
+                   "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey" \
+                   "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" \
+                   "$OUT/archive/pc/mod"
+          cp source/redscript/NCTC/*.reds "$OUT/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$OUT/r6/tweaks/NCTC/"
+          cp source/cet/nctc_survey/* "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_passenger/* "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp source/archive/pc/mod/NCTCDisplayPrototype.archive "$OUT/archive/pc/mod/"
+          cp source/archive/pc/mod/NCTCTrafficRuntime.archive "$OUT/archive/pc/mod/"
+          cp README.md THIRD_PARTY_NOTICES.md "$OUT/"
+          cat > "$OUT/NCTC_BUILD_INFO.txt" <<'EOF'
+          Night City Transit Corporation devkit
+          Build: r374u bay-width calibration
+          Runtime: 37421
+          Source commit: c979b277d4e7eab3372e60e1c8a4d163a91b0f8f
+          Branch: experiment/r374u-bay-width-calibration
+
+          PURPOSE
+          - Calibration-only build based exactly on r374t driving behavior.
+          - Adds two per-stop survey points: bayWidthA and bayWidthB.
+          - Does not use those points for driving yet.
+
+          AUTHORING
+          - NumPad0 cycles: Bay Point 1 -> Bay Point 2 -> Bay Width A -> Bay Width B -> Bay Point 1.
+          - NumPad3 records the active point.
+          - For Width A/B, stand on opposite straight edges of the bay, approximately face-to-face across its width.
+          - After both points exist, nctc_survey.log prints BAY WIDTH CALIBRATION with the 2D width in metres.
+          - Record H2, Cannery Plaza and QG Delamain separately so their widths can be compared.
+
+          PACKAGING
+          - Active nctc_network.json is intentionally not included.
+          - Existing nctc_network.default.json remains included as before.
+          EOF
+          ZIP=NightCityTransitCorporation-0.3.0-devkit-r374u-bay-width-calibration-development.zip
+          (cd "$OUT" && zip -qr "../$ZIP" .)
+          sha256sum "$ZIP" | tee "$ZIP.sha256"
+          sha256sum "$OUT/archive/pc/mod/NCTCDisplayPrototype.archive" | tee display.sha256
+          grep -q '37421' "$OUT/r6/scripts/NCTC/NCTCTransitSystem.reds"
+          grep -q 'nctc_survey_bay_edit_mode' "$OUT/r6/scripts/NCTC/NCTCSettings.reds"
+          grep -q 'BAY WIDTH CALIBRATION' "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/init.lua"
+          test ! -e "$OUT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r374u-calibration-devkit
+          path: |
+            NightCityTransitCorporation-0.3.0-devkit-r374u-bay-width-calibration-development.zip
+            NightCityTransitCorporation-0.3.0-devkit-r374u-bay-width-calibration-development.zip.sha256
+            display.sha256
+          if-no-files-found: error
