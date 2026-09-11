@@ -1,0 +1,132 @@
+name: r374o-dual-bay-geometry-builder
+on:
+  push:
+    branches: ["automation/r374o-dual-bay-geometry-builder"]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch dual-point bay geometry
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('source/redscript/NCTC/NCTCSettings.reds')
+          s = p.read_text()
+          marker = '  public let editBayPoint2: Bool = false;\n'
+          addition = '''\n  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")\n  @runtimeProperty("ModSettings.displayName", "Toggle Bay Point editor")\n  @runtimeProperty("ModSettings.description", "Developer-only shortcut. Switches NumPad 3 between Bay Point 1 and Bay Point 2.")\n  @runtimeProperty("ModSettings.category", "Developer mode")\n  @runtimeProperty("ModSettings.dependency", "developerMode")\n  public let toggleBayPointEditorKey: EInputKey = EInputKey.IK_NumPad0;\n'''
+          assert marker in s
+          s = s.replace(marker, marker + addition, 1)
+          key_marker = '    if Equals(event.GetKey(), this.nextSurveyStopKey) { this.CycleSurveyStop(true); return; };\n'
+          assert key_marker in s
+          s = s.replace(key_marker, key_marker + '    if Equals(event.GetKey(), this.toggleBayPointEditorKey) { this.ToggleBayPointEditor(); return; };\n', 1)
+          method_marker = '  private func RemoveSelectedBayPoint2() -> Void {\n'
+          method = '''  private func ToggleBayPointEditor() -> Void {\n    this.editBayPoint2 = !this.editBayPoint2;\n    this.lastBayPoint2EditMode = this.editBayPoint2;\n    this.PublishSurveySettings();\n    NCTCSettings.Notify(this.GetGameInstance(), this.editBayPoint2 ? "NCTC - Editing Bay Point 2" : "NCTC - Editing Bay Point 1");\n  }\n\n'''
+          assert method_marker in s
+          s = s.replace(method_marker, method + method_marker, 1)
+          dyn = '      else if Equals(variable.GetName(), n"removeBayPoint2") { variable.SetVisible(this.developerMode && this.editBayPoint2); };\n'
+          s = s.replace(dyn, '')
+          p.write_text(s)
+
+          p = Path('source/redscript/NCTC/NCTCTransitSystem.reds')
+          s = p.read_text()
+          assert 'SetFact(n"nctc_dev_build_revision", 37414);' in s
+          s = s.replace('SetFact(n"nctc_dev_build_revision", 37414);', 'SetFact(n"nctc_dev_build_revision", 37415);', 1)
+          probe = '    quests.SetFact(n"nctc_dev_profile_probe_berth_valid", quests.GetFact(StringToName(prefix + "berth_valid")));\n'
+          assert probe in s
+          s = s.replace(probe, probe + '    quests.SetFact(n"nctc_dev_profile_probe_berth2_valid", quests.GetFact(StringToName(prefix + "berth2_valid")));\n', 1)
+          berth_forward_method = '''  public static func TryGetBerthForward(game: GameInstance, stopId: Int32, out forward: Vector4) -> Bool {\n    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);\n    let prefix: String = "nctc_external_capture_id" + ToString(stopId) + "_berth_";\n    if !IsDefined(quests) || !Equals(quests.GetFact(StringToName(prefix + "forward_valid")), 1) { return false; };\n    forward = new Vector4(Cast<Float>(quests.GetFact(StringToName(prefix + "forward_x"))) / 1000000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "forward_y"))) / 1000000.00, 0.00, 0.00);\n    forward = Vector4.Normalize2D(forward);\n    return AbsF(forward.X) > 0.01 || AbsF(forward.Y) > 0.01;\n  }\n'''
+          berth2_method = berth_forward_method + '''\n  public static func TryGetBerth2(game: GameInstance, stopId: Int32, out berth2: Vector4, out forward: Vector4) -> Bool {\n    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);\n    let prefix: String = "nctc_external_capture_id" + ToString(stopId) + "_berth2_";\n    if !IsDefined(quests) || !Equals(quests.GetFact(StringToName(prefix + "valid")), 1) { return false; };\n    berth2 = NCTCServiceProfiles.ReadVector(quests, prefix);\n    if AbsF(berth2.X) < 1.00 && AbsF(berth2.Y) < 1.00 { return false; };\n    forward = new Vector4(0.00, 0.00, 0.00, 0.00);\n    if Equals(quests.GetFact(StringToName(prefix + "forward_valid")), 1) {\n      forward = new Vector4(Cast<Float>(quests.GetFact(StringToName(prefix + "forward_x"))) / 1000000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "forward_y"))) / 1000000.00, 0.00, 0.00);\n      forward = Vector4.Normalize2D(forward);\n    };\n    return true;\n  }\n'''
+          assert berth_forward_method in s
+          s = s.replace(berth_forward_method, berth2_method, 1)
+          fields = '  private let surveyBerth: Vector4;\n  private let surveyBerthForward: Vector4;\n  private let surveyYaw: Float;\n'
+          fields_new = '  private let surveyBerth: Vector4;\n  private let surveyBerthForward: Vector4;\n  private let surveyBerth2: Vector4;\n  private let surveyBerth2Forward: Vector4;\n  private let hasSurveyBerth2: Bool;\n  private let surveyYaw: Float;\n'
+          assert fields in s
+          s = s.replace(fields, fields_new, 1)
+          dep_fields = '  private let departureStart: Vector4;\n  private let departureForward: Vector4;\n  private let departureRoadTarget: Vector4;\n'
+          assert dep_fields in s
+          s = s.replace(dep_fields, '  private let departureStart: Vector4;\n  private let departureForward: Vector4;\n  private let departureExitPoint: Vector4;\n  private let departureRoadTarget: Vector4;\n', 1)
+          start = s.index('  private func GetServiceBerth() -> Vector4 {')
+          end = s.index('  // r374k: keep the successful early-nose entry', start)
+          geometry = '''  private func HasServiceBay() -> Bool {\n    return this.hasSurveyProfile && this.hasSurveyBerth2 && Vector4.Distance(this.surveyBerth, this.surveyBerth2) >= 12.00;\n  }\n\n  private func GetBayForward() -> Vector4 {\n    let segment: Vector4 = this.surveyBerth2 - this.surveyBerth;\n    let authored: Vector4;\n    let forward: Vector4;\n    if Vector4.Distance(this.surveyBerth, this.surveyBerth2) < 0.10 { return this.surveyBerthForward; };\n    if AbsF(this.surveyBerthForward.X) > 0.01 || AbsF(this.surveyBerthForward.Y) > 0.01 { authored = Vector4.Normalize2D(this.surveyBerthForward); }\n    else {\n      if AbsF(this.surveyBerth2Forward.X) > 0.01 || AbsF(this.surveyBerth2Forward.Y) > 0.01 { authored = Vector4.Normalize2D(this.surveyBerth2Forward); }\n      else { authored = IsDefined(this.controller) ? this.controller.GetWorldForward() : new Vector4(0.00, 0.00, 0.00, 0.00); };\n    };\n    forward = Vector4.Normalize2D(segment);\n    if (AbsF(authored.X) > 0.01 || AbsF(authored.Y) > 0.01) && Vector4.Dot(forward, authored) < 0.00 { forward = forward * -1.00; };\n    return forward;\n  }\n\n  private func GetBayEntryPoint() -> Vector4 {\n    let forward: Vector4 = this.GetBayForward();\n    let segment: Vector4 = this.surveyBerth2 - this.surveyBerth;\n    return Vector4.Dot(segment, forward) >= 0.00 ? this.surveyBerth : this.surveyBerth2;\n  }\n\n  private func GetBayExitPoint() -> Vector4 {\n    let forward: Vector4 = this.GetBayForward();\n    let segment: Vector4 = this.surveyBerth2 - this.surveyBerth;\n    return Vector4.Dot(segment, forward) >= 0.00 ? this.surveyBerth2 : this.surveyBerth;\n  }\n\n  private func GetServiceBerth() -> Vector4 {\n    let entry: Vector4;\n    let exit: Vector4;\n    if this.HasServiceBay() {\n      entry = this.GetBayEntryPoint();\n      exit = this.GetBayExitPoint();\n      return entry + (exit - entry) * 0.65;\n    };\n    return this.hasSurveyProfile ? this.surveyBerth : this.requestedStop;\n  }\n\n  private func GetBerthForward() -> Vector4 {\n    let forward: Vector4;\n    if this.HasServiceBay() { return this.GetBayForward(); };\n    forward = this.surveyBerthForward;\n    if AbsF(forward.X) > 0.01 || AbsF(forward.Y) > 0.01 { return Vector4.Normalize2D(forward); };\n    if IsDefined(this.controller) { return this.controller.GetWorldForward(); };\n    return new Vector4(0.00, 0.00, 0.00, 0.00);\n  }\n\n'''
+          s = s[:start] + geometry + s[end:]
+          old_corridor = '''  // r374m: one continuous bay target. Keep a small 10% residue on the ROAD\n  // side of the berth axis so the direct driver never has a reason to cross\n  // the axis and counter-steer back (the visible Cannery/Delamain zigzag).\n  private func GetBerthCorridorTarget() -> Vector4 {\n    let forward: Vector4 = this.GetBerthForward();\n    let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);\n    return this.GetServiceBerth()\n      + forward * 4.00\n      - right * this.berthMergeSignedLateral * 0.10;\n  }\n'''
+          new_corridor = '''  // r374o: Point 1/2 define the real bay axis. One continuous direct command\n  // aims four metres beyond the 65% service point, with no virtual retarget.\n  private func GetBerthCorridorTarget() -> Vector4 {\n    let forward: Vector4 = this.GetBerthForward();\n    return this.GetServiceBerth() + forward * 4.00;\n  }\n'''
+          assert old_corridor in s
+          s = s.replace(old_corridor, new_corridor, 1)
+          arm_start = s.index('  // r374k departure: steer out hard from the bus actual stopped position.')
+          arm_end = s.index('  // r374g: braking target on the current road line.', arm_start)
+          arm = '''  // r374o: leave through the authored bay exit before native traffic resumes.\n  private func ArmDepartureManeuver() -> Void {\n    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());\n    let forward: Vector4 = this.GetBayForward();\n    this.departureStart = this.controller.GetWorldPosition();\n    this.departureForward = forward;\n    this.departureExitPoint = this.GetBayExitPoint();\n    this.departureRoadTarget = this.departureExitPoint + forward * 8.00;\n    this.departureManeuverActive = true;\n    if IsDefined(quests) {\n      quests.SetFact(n"nctc_dev_departure_target_x_mm", Cast<Int32>(this.departureRoadTarget.X * 1000.00));\n      quests.SetFact(n"nctc_dev_departure_target_y_mm", Cast<Int32>(this.departureRoadTarget.Y * 1000.00));\n      quests.SetFact(n"nctc_dev_departure_target_z_mm", Cast<Int32>(this.departureRoadTarget.Z * 1000.00));\n      quests.SetFact(n"nctc_dev_departure_progress_mm", Cast<Int32>(this.GetDepartureProgress() * 1000.00));\n      quests.SetFact(n"nctc_dev_departure_speed_mm", 0);\n    };\n  }\n\n  private func GetDepartureProgress() -> Float {\n    let delta: Vector4 = this.controller.GetWorldPosition() - this.departureExitPoint;\n    return Vector4.Dot(delta, this.departureForward);\n  }\n\n'''
+          s = s[:arm_start] + arm + s[arm_end:]
+          occ_start = s.index('  // r374m occupancy bridge.')
+          occ_end = s.index('  private func PublishRouteDisplay', occ_start)
+          occ = '''  // r374o: scan the whole authored bay, not a guessed box around one berth.\n  private func PublishBerthOccupancyProbe(quests: ref<QuestsSystem>) -> Void {\n    let entry: Vector4; let exit: Vector4; let center: Vector4; let forward: Vector4; let halfLength: Float;\n    if !IsDefined(quests) { return; };\n    if this.serviceStopId <= 0 || !this.HasServiceBay() {\n      quests.SetFact(n"nctc_dev_service_berth_stop_id", 0);\n      quests.SetFact(n"nctc_dev_service_bay_half_length_mm", 0);\n      return;\n    };\n    entry = this.GetBayEntryPoint(); exit = this.GetBayExitPoint();\n    center = entry + (exit - entry) * 0.50; forward = this.GetBayForward();\n    halfLength = Vector4.Distance(entry, exit) * 0.50;\n    quests.SetFact(n"nctc_dev_service_berth_stop_id", this.serviceStopId);\n    quests.SetFact(n"nctc_dev_service_berth_x_mm", Cast<Int32>(center.X * 1000.00));\n    quests.SetFact(n"nctc_dev_service_berth_y_mm", Cast<Int32>(center.Y * 1000.00));\n    quests.SetFact(n"nctc_dev_service_berth_z_mm", Cast<Int32>(center.Z * 1000.00));\n    quests.SetFact(n"nctc_dev_service_berth_forward_x_mm", Cast<Int32>(forward.X * 1000.00));\n    quests.SetFact(n"nctc_dev_service_berth_forward_y_mm", Cast<Int32>(forward.Y * 1000.00));\n    quests.SetFact(n"nctc_dev_service_bay_half_length_mm", Cast<Int32>(halfLength * 1000.00));\n  }\n\n'''
+          s = s[:occ_start] + occ + s[occ_end:]
+          req = '''    this.surveyBerthForward = new Vector4(0.00, 0.00, 0.00, 0.00);\n    this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), line, stopId, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);\n    NCTCServiceProfiles.TryGetBerthForward(this.GetGameInstance(), stopId, this.surveyBerthForward);\n'''
+          req_new = '''    this.surveyBerthForward = new Vector4(0.00, 0.00, 0.00, 0.00);\n    this.surveyBerth2 = new Vector4(0.00, 0.00, 0.00, 0.00);\n    this.surveyBerth2Forward = new Vector4(0.00, 0.00, 0.00, 0.00);\n    this.hasSurveyBerth2 = false;\n    this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), line, stopId, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);\n    NCTCServiceProfiles.TryGetBerthForward(this.GetGameInstance(), stopId, this.surveyBerthForward);\n    this.hasSurveyBerth2 = NCTCServiceProfiles.TryGetBerth2(this.GetGameInstance(), stopId, this.surveyBerth2, this.surveyBerth2Forward);\n'''
+          assert req in s
+          s = s.replace(req, req_new, 1)
+          spawn = '''    this.surveyBerthForward = new Vector4(0.00, 0.00, 0.00, 0.00);\n    this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), this.requestedLine, this.requestedStopId, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);\n    NCTCServiceProfiles.TryGetBerthForward(this.GetGameInstance(), this.requestedStopId, this.surveyBerthForward);\n'''
+          spawn_new = '''    this.surveyBerthForward = new Vector4(0.00, 0.00, 0.00, 0.00);\n    this.surveyBerth2 = new Vector4(0.00, 0.00, 0.00, 0.00);\n    this.surveyBerth2Forward = new Vector4(0.00, 0.00, 0.00, 0.00);\n    this.hasSurveyBerth2 = false;\n    this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), this.requestedLine, this.requestedStopId, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);\n    NCTCServiceProfiles.TryGetBerthForward(this.GetGameInstance(), this.requestedStopId, this.surveyBerthForward);\n    this.hasSurveyBerth2 = NCTCServiceProfiles.TryGetBerth2(this.GetGameInstance(), this.requestedStopId, this.surveyBerth2, this.surveyBerth2Forward);\n'''
+          assert spawn in s
+          s = s.replace(spawn, spawn_new, 1)
+          adv = '''    this.surveyBerth = nextBerth;\n    this.surveyBerthForward = new Vector4(0.00, 0.00, 0.00, 0.00);\n    NCTCServiceProfiles.TryGetBerthForward(this.GetGameInstance(), nextStopId, this.surveyBerthForward);\n    this.surveyYaw = nextYaw;\n'''
+          adv_new = '''    this.surveyBerth = nextBerth;\n    this.surveyBerthForward = new Vector4(0.00, 0.00, 0.00, 0.00);\n    this.surveyBerth2 = new Vector4(0.00, 0.00, 0.00, 0.00);\n    this.surveyBerth2Forward = new Vector4(0.00, 0.00, 0.00, 0.00);\n    this.hasSurveyBerth2 = false;\n    NCTCServiceProfiles.TryGetBerthForward(this.GetGameInstance(), nextStopId, this.surveyBerthForward);\n    this.hasSurveyBerth2 = NCTCServiceProfiles.TryGetBerth2(this.GetGameInstance(), nextStopId, this.surveyBerth2, this.surveyBerth2Forward);\n    this.surveyYaw = nextYaw;\n'''
+          assert adv in s
+          s = s.replace(adv, adv_new, 1)
+          dwell_old = '''      // r374m: no hand-authored departure arc. After closing the doors,\n      // immediately return the Mahir to native traffic navigation.\n      this.serviceStopId = 0;\n      this.departureManeuverActive = false;\n      if !this.AdvanceToNextStop() {\n        this.PublishLoopDiagnostic(34, 0);\n        this.ScheduleDispatch(1.00);\n        return;\n      };\n      this.arrived = false;\n      this.dwellPolls = 0;\n      this.legPolls = 0;\n      this.driveCommandSent = this.controller.DriveToTraffic(this.GetTrafficTarget(), 0.00);\n      this.PublishLoopDiagnostic(this.driveCommandSent ? 49 : 33, this.requestedStopId);\n      this.ScheduleDispatch(0.25);\n      return;\n'''
+          dwell_new = '''      let leaveBayDirect: Bool = this.HasServiceBay() && !this.berthBypassActive;\n      if leaveBayDirect { this.ArmDepartureManeuver(); } else { this.departureManeuverActive = false; };\n      this.serviceStopId = 0;\n      if !this.AdvanceToNextStop() {\n        this.PublishLoopDiagnostic(34, 0);\n        this.ScheduleDispatch(1.00);\n        return;\n      };\n      this.arrived = false; this.dwellPolls = 0; this.legPolls = 0;\n      if leaveBayDirect {\n        this.driveCommandSent = this.controller.DriveToBerthDirect(this.departureRoadTarget, 0.00);\n        this.PublishLoopDiagnostic(this.driveCommandSent ? 48 : 33, this.requestedStopId);\n        this.ScheduleDispatch(0.05);\n      } else {\n        this.driveCommandSent = this.controller.DriveToTraffic(this.GetTrafficTarget(), 0.00);\n        this.PublishLoopDiagnostic(this.driveCommandSent ? 49 : 33, this.requestedStopId);\n        this.ScheduleDispatch(0.25);\n      };\n      return;\n'''
+          assert dwell_old in s
+          s = s.replace(dwell_old, dwell_new, 1)
+          dep_comment = '    // r374m: departure is now entirely native traffic recovery.\n\n'
+          dep_branch = '''    if this.departureManeuverActive {\n      let departureProgress: Float = this.GetDepartureProgress();\n      let departureSpeed: Float = AbsF(this.controller.GetCurrentSpeed());\n      quests.SetFact(n"nctc_dev_departure_progress_mm", Cast<Int32>(departureProgress * 1000.00));\n      quests.SetFact(n"nctc_dev_departure_speed_mm", Cast<Int32>(departureSpeed * 1000.00));\n      if departureProgress >= 2.00 || this.controller.IsNear(this.departureRoadTarget, 2.50) {\n        this.departureManeuverActive = false; this.legPolls = 0;\n        this.driveCommandSent = this.controller.DriveToTrafficAfterRollingPassage(this.GetTrafficTarget(), 0.00, departureSpeed);\n        this.PublishLoopDiagnostic(this.driveCommandSent ? 49 : 33, this.requestedStopId);\n        this.ScheduleDispatch(0.05); return;\n      };\n      if this.controller.IsRouteCommandFailed() {\n        this.driveCommandSent = this.controller.DriveToBerthDirect(this.departureRoadTarget, departureSpeed);\n        this.PublishLoopDiagnostic(this.driveCommandSent ? 48 : 33, this.requestedStopId);\n      };\n      this.ScheduleDispatch(0.10); return;\n    };\n\n'''
+          assert dep_comment in s
+          s = s.replace(dep_comment, dep_branch, 1)
+          s = s.replace('    if !this.followingPassage && this.hasSurveyProfile && !this.berthBypassActive\n      && Equals(this.requestedStopId, this.serviceStopId)\n', '    if !this.followingPassage && this.HasServiceBay() && !this.berthBypassActive\n      && Equals(this.requestedStopId, this.serviceStopId)\n', 1)
+          brake_start = s.index('    // r374g: traffic-mode speed fields proved non-authoritative.')
+          brake_end = s.index('    // r374m single-command bay entry:', brake_start)
+          brake = '''    if !this.followingPassage && this.HasServiceBay() && !this.berthManeuverActive\n      && !this.berthBypassActive && Equals(this.requestedStopId, this.serviceStopId)\n      && !this.approachSlowdownApplied {\n      let bayEntryDistance: Float = Vector4.Distance(this.controller.GetWorldPosition(), this.GetBayEntryPoint());\n      let brakeSpeed: Float = AbsF(this.controller.GetCurrentSpeed());\n      if bayEntryDistance <= 55.00 && bayEntryDistance >= 18.00 && brakeSpeed > 8.00 {\n        this.approachSlowdownApplied = true; this.legPolls = 0;\n        this.driveCommandSent = this.controller.DriveToTrafficAtSpeed(this.GetTrafficTarget(), 0.00, brakeSpeed, 7.00);\n        this.PublishLoopDiagnostic(this.driveCommandSent ? 47 : 33, this.requestedStopId);\n        this.ScheduleDispatch(0.05); return;\n      };\n    };\n\n'''
+          s = s[:brake_start] + brake + s[brake_end:]
+          old_entry_head = '''    // r374m single-command bay entry: no ENTRY->ALIGN retarget.\n    if !this.followingPassage && this.hasSurveyProfile && !this.berthManeuverActive\n      && !this.berthBypassActive\n      && Equals(this.requestedStopId, this.serviceStopId)\n      && this.controller.IsNear(this.GetServiceBerth(), 35.00)\n      && (AbsF(this.controller.GetCurrentSpeed()) >= 1.50 || this.approachSlowdownApplied)\n      && AbsF(this.controller.GetCurrentSpeed()) <= 8.00 {\n'''
+          new_entry_head = '''    // r374o: one-point stop = road stop; two-point stop = authored bay.\n    if !this.followingPassage && this.HasServiceBay() && !this.berthManeuverActive\n      && !this.berthBypassActive\n      && Equals(this.requestedStopId, this.serviceStopId)\n      && this.controller.IsNear(this.GetBayEntryPoint(), 22.00)\n      && (AbsF(this.controller.GetCurrentSpeed()) >= 1.50 || this.approachSlowdownApplied)\n      && AbsF(this.controller.GetCurrentSpeed()) <= 8.00 {\n'''
+          assert old_entry_head in s
+          s = s.replace(old_entry_head, new_entry_head, 1)
+          clear_marker = '    this.hasSurveyProfile = false;\n    this.routeStarted = false;\n'
+          assert clear_marker in s
+          s = s.replace(clear_marker, '    this.hasSurveyProfile = false;\n    this.hasSurveyBerth2 = false;\n    this.routeStarted = false;\n', 1)
+          p.write_text(s)
+
+          p = Path('source/cet/nctc_survey/init.lua')
+          s = p.read_text()
+          old_half = '  local fx = fact(quests, "nctc_dev_service_berth_forward_x_mm") / 1000.0\n  local fy = fact(quests, "nctc_dev_service_berth_forward_y_mm") / 1000.0\n'
+          assert old_half in s
+          s = s.replace(old_half, old_half + '  local bay_half_length = fact(quests, "nctc_dev_service_bay_half_length_mm") / 1000.0\n', 1)
+          old_rect = '              if math.abs(longitudinal) <= 8.50 and math.abs(lateral) <= 2.60 and math.abs(dz) <= 2.50 then\n'
+          assert old_rect in s
+          s = s.replace(old_rect, '              local half_length = bay_half_length > 1.0 and bay_half_length or 8.50\n              if math.abs(longitudinal) <= (half_length + 0.75) and math.abs(lateral) <= 2.60 and math.abs(dz) <= 2.50 then\n', 1)
+          build_old = '  if revision == 37414 then\n    log("NCTC runtime build=37414 r374n dual-point bay authoring")\n  elseif revision == 37413 then\n'
+          assert build_old in s
+          s = s.replace(build_old, '  if revision == 37415 then\n    log("NCTC runtime build=37415 r374o two-point bay geometry + authored exit handoff")\n  elseif revision == 37414 then\n    log("NCTC runtime build=37414 r374n dual-point bay authoring")\n  elseif revision == 37413 then\n', 1)
+          p.write_text(s)
+          PY
+          git diff --check
+          grep -q 'toggleBayPointEditorKey: EInputKey = EInputKey.IK_NumPad0' source/redscript/NCTC/NCTCSettings.reds
+          grep -q 'private func HasServiceBay() -> Bool' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'return entry + (exit - entry) \* 0.65' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'this.departureExitPoint = this.GetBayExitPoint()' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'nctc_dev_service_bay_half_length_mm' source/cet/nctc_survey/init.lua
+          grep -q 'nctc_dev_build_revision", 37415' source/redscript/NCTC/NCTCTransitSystem.reds
+      - name: Commit changes and remove builder
+        shell: bash
+        run: |
+          rm -f .github/workflows/r374o-dual-bay-geometry-builder.yml
+          git config user.name "NCTC build bot"
+          git config user.email "nctc-build-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: r374o drive authored two-point bays"
+          git push origin HEAD:automation/r374o-dual-bay-geometry-builder
