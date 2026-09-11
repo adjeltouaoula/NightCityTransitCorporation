@@ -1,0 +1,22 @@
+name: r374w rolling-ray builder
+on:
+  push:
+    branches: [automation/r374w-rolling-ray-builder]
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: automation/r374w-rolling-ray-builder
+      - name: Apply r374w patch
+        run: python3 tools/r374w_patch.py
+      - name: Commit source
+        run: |
+          git config user.name "NCTC build bot"
+          git config user.email "nctc-build-bot@users.noreply.github.com"
+          git add source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_survey/init.lua
+          git commit -m "fix: r374w rolling bay control rays"
+          git push
