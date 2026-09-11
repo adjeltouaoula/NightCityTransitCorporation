@@ -418,6 +418,8 @@ normalize_captures = function(network)
       if vector_has_position(capture.approach) then saved.approach = capture.approach end
       if vector_has_position(capture.berth) then saved.berth = capture.berth end
       if vector_has_position(capture.berth2) then saved.berth2 = capture.berth2 end
+      if vector_has_position(capture.bayWidthA) then saved.bayWidthA = capture.bayWidthA end
+      if vector_has_position(capture.bayWidthB) then saved.bayWidthB = capture.bayWidthB end
       saved.eventId = capture.eventId or saved.eventId
       saved.stopSequence = capture.stopSequence or saved.stopSequence
       saved.stopLocKey = capture.stopLocKey or saved.stopLocKey
@@ -684,6 +686,12 @@ local function update_capture_point(capture, point, value)
   elseif point == 4 then
     capture.berth2 = value
     return "bay point 2"
+  elseif point == 5 then
+    capture.bayWidthA = value
+    return "bay width A"
+  elseif point == 6 then
+    capture.bayWidthB = value
+    return "bay width B"
   end
   capture.berth = value
   return "bay point 1"
@@ -890,7 +898,14 @@ local function capture_directly(kind)
   capture.stopName = target.name
   capture.eventId = (capture.eventId or 0) + 1
   local point = { x = round3(position.x), y = round3(position.y), z = round3(position.z), yaw = round3(player:GetWorldYaw()) }
-  local point_code = kind == "spawn" and 1 or (kind == "approach" and 2 or ((fact(quests, "nctc_survey_edit_bay_point2") == 1) and 4 or 3))
+  local editor_mode = fact(quests, "nctc_survey_bay_edit_mode")
+  local point_code = 3
+  if kind == "spawn" then point_code = 1
+  elseif kind == "approach" then point_code = 2
+  elseif editor_mode == 1 then point_code = 4
+  elseif editor_mode == 2 then point_code = 5
+  elseif editor_mode == 3 then point_code = 6
+  end
   local point_name = update_capture_point(capture, point_code, point)
   network.revision = (network.revision or 0) + 1
   if write_network(network) then
@@ -898,6 +913,17 @@ local function capture_directly(kind)
     set_fact(quests, "nctc_survey_direct_notice_id", fact(quests, "nctc_survey_direct_notice_id") + 1)
     log("direct saved " .. point_name .. " L" .. tostring(line) .. " stop " .. tostring(stop_index) .. "/" .. tostring(count)
       .. " at (" .. tostring(point.x) .. ", " .. tostring(point.y) .. ", " .. tostring(point.z) .. ")")
+    if vector_has_position(capture.bayWidthA) and vector_has_position(capture.bayWidthB) then
+      local dx = (capture.bayWidthA.x or 0) - (capture.bayWidthB.x or 0)
+      local dy = (capture.bayWidthA.y or 0) - (capture.bayWidthB.y or 0)
+      local width = math.sqrt(dx * dx + dy * dy)
+      log("BAY WIDTH CALIBRATION L" .. tostring(line)
+        .. " stop " .. tostring(stop_index) .. "/" .. tostring(count)
+        .. " stopId=" .. tostring(target.id)
+        .. " name=" .. tostring(target.name or capture.stopName or "")
+        .. string.format(" width=%.3fm", width)
+        .. string.format(" A=(%.3f, %.3f) B=(%.3f, %.3f)", capture.bayWidthA.x or 0, capture.bayWidthA.y or 0, capture.bayWidthB.x or 0, capture.bayWidthB.y or 0))
+    end
   end
 end
 
@@ -1297,7 +1323,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37420 then
+  if revision == 37421 then
+    log("NCTC runtime build=37421 r374u bay-width calibration")
+  elseif revision == 37420 then
     log("NCTC runtime build=37420 r374t real-bus S-curve bay path")
   elseif revision == 37419 then
     log("NCTC runtime build=37419 r374s early Point1 gate + local road rejoin")
