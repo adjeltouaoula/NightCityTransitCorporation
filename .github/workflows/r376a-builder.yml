@@ -1,0 +1,354 @@
+name: r376a native spline builder
+
+on:
+  push:
+    branches:
+      - automation/r376a-builder
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: automation/r376a-builder
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Replace point-based H2 bay controller with native spline
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('source/redscript/NCTC/NCTCTransitSystem.reds')
+          s = p.read_text()
+
+          def once(old, new, label):
+              global s
+              n = s.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected 1 match, found {n}')
+              s = s.replace(old, new, 1)
+
+          # Runtime marker.
+          once('SetFact(n"nctc_dev_build_revision", 37502);', 'SetFact(n"nctc_dev_build_revision", 37601);', 'runtime')
+
+          # Dedicated spline callback. One command owns the entire H2 curve.
+          marker = '\n\n// NCTC owns the native autonomous command lifecycle.'
+          spline_class = r'''
+
+public class NCTCDeferredSplineDriveCommand extends DelayCallback {
+  private let bus: wref<VehicleObject>;
+  private let controller: wref<NCTCServiceBusController>;
+  private let splinePath: String;
+  private let startSpeed: Float;
+  private let stopAtPathEnd: Bool;
+  private let commandGeneration: Int32;
+
+  public func Configure(bus: ref<VehicleObject>, controller: ref<NCTCServiceBusController>, splinePath: String, startSpeed: Float, stopAtPathEnd: Bool, commandGeneration: Int32) -> ref<NCTCDeferredSplineDriveCommand> {
+    this.bus = bus;
+    this.controller = controller;
+    this.splinePath = splinePath;
+    this.startSpeed = startSpeed;
+    this.stopAtPathEnd = stopAtPathEnd;
+    this.commandGeneration = commandGeneration;
+    return this;
+  }
+
+  public func Call() -> Void {
+    let command: ref<AIVehicleOnSplineCommand>;
+    if !IsDefined(this.bus) || !this.bus.IsAttached() || !IsDefined(this.bus.GetAIComponent()) { return; };
+    if IsDefined(this.controller) && !this.controller.IsDriveGenerationCurrent(this.commandGeneration) {
+      this.controller.ReportStaleDriveCallback(this.commandGeneration);
+      return;
+    };
+    command = new AIVehicleOnSplineCommand();
+    command.splineRef = CreateNodeRef(this.splinePath);
+    command.secureTimeOut = 120.00;
+    command.driveBackwards = false;
+    command.reverseSpline = false;
+    command.startFromClosest = true;
+    command.stopAtPathEnd = this.stopAtPathEnd;
+    command.needDriver = false;
+    command.useKinematic = false;
+    if this.startSpeed > 0.50 { command.forcedStartSpeed = this.startSpeed; };
+    this.bus.GetAIComponent().SendCommand(command);
+    if IsDefined(this.controller) { this.controller.SetActiveSplineCommand(command, this.commandGeneration); };
+  }
+}
+'''
+          once(marker, spline_class + marker, 'spline callback marker')
+
+          # Controller keeps spline state separately from point-drive state.
+          once('  private let previousRouteCommand: ref<AIVehicleDriveToPointCommand>;\n  private let driveGeneration: Int32;',
+               '  private let previousRouteCommand: ref<AIVehicleDriveToPointCommand>;\n  private let activeSplineCommand: ref<AIVehicleOnSplineCommand>;\n  private let driveGeneration: Int32;',
+               'spline field')
+
+          # Native spline submission method.
+          adaptive = '  // Adaptive NCTC service speed. The game district supplies the zone profile\n'
+          spline_method = r'''  // r376a: H2 bay motion is a native continuous spline. Unlike
+  // DriveToPoint, the intermediate curve points are geometry, not destinations.
+  public func DriveOnBaySpline(splinePath: String, startSpeed: Float, stopAtPathEnd: Bool) -> Bool {
+    let callback: ref<NCTCDeferredSplineDriveCommand>;
+    let noDriver: ref<AIEvent>;
+    let driverReady: ref<AIEvent>;
+    let generation: Int32;
+    if !this.IsReady() { return false; };
+    generation = this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleOnSplineCommand", false, true);
+    this.activeRouteCommand = null;
+    this.activeSplineCommand = null;
+    noDriver = new AIEvent();
+    driverReady = new AIEvent();
+    noDriver.name = n"NoDriver";
+    driverReady.name = n"DriverReady";
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.030);
+    callback = new NCTCDeferredSplineDriveCommand();
+    callback.Configure(this.bus, this, splinePath, MaxF(startSpeed, 0.00), stopAtPathEnd, generation);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);
+    return true;
+  }
+
+'''
+          once(adaptive, spline_method + adaptive, 'spline method')
+
+          # Spline state accessors before point-command state accessors.
+          accessor_marker = '  public func IsRouteCommandSuccessful() -> Bool {\n'
+          accessors = r'''  public func SetActiveSplineCommand(command: ref<AIVehicleOnSplineCommand>, generation: Int32) -> Void {
+    if !this.IsDriveGenerationCurrent(generation) { return; };
+    this.activeSplineCommand = command;
+  }
+
+  public func IsSplineCommandSuccessful() -> Bool {
+    return IsDefined(this.activeSplineCommand) && Equals(this.activeSplineCommand.state, AICommandState.Success);
+  }
+
+  public func IsSplineCommandFailed() -> Bool {
+    if !IsDefined(this.activeSplineCommand) { return false; };
+    return Equals(this.activeSplineCommand.state, AICommandState.Failure)
+      || Equals(this.activeSplineCommand.state, AICommandState.Cancelled)
+      || Equals(this.activeSplineCommand.state, AICommandState.Interrupted);
+  }
+
+  public func GetSplineCommandStatusCode() -> Int32 {
+    if !IsDefined(this.activeSplineCommand) { return 0; };
+    if Equals(this.activeSplineCommand.state, AICommandState.Success) { return 2; };
+    if this.IsSplineCommandFailed() { return 3; };
+    return 1;
+  }
+
+'''
+          once(accessor_marker, accessors + accessor_marker, 'spline accessors')
+
+          # Cleanup must stop either command type.
+          old_cancel = '''  public func CancelTrafficRoute() -> Void {
+    if this.IsReady() {
+      this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+    };
+  }
+
+  public func ArriveAtStop() -> Void {
+    if !this.IsReady() { return; };
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+  }
+'''
+          new_cancel = '''  public func CancelTrafficRoute() -> Void {
+    if this.IsReady() {
+      this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+      this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleOnSplineCommand", false, true);
+    };
+  }
+
+  public func ArriveAtStop() -> Void {
+    if !this.IsReady() { return; };
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleOnSplineCommand", false, true);
+  }
+'''
+          once(old_cancel, new_cancel, 'cleanup')
+
+          # H2 POC intentionally holds after successful arrival. Do not contaminate
+          # this test with the old direct-point departure logic.
+          once('      this.controller.KeepPassengerDoorOpen();\n      boarded = this.controller.IsPlayerAboard()',
+               '      this.controller.KeepPassengerDoorOpen();\n      if Equals(this.requestedStopId, 70) && this.HasServiceBay() && this.bayParkingWasEntered {\n        this.ScheduleDispatch(0.25);\n        return;\n      };\n      boarded = this.controller.IsPlayerAboard()',
+               'H2 hold')
+
+          # During spline motion, report spline state instead of stale point state.
+          once('''    if this.telemetryPolls >= 10 {
+      this.telemetryPolls = 0;
+      this.PublishRouteCommandTelemetry();
+    };''',
+               '''    if this.telemetryPolls >= 10 {
+      this.telemetryPolls = 0;
+      if this.bayParkingActive && Equals(this.bayParkingStage, 10) {
+        this.PublishLoopDiagnostic(71, this.requestedStopId);
+      } else {
+        this.PublishRouteCommandTelemetry();
+      };
+    };''',
+               'spline telemetry')
+
+          # Throw away r375 point-ray bay motion completely. Occupancy and
+          # intermediate-bay skip above this block remain untouched.
+          start = s.index('    // ENTRY: capture the real road centreline locally and issue ONE long direct')
+          end = s.index('    // Road-stop / occupied-bay fallback remains native traffic.', start)
+          fresh = r'''    // r376a H2-ONLY NATIVE SPLINE ARRIVAL POC.
+    // All r375 DriveToPoint bay trajectory stages are intentionally removed.
+    // The spline begins on the live road lane ~22 m before P1, bends through
+    // the bay mouth, aligns to P1->P2, and ends around 64% of the bay length.
+    if !this.followingPassage && this.HasServiceBay() && !this.bayParkingActive
+      && !this.bayParkingBypass && Equals(this.requestedStopId, this.serviceStopId)
+      && Equals(this.requestedStopId, 70) {
+      let entryLateral: Float;
+      let entryLongitudinal: Float = this.GetBayEntryProgress(entryLateral);
+      if entryLongitudinal > 0.50 && entryLongitudinal <= 24.00 && entryLateral <= 12.00 {
+        let entrySpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 6.00), 2.00);
+        this.bayParkingActive = true;
+        this.bayParkingStage = 10;
+        this.bayParkingWasEntered = true;
+        this.bayParkingRetryCount = 0;
+        this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/arrival_spline", entrySpeed, true);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 68 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.10);
+        return;
+      };
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 10) {
+      if this.controller.IsSplineCommandSuccessful() {
+        this.controller.ArriveAtStop();
+        this.arrived = true;
+        this.bayParkingActive = false;
+        this.bayParkingStage = 0;
+        this.driveCommandSent = false;
+        this.dwellPolls = 0;
+        quests.SetFact(n"nctc_service_bus_at_stop", 1);
+        this.PublishLoopDiagnostic(69, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      if this.controller.IsSplineCommandFailed() {
+        // Failure is terminal in this POC: hold position and log it. Never
+        // fall back to a point target or native traffic while off-lane.
+        this.bayParkingStage = 11;
+        this.PublishLoopDiagnostic(70, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      this.ScheduleDispatch(0.10);
+      return;
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 11) {
+      this.ScheduleDispatch(0.25);
+      return;
+    };
+
+'''
+          s = s[:start] + fresh + s[end:]
+          p.write_text(s)
+
+          # CET log labels/build marker.
+          q = Path('source/cet/nctc_survey/init.lua')
+          t = q.read_text()
+          old_codes = '''    [65] = "route loop: r375b entry retry",
+    [66] = "route loop: r375b one-shot parking correction",
+    [67] = "route loop: r375b exit retry"
+'''
+          new_codes = '''    [65] = "route loop: r375b entry retry",
+    [66] = "route loop: r375b one-shot parking correction",
+    [67] = "route loop: r375b exit retry",
+    [68] = "route loop: r376a H2 native spline armed",
+    [69] = "route loop: r376a H2 native spline reached path end",
+    [70] = "route loop: r376a H2 native spline FAILED",
+    [71] = "route loop: r376a H2 native spline active telemetry"
+'''
+          if t.count(old_codes) != 1: raise SystemExit('CET codes mismatch')
+          t = t.replace(old_codes, new_codes, 1)
+          old_extra = 'or code == 60 or code == 61 or code == 62 or code == 63 or code == 64 or code == 65 or code == 66 or code == 67 then'
+          new_extra = 'or code == 60 or code == 61 or code == 62 or code == 63 or code == 64 or code == 65 or code == 66 or code == 67 or code == 68 or code == 69 or code == 70 or code == 71 then'
+          if t.count(old_extra) != 1: raise SystemExit('CET extra mismatch')
+          t = t.replace(old_extra, new_extra, 1)
+          old_build = '  if revision == 37502 then\n    log("NCTC runtime build=37502 r375b early-progress parking + physical bay arrival")'
+          new_build = '  if revision == 37601 then\n    log("NCTC runtime build=37601 r376a H2 native spline arrival POC")\n  elseif revision == 37502 then\n    log("NCTC runtime build=37502 r375b early-progress parking + physical bay arrival")'
+          if t.count(old_build) != 1: raise SystemExit('CET build mismatch')
+          t = t.replace(old_build, new_build, 1)
+          q.write_text(t)
+          PY
+
+      - name: Generate H2 spline world archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r376a-world"
+          RAW="$WORK/NCTCH2Spline"
+          OUT="$WORK/out"
+          mkdir -p "$WORK/src" "$RAW/nctc/bays/h2/sectors" "$OUT" source/archive/pc/mod
+          cd "$WORK/src"
+          dotnet new console --framework net10.0 --force
+          dotnet add package WolvenKit.RED4 --version 9.0.1
+          cat > Program.cs <<'CS'
+          using System.Text;
+          using WolvenKit.RED4.Archive.Buffer;
+          using WolvenKit.RED4.Archive.CR2W;
+          using WolvenKit.RED4.Archive.IO;
+          using WolvenKit.RED4.Types;
+          using static WolvenKit.RED4.Types.Enums;
+          static Vector3 V3(float x,float y,float z)=>new(){X=x,Y=y,Z=z};
+          static Vector4 V4(float x,float y,float z,float w=0)=>new(){X=x,Y=y,Z=z,W=w};
+          static Box B(float ax,float ay,float az,float bx,float by,float bz)=>new(){Min=V4(ax,ay,az),Max=V4(bx,by,bz)};
+          static SplinePoint P(float x,float y,float z,uint id)=>new(){Position=V3(x,y,z),Id=id,AutomaticTangents=true,ContinuousTangents=true};
+          static void Write(string path, RedBaseClass root){var f=new CR2WFile{RootChunk=root};using(var fs=File.Create(path))using(var w=new CR2WWriter(fs))w.WriteFile(f);using var input=File.OpenRead(path);using var r=new CR2WReader(input,Encoding.UTF8,false);if(r.ReadFile(out var parsed)!=EFileReadErrorCodes.NoError||parsed is null)throw new Exception("CR2W roundtrip failed "+path);}
+          const string nodeRefText="$/nctc/bays/h2/arrival_spline";
+          const string sectorDepot="nctc\\bays\\h2\\sectors\\h2_arrival.streamingsector";
+          NodeRef nodeRef=nodeRefText;
+          var spline=new Spline{Looped=false,Reversed=false,HasDirection=true};
+          // P1=(-2161.015,-1012.713), P2=(-2162.260,-1043.903).
+          // Local points: road centreline -> taper -> bay centreline -> parked endpoint.
+          spline.Points.Add(P( 5.074125f, 21.814978f,0,1)); // 22 m before P1, road +4.2 m
+          spline.Points.Add(P( 4.595507f,  9.824526f,0,2)); // 10 m before P1, road +4.2 m
+          spline.Points.Add(P( 4.196658f, -0.167516f,0,3)); // P1 mouth, road side
+          spline.Points.Add(P( 2.298586f, -5.095734f,0,4)); // +5 m, transition
+          spline.Points.Add(P( 0.400515f,-10.023951f,0,5)); // +10 m, nearly aligned
+          spline.Points.Add(P(-0.598273f,-14.988064f,0,6)); // +15 m, bay axis
+          spline.Points.Add(P(-0.797698f,-19.984086f,0,7)); // +20 m, parked endpoint
+          var node=new worldSplineNode{SplineData=new CHandle<Spline>(spline)};
+          var sector=new worldStreamingSector{Version=62,Level=0,Category=worldStreamingSectorCategory.Exterior};
+          sector.VariantIndices.Add(0); sector.Nodes.Add(new CHandle<worldNode>(node)); sector.NodeRefs.Add(nodeRef);
+          var nd=new worldNodeDataBuffer(); nd.Add(new worldNodeData{Id=1,NodeIndex=0,Position=V4(-2161.015f,-1012.713f,7.851f),Orientation=new Quaternion{R=1},Scale=V3(1,1,1),Pivot=V3(-2161.015f,-1012.713f,7.851f),Bounds=B(-2170,-1045,5,-2150,-985,12),QuestPrefabRefHash=nodeRef,MaxStreamingDistance=250,UkFloat1=300,Uk10=1024,Uk11=512});
+          sector.NodeData=new DataBuffer(); sector.NodeData.Data=nd; sector.NodeData.Buffer.Parent=sector; sector.NodeData.Buffer.ParentTypes.Add("worldStreamingSector.transforms");
+          var block=new worldStreamingBlock(); block.Descriptors.Add(new worldStreamingSectorDescriptor{Data=new CResourceAsyncReference<worldStreamingSector>((ResourcePath)sectorDepot),StreamingBox=B(-2220,-1100,0,-2100,-950,30),NumNodeRanges=1,Level=0,Category=worldStreamingSectorCategory.Exterior});
+          var root=Environment.GetEnvironmentVariable("RAW_ROOT")!;
+          var sp=Path.Combine(root,"nctc","bays","h2","sectors","h2_arrival.streamingsector"); var bp=Path.Combine(root,"nctc","bays","h2","all.streamingblock"); Directory.CreateDirectory(Path.GetDirectoryName(sp)!); Write(sp,sector); Write(bp,block);
+          using var inp=File.OpenRead(sp); using var rr=new CR2WReader(inp,Encoding.UTF8,false); if(rr.ReadFile(out var parsed)!=EFileReadErrorCodes.NoError)throw new Exception("verify failed"); var ps=(worldStreamingSector)parsed!.RootChunk; var sn=(worldSplineNode)ps.Nodes[0].Chunk!; if(sn.SplineData.Chunk?.Points.Count!=7)throw new Exception("wrong points"); Console.WriteLine("R376A_WORLD_OK");
+          CS
+          RAW_ROOT="$RAW" dotnet run -c Release
+          dotnet tool install WolvenKit.CLI --version 9.0.1 --tool-path "$WORK/tools"
+          "$WORK/tools/cp77tools" pack "$RAW" -o "$OUT"
+          test -s "$OUT/NCTCH2Spline.archive"
+          cd "$GITHUB_WORKSPACE"
+          cp "$OUT/NCTCH2Spline.archive" source/archive/pc/mod/NCTCH2Spline.archive
+          cat > source/archive/pc/mod/NCTCH2Spline.archive.xl <<'YAML'
+          streaming:
+            blocks:
+              - nctc\bays\h2\all.streamingblock
+          YAML
+          test "$(sha256sum source/archive/pc/mod/NCTCDisplayPrototype.archive | awk '{print $1}')" = "09a8fb10c2e027b2250c1ec647f8c3d466129bea907f5421771795093ae37d0a"
+
+      - name: Commit generated r376a sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "NCTC build bot"
+          git config user.email "nctc-build-bot@users.noreply.github.com"
+          git add source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_survey/init.lua source/archive/pc/mod/NCTCH2Spline.archive source/archive/pc/mod/NCTCH2Spline.archive.xl
+          git diff --cached --stat
+          git commit -m "feat: r376a H2 native spline arrival"
+          git push origin HEAD:automation/r376a-builder
