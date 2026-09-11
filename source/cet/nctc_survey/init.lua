@@ -1030,6 +1030,8 @@ local function synchronize_external_survey(quests)
     set_fact(quests, prefix .. "spawn_valid", 0)
     set_fact(quests, prefix .. "approach_valid", 0)
     set_fact(quests, prefix .. "berth_valid", 0)
+    set_fact(quests, prefix .. "berth2_valid", 0)
+    set_fact(quests, prefix .. "berth2_forward_valid", 0)
   end
   -- Every passage receives its own fact namespace. Future enabled routes can
   -- consume their capture directly; no information is thrown away when a
@@ -1111,6 +1113,12 @@ local function log_service_loop(quests)
   local dwell_polls = fact(quests, "nctc_dev_loop_dwell_polls")
   local player_aboard = fact(quests, "nctc_dev_loop_player_aboard")
   local mount_request = fact(quests, "nctc_dev_loop_mount_request")
+  local has_bay = fact(quests, "nctc_dev_loop_has_bay")
+  local bay_length = fact(quests, "nctc_dev_loop_bay_length_mm") / 1000.0
+  local bay_p1_x = fact(quests, "nctc_dev_loop_bay_p1_x_mm") / 1000.0
+  local bay_p1_y = fact(quests, "nctc_dev_loop_bay_p1_y_mm") / 1000.0
+  local bay_p2_x = fact(quests, "nctc_dev_loop_bay_p2_x_mm") / 1000.0
+  local bay_p2_y = fact(quests, "nctc_dev_loop_bay_p2_y_mm") / 1000.0
   local states = {
     [1] = "arrived and opened doors",
     [2] = "waiting: V is not mounted in this bus",
@@ -1139,13 +1147,13 @@ local function log_service_loop(quests)
     [38] = "route loop: native stop detected; forward berth correction sent",
     [41] = "route loop: r372n outgoing corridor armed",
     [42] = "route loop: r372n rolling post-passage handoff",
-    [43] = "route loop: r374m single continuous BAY command sent",
+    [43] = "route loop: r374o two-point BAY direct command sent",
     [44] = "route loop: legacy ALIGN handoff (unexpected in r374m)",
     [45] = "route loop: legacy final BERTH command sent (unexpected in r374m)",
     [46] = "route loop: r374b rolling slow traffic handoff",
     [47] = "route loop: r374g road brake armed before ENTRY",
-    [48] = "route loop: legacy departure ARC sent (unexpected in r374m)",
-    [49] = "route loop: r374m native lane recovery departure",
+    [48] = "route loop: r374o authored bay exit command sent",
+    [49] = "route loop: r374o traffic handoff after bay exit / road stop",
     [50] = "route loop: r374m BAY OCCUPIED -> stay on road"
   }
   local command_extra = ""
@@ -1191,6 +1199,12 @@ local function log_service_loop(quests)
         fact(quests, "nctc_dev_departure_target_z_mm") / 1000.0)
       .. " departureProgress=" .. string.format("%.1fm", fact(quests, "nctc_dev_departure_progress_mm") / 1000.0)
       .. " departureSpeed=" .. string.format("%.2f", fact(quests, "nctc_dev_departure_speed_mm") / 1000.0)
+  end
+  if code == 29 or code == 30 or code == 36 or code == 43 or code == 47 or code == 48 or code == 49 or code == 50 then
+    command_extra = command_extra
+      .. " hasBay=" .. tostring(has_bay)
+      .. " bayLen=" .. string.format("%.2fm", bay_length)
+      .. string.format(" P1=(%.3f, %.3f) P2=(%.3f, %.3f)", bay_p1_x, bay_p1_y, bay_p2_x, bay_p2_y)
   end
   if berth_active == 1 or code == 43 or code == 44 or code == 45 then
     command_extra = command_extra
@@ -1331,7 +1345,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37415 then
+  if revision == 37416 then
+    log("NCTC runtime build=37416 r374p fresh bay facts + geometry diagnostics")
+  elseif revision == 37415 then
     log("NCTC runtime build=37415 r374o two-point bay geometry + authored exit handoff")
   elseif revision == 37414 then
     log("NCTC runtime build=37414 r374n dual-point bay authoring")

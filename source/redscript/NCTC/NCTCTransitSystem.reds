@@ -134,7 +134,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37415);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37416);
     return true;
   }
 
@@ -1027,6 +1027,12 @@ public class NCTCTransitSystem extends ScriptableSystem {
     quests.SetFact(n"nctc_dev_loop_dwell_polls", this.dwellPolls);
     quests.SetFact(n"nctc_dev_loop_player_aboard", IsDefined(this.controller) && this.controller.IsPlayerAboard() ? 1 : 0);
     quests.SetFact(n"nctc_dev_loop_mount_request", quests.GetFact(n"nctc_passenger_departure_requested"));
+    quests.SetFact(n"nctc_dev_loop_has_bay", this.HasServiceBay() ? 1 : 0);
+    quests.SetFact(n"nctc_dev_loop_bay_p1_x_mm", Cast<Int32>(this.surveyBerth.X * 1000.00));
+    quests.SetFact(n"nctc_dev_loop_bay_p1_y_mm", Cast<Int32>(this.surveyBerth.Y * 1000.00));
+    quests.SetFact(n"nctc_dev_loop_bay_p2_x_mm", Cast<Int32>(this.surveyBerth2.X * 1000.00));
+    quests.SetFact(n"nctc_dev_loop_bay_p2_y_mm", Cast<Int32>(this.surveyBerth2.Y * 1000.00));
+    quests.SetFact(n"nctc_dev_loop_bay_length_mm", this.HasServiceBay() ? Cast<Int32>(Vector4.Distance(this.surveyBerth, this.surveyBerth2) * 1000.00) : 0);
     if IsDefined(this.controller) && this.controller.IsReady() {
       busPosition = this.controller.GetWorldPosition();
       quests.SetFact(n"nctc_dev_loop_bus_x_mm", Cast<Int32>(busPosition.X * 1000.00));
