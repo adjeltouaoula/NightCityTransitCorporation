@@ -32,8 +32,8 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cp77tools convert -d build/raw/nctc/h2/h2_bay.streamingsector.json
-          cp77tools convert -d build/raw/nctc/h2/h2_bay.streamingblock.json
+          cp77tools convert deserialize build/raw/nctc/h2/h2_bay.streamingsector.json
+          cp77tools convert deserialize build/raw/nctc/h2/h2_bay.streamingblock.json
           find build/raw -maxdepth 5 -type f -printf '%p %s bytes\n'
           mkdir -p build/archive_input/nctc/h2 build/out
           cp build/raw/nctc/h2/h2_bay.streamingsector build/archive_input/nctc/h2/
