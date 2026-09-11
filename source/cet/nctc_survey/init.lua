@@ -1147,14 +1147,14 @@ local function log_service_loop(quests)
     [38] = "route loop: native stop detected; forward berth correction sent",
     [41] = "route loop: r372n outgoing corridor armed",
     [42] = "route loop: r372n rolling post-passage handoff",
-    [43] = "route loop: r374o two-point BAY direct command sent",
-    [44] = "route loop: legacy ALIGN handoff (unexpected in r374m)",
+    [43] = "route loop: r374r ENTRY_GATE direct command sent",
+    [44] = "route loop: r374r entry gate -> bay corridor/rejoin handoff",
     [45] = "route loop: legacy final BERTH command sent (unexpected in r374m)",
     [46] = "route loop: r374b rolling slow traffic handoff",
-    [47] = "route loop: r374g road brake armed before ENTRY",
-    [48] = "route loop: r374o authored bay exit command sent",
-    [49] = "route loop: r374o traffic handoff after bay exit / road stop",
-    [50] = "route loop: r374m BAY OCCUPIED -> stay on road"
+    [47] = "route loop: legacy road brake (unexpected in r374r)",
+    [48] = "route loop: r374r direct road-rejoin departure",
+    [49] = "route loop: r374r traffic handoff after road rejoin",
+    [50] = "route loop: r374r native Vehicle overlap -> stay on road"
   }
   local command_extra = ""
   if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then
@@ -1270,73 +1270,20 @@ local function scan_service_berth_occupancy(quests, delta_time)
   berth_scan_accumulator = berth_scan_accumulator + (tonumber(delta_time) or 0.0)
   if berth_scan_accumulator < 0.20 then return end
   berth_scan_accumulator = 0.0
-  local stop_id = fact(quests, "nctc_dev_service_berth_stop_id")
+  -- r374r: REDscript owns occupancy using the native physics Vehicle overlap.
+  -- CET is telemetry-only here and must never overwrite the physics result.
+  local stop_id = fact(quests, "nctc_dev_berth_occupancy_stop_id")
+  local occupied = fact(quests, "nctc_dev_berth_occupied")
   if stop_id <= 0 then
-    set_fact(quests, "nctc_dev_berth_occupancy_stop_id", 0)
-    set_fact(quests, "nctc_dev_berth_occupied", 0)
     last_berth_occupancy_stop_id, last_berth_occupancy_state = -1, -1
     return
   end
-  local player = Game.GetPlayer()
-  if not player then return end
-  local bx = fact(quests, "nctc_dev_service_berth_x_mm") / 1000.0
-  local by = fact(quests, "nctc_dev_service_berth_y_mm") / 1000.0
-  local bz = fact(quests, "nctc_dev_service_berth_z_mm") / 1000.0
-  local fx = fact(quests, "nctc_dev_service_berth_forward_x_mm") / 1000.0
-  local fy = fact(quests, "nctc_dev_service_berth_forward_y_mm") / 1000.0
-  local bay_half_length = fact(quests, "nctc_dev_service_bay_half_length_mm") / 1000.0
-  local flen = math.sqrt(fx*fx + fy*fy)
-  if flen < 0.50 then return end
-  fx, fy = fx/flen, fy/flen
-  local rx, ry = -fy, fx
-  local pp = player:GetWorldPosition()
-  local pdx, pdy = bx-pp.x, by-pp.y
-  local pd = math.sqrt(pdx*pdx + pdy*pdy)
-  if pd > 140.0 then return end
-  local occupied, occupant, olong, olat = 0, "", 0.0, 0.0
-  local ok = pcall(function()
-    local query = Game['TSQ_ALL;']()
-    query.maxDistance = math.max(25.0, math.min(150.0, pd + 18.0))
-    local parts = Game.GetTargetingSystem():GetTargetParts(player, query)
-    if not parts then return end
-    local seen = {}
-    for _, part in ipairs(parts) do
-      local entity = nil
-      pcall(function() entity = part:GetComponent():GetEntity() end)
-      if entity then
-        local eid = tostring(entity:GetEntityID())
-        if not seen[eid] then
-          seen[eid] = true
-          local vehicle = false
-          pcall(function() vehicle = GameObject.IsVehicle(entity) end)
-          if vehicle then
-            local rid = ""
-            pcall(function() rid = tostring(entity:GetRecordID().value) end)
-            if not string.find(rid, "nctc_service_mahir_mt28_coach", 1, true) then
-              local pos = entity:GetWorldPosition()
-              local dx, dy, dz = pos.x-bx, pos.y-by, pos.z-bz
-              local longitudinal = dx*fx + dy*fy
-              local lateral = dx*rx + dy*ry
-              local half_length = bay_half_length > 1.0 and bay_half_length or 8.50
-              if math.abs(longitudinal) <= (half_length + 0.75) and math.abs(lateral) <= 2.60 and math.abs(dz) <= 2.50 then
-                occupied, occupant, olong, olat = 1, rid, longitudinal, lateral
-                break
-              end
-            end
-          end
-        end
-      end
-    end
-  end)
-  if not ok then occupied = 0 end
-  set_fact(quests, "nctc_dev_berth_occupancy_stop_id", stop_id)
-  set_fact(quests, "nctc_dev_berth_occupied", occupied)
   if stop_id ~= last_berth_occupancy_stop_id or occupied ~= last_berth_occupancy_state then
     last_berth_occupancy_stop_id, last_berth_occupancy_state = stop_id, occupied
     if occupied == 1 then
-      log(string.format("berth occupancy stopId=%d OCCUPIED vehicle=%s local=(%.2f, %.2f)", stop_id, occupant, olong, olat))
+      log("berth occupancy stopId=" .. tostring(stop_id) .. " OCCUPIED (native Vehicle overlap)")
     else
-      log("berth occupancy stopId=" .. tostring(stop_id) .. " clear")
+      log("berth occupancy stopId=" .. tostring(stop_id) .. " clear (native Vehicle overlap)")
     end
   end
 end
@@ -1345,7 +1292,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37417 then
+  if revision == 37418 then
+    log("NCTC runtime build=37418 r374r entry-gate + native bay overlap + road rejoin")
+  elseif revision == 37417 then
     log("NCTC runtime build=37417 r374q bay geometry independent from service state")
   elseif revision == 37416 then
     log("NCTC runtime build=37416 r374p fresh bay facts + geometry diagnostics")
