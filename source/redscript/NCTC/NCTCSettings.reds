@@ -47,7 +47,7 @@ public class NCTCDirectSurveyNoticeCallback extends DelayCallback {
       noticeId = quests.GetFact(n"nctc_survey_direct_notice_id");
       if noticeId > this.lastNoticeId {
         point = quests.GetFact(n"nctc_survey_direct_notice_point");
-        NCTCSettings.Notify(this.game, "NCTC survey confirmed: " + (Equals(point, 1) ? "spawn" : Equals(point, 2) ? "approach" : Equals(point, 4) ? "Bay Point 2" : "Bay Point 1"));
+        NCTCSettings.Notify(this.game, "NCTC survey confirmed: " + (Equals(point, 1) ? "spawn" : Equals(point, 2) ? "approach" : Equals(point, 4) ? "Bay Point 2" : Equals(point, 5) ? "Bay Width A" : Equals(point, 6) ? "Bay Width B" : "Bay Point 1"));
         this.lastNoticeId = noticeId;
       } else if noticeId < this.lastNoticeId {
         this.lastNoticeId = noticeId;
@@ -370,7 +370,7 @@ public class NCTCSettings extends ScriptableSystem {
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Toggle Bay Point editor")
-  @runtimeProperty("ModSettings.description", "Developer-only shortcut. Switches NumPad 3 between Bay Point 1 and Bay Point 2.")
+  @runtimeProperty("ModSettings.description", "Developer-only shortcut. Cycles NumPad 3 through Bay Point 1, Bay Point 2, Width A and Width B.")
   @runtimeProperty("ModSettings.category", "Developer mode")
   @runtimeProperty("ModSettings.dependency", "developerMode")
   public let toggleBayPointEditorKey: EInputKey = EInputKey.IK_NumPad0;
@@ -455,6 +455,7 @@ public class NCTCSettings extends ScriptableSystem {
   public let beginDraftLine: Bool = false;
 
   private let lastBayPoint2EditMode: Bool;
+  private let bayEditorMode: Int32;
 
   private func OnAttach() -> Void {
     let callback: ref<NCTCDirectSurveyNoticeCallback>;
@@ -462,6 +463,7 @@ public class NCTCSettings extends ScriptableSystem {
     let quests: ref<QuestsSystem>;
     this.RegisterSettings();
     this.lastBayPoint2EditMode = this.editBayPoint2;
+    this.bayEditorMode = this.editBayPoint2 ? 1 : 0;
     this.PublishSurveySettings();
     this.UpdateDeveloperVisibility();
     NCTCMapMarkerSystem.GetInstance(this.GetGameInstance()).RegisterAllMarkers();
@@ -484,7 +486,8 @@ public class NCTCSettings extends ScriptableSystem {
   public func OnModSettingsChange() -> Void {
     if this.developerMode && NotEquals(this.editBayPoint2, this.lastBayPoint2EditMode) {
       this.lastBayPoint2EditMode = this.editBayPoint2;
-      NCTCSettings.Notify(this.GetGameInstance(), this.editBayPoint2 ? "NCTC - Editing Bay Point 2" : "NCTC - Editing Bay Point 1");
+      this.bayEditorMode = this.editBayPoint2 ? 1 : 0;
+      NCTCSettings.Notify(this.GetGameInstance(), "NCTC - Editing " + this.GetBayEditorName());
     };
     if this.developerMode && this.removeBayPoint2 {
       this.removeBayPoint2 = false;
@@ -503,6 +506,7 @@ public class NCTCSettings extends ScriptableSystem {
     quests.SetFact(n"nctc_survey_selected_line", this.GetSelectedLineNumber());
     quests.SetFact(n"nctc_survey_selected_stop_index", this.surveyStopIndex);
     quests.SetFact(n"nctc_survey_edit_bay_point2", this.editBayPoint2 ? 1 : 0);
+    quests.SetFact(n"nctc_survey_bay_edit_mode", this.bayEditorMode);
     quests.SetFact(n"nctc_survey_passage", EnumInt(this.surveyPassage));
   }
 
@@ -510,7 +514,7 @@ public class NCTCSettings extends ScriptableSystem {
     let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(this.GetGameInstance());
     let line: Int32 = this.GetSelectedLineNumber();
     if !IsDefined(markers) || line < 1 { return; };
-    NCTCSettings.Notify(this.GetGameInstance(), "NCTC survey: line " + ToString(line) + " · stop " + ToString(this.surveyStopIndex) + " · " + markers.GetSurveyStopName(line, this.surveyStopIndex) + " · editing " + (this.editBayPoint2 ? "Bay Point 2" : "Bay Point 1"));
+    NCTCSettings.Notify(this.GetGameInstance(), "NCTC survey: line " + ToString(line) + " · stop " + ToString(this.surveyStopIndex) + " · " + markers.GetSurveyStopName(line, this.surveyStopIndex) + " · editing " + this.GetBayEditorName());
   }
 
   @if(ModuleExists("ModSettingsModule"))
@@ -546,11 +550,20 @@ public class NCTCSettings extends ScriptableSystem {
     };
   }
 
+  private func GetBayEditorName() -> String {
+    if Equals(this.bayEditorMode, 1) { return "Bay Point 2"; };
+    if Equals(this.bayEditorMode, 2) { return "Bay Width A"; };
+    if Equals(this.bayEditorMode, 3) { return "Bay Width B"; };
+    return "Bay Point 1";
+  }
+
   private func ToggleBayPointEditor() -> Void {
-    this.editBayPoint2 = !this.editBayPoint2;
+    this.bayEditorMode += 1;
+    if this.bayEditorMode > 3 { this.bayEditorMode = 0; };
+    this.editBayPoint2 = Equals(this.bayEditorMode, 1);
     this.lastBayPoint2EditMode = this.editBayPoint2;
     this.PublishSurveySettings();
-    NCTCSettings.Notify(this.GetGameInstance(), this.editBayPoint2 ? "NCTC - Editing Bay Point 2" : "NCTC - Editing Bay Point 1");
+    NCTCSettings.Notify(this.GetGameInstance(), "NCTC - Editing " + this.GetBayEditorName());
   }
 
   private func RemoveSelectedBayPoint2() -> Void {
