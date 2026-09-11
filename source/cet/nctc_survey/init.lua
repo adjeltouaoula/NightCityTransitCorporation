@@ -417,6 +417,7 @@ normalize_captures = function(network)
       if vector_has_position(capture.spawn) then saved.spawn = capture.spawn end
       if vector_has_position(capture.approach) then saved.approach = capture.approach end
       if vector_has_position(capture.berth) then saved.berth = capture.berth end
+      if vector_has_position(capture.berth2) then saved.berth2 = capture.berth2 end
       saved.eventId = capture.eventId or saved.eventId
       saved.stopSequence = capture.stopSequence or saved.stopSequence
       saved.stopLocKey = capture.stopLocKey or saved.stopLocKey
@@ -680,9 +681,12 @@ local function update_capture_point(capture, point, value)
   elseif point == 2 then
     capture.approach = value
     return "approach"
+  elseif point == 4 then
+    capture.berth2 = value
+    return "bay point 2"
   end
   capture.berth = value
-  return "berth"
+  return "bay point 1"
 end
 
 local function persist_capture(quests, event_id)
@@ -801,6 +805,22 @@ local function persist_capture(quests, event_id)
     }
     local deleted = delete_nearest_passage(network, fact(quests, "nctc_delete_passage_line"), position)
     kind = deleted and "deleted passage point" or "no passage point deleted"
+  elseif event_kind == 10 then
+    local capture_line = fact(quests, "nctc_survey_capture_line")
+    local capture_stop_index = fact(quests, "nctc_survey_capture_stop_index")
+    local target, count = selected_stop(network, capture_line, capture_stop_index)
+    if not target then
+      log("bay point 2 removal rejected: line " .. tostring(capture_line) .. " stop " .. tostring(capture_stop_index) .. " unavailable")
+      return
+    end
+    local capture = find_capture(network, target.id)
+    if capture and vector_has_position(capture.berth2) then
+      capture.berth2 = nil
+      capture.eventId = event_id
+      kind = "removed bay point 2 L" .. tostring(capture_line) .. " stop " .. tostring(capture_stop_index) .. "/" .. tostring(count)
+    else
+      kind = "no bay point 2 to remove L" .. tostring(capture_line) .. " stop " .. tostring(capture_stop_index) .. "/" .. tostring(count)
+    end
   else
     local capture_line = fact(quests, "nctc_survey_capture_line")
     local capture_stop_index = fact(quests, "nctc_survey_capture_stop_index")
@@ -870,13 +890,13 @@ local function capture_directly(kind)
   capture.stopName = target.name
   capture.eventId = (capture.eventId or 0) + 1
   local point = { x = round3(position.x), y = round3(position.y), z = round3(position.z), yaw = round3(player:GetWorldYaw()) }
-  update_capture_point(capture, kind == "spawn" and 1 or (kind == "approach" and 2 or 3), point)
+  local point_code = kind == "spawn" and 1 or (kind == "approach" and 2 or ((fact(quests, "nctc_survey_edit_bay_point2") == 1) and 4 or 3))
+  local point_name = update_capture_point(capture, point_code, point)
   network.revision = (network.revision or 0) + 1
   if write_network(network) then
-    local point_code = kind == "spawn" and 1 or (kind == "approach" and 2 or 3)
     set_fact(quests, "nctc_survey_direct_notice_point", point_code)
     set_fact(quests, "nctc_survey_direct_notice_id", fact(quests, "nctc_survey_direct_notice_id") + 1)
-    log("direct saved " .. kind .. " L" .. tostring(line) .. " stop " .. tostring(stop_index) .. "/" .. tostring(count)
+    log("direct saved " .. point_name .. " L" .. tostring(line) .. " stop " .. tostring(stop_index) .. "/" .. tostring(count)
       .. " at (" .. tostring(point.x) .. ", " .. tostring(point.y) .. ", " .. tostring(point.z) .. ")")
   end
 end
@@ -949,6 +969,7 @@ local function apply_capture(quests, capture)
   apply_vector("nctc_survey_spawn_", capture.spawn)
   apply_vector("nctc_survey_approach_", capture.approach)
   apply_vector("nctc_survey_berth_", capture.berth)
+  apply_vector("nctc_survey_berth2_", capture.berth2)
 end
 
 local function publish_capture(quests, capture)
@@ -962,8 +983,8 @@ local function publish_capture(quests, capture)
     set_fact(quests, prefix .. "y", math.floor((point.y or 0) * 1000))
     set_fact(quests, prefix .. "z", math.floor((point.z or 0) * 1000))
     set_fact(quests, prefix .. "yaw", math.floor((point.yaw or 0) * 1000))
-    if kind == "berth" then
-      -- The capture yaw is the surveyed direction of circulation. Publish a
+    if kind == "berth" or kind == "berth2" then
+      -- Bay endpoint yaw is the surveyed direction of circulation. Publish a
       -- world-space forward vector so redscript never has to guess yaw-axis
       -- conventions when it computes the AI-only target beyond the berth.
       local radians = math.rad(point.yaw or 0)
@@ -976,6 +997,7 @@ local function publish_capture(quests, capture)
   publish_vector("spawn", capture.spawn)
   publish_vector("approach", capture.approach)
   publish_vector("berth", capture.berth)
+  publish_vector("berth2", capture.berth2)
 end
 
 local function synchronize_external_survey(quests)
@@ -1307,7 +1329,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37413 then
+  if revision == 37414 then
+    log("NCTC runtime build=37414 r374n dual-point bay authoring")
+  elseif revision == 37413 then
     log("NCTC runtime build=37413 r374m single bay arc + native lane recovery + occupied-bay road stop")
   elseif revision == 37412 then
     log("NCTC runtime build=37412 r374l rolling bay handoff, no entry hesitation")
