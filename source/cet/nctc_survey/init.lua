@@ -1345,7 +1345,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37416 then
+  if revision == 37417 then
+    log("NCTC runtime build=37417 r374q bay geometry independent from service state")
+  elseif revision == 37416 then
     log("NCTC runtime build=37416 r374p fresh bay facts + geometry diagnostics")
   elseif revision == 37415 then
     log("NCTC runtime build=37415 r374o two-point bay geometry + authored exit handoff")
