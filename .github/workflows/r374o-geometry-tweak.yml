@@ -1,0 +1,36 @@
+name: r374o-geometry-tweak
+on:
+  push:
+    branches: ["automation/r374o-dual-bay-geometry-builder"]
+permissions:
+  contents: write
+jobs:
+  tweak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Keep two-point semantics strict
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('source/redscript/NCTC/NCTCTransitSystem.reds')
+          s=p.read_text()
+          old='return this.hasSurveyProfile && this.hasSurveyBerth2 && Vector4.Distance(this.surveyBerth, this.surveyBerth2) >= 12.00;'
+          new='return this.hasSurveyProfile && this.hasSurveyBerth2 && Vector4.Distance(this.surveyBerth, this.surveyBerth2) > 1.00;'
+          assert old in s
+          p.write_text(s.replace(old,new,1))
+          PY
+          git diff --check
+          grep -q 'this.hasSurveyBerth2 && Vector4.Distance(this.surveyBerth, this.surveyBerth2) > 1.00' source/redscript/NCTC/NCTCTransitSystem.reds
+      - name: Commit tweak and clean workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/r374o-geometry-tweak.yml
+          git config user.name "NCTC build bot"
+          git config user.email "nctc-build-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: r374o treat every distinct second point as a bay"
+          git push origin HEAD:automation/r374o-dual-bay-geometry-builder
