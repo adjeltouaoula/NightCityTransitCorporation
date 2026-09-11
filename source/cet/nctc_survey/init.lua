@@ -1197,7 +1197,15 @@ local function log_service_loop(quests)
     [51] = "route loop: r374w TRACK rolling centreline",
     [52] = "route loop: r374w ROLLING EXIT ATTACK",
     [53] = "route loop: r374w 3-to-1 rolling REJOIN",
-    [54] = "route loop: r374w direct departure stall recovery"
+    [54] = "route loop: r374w direct departure stall recovery",
+    [60] = "route loop: r375a bay entry ray",
+    [61] = "route loop: r375a final parking target",
+    [62] = "route loop: r375a parked in bay",
+    [63] = "route loop: r375a bay exit/rejoin",
+    [64] = "route loop: r375a intermediate bay skipped",
+    [65] = "route loop: r375a entry retry",
+    [66] = "route loop: r375a parking retry",
+    [67] = "route loop: r375a exit retry"
   }
   local command_extra = ""
   if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then
