@@ -1186,18 +1186,18 @@ local function log_service_loop(quests)
     [38] = "route loop: native stop detected; forward berth correction sent",
     [41] = "route loop: r372n outgoing corridor armed",
     [42] = "route loop: r372n rolling post-passage handoff",
-    [43] = "route loop: r374v WIDTH-AWARE ENTRY ATTACK",
-    [44] = "route loop: r374v centreline COUNTER-STEER",
+    [43] = "route loop: r374w ROLLING-RAY ENTRY ATTACK",
+    [44] = "route loop: r374w LONG-CORRIDOR COUNTER-STEER",
     [45] = "route loop: legacy final BERTH command sent (unexpected in r374m)",
     [46] = "route loop: r374b rolling slow traffic handoff",
     [47] = "route loop: legacy road brake (unexpected in r374s)",
-    [48] = "route loop: r374v service departure armed",
-    [49] = "route loop: r374v traffic handoff after measured rejoin",
-    [50] = "route loop: r374v native Vehicle overlap -> stay on road",
-    [51] = "route loop: r374v TRACK narrow bay",
-    [52] = "route loop: r374v EXIT ATTACK inside bay envelope",
-    [53] = "route loop: r374v 3-to-1 REJOIN counter-steer",
-    [54] = "route loop: r374v direct departure stall recovery"
+    [48] = "route loop: r374w rolling service departure armed",
+    [49] = "route loop: r374w traffic handoff after rolling rejoin",
+    [50] = "route loop: r374w native Vehicle overlap -> stay on road",
+    [51] = "route loop: r374w TRACK rolling centreline",
+    [52] = "route loop: r374w ROLLING EXIT ATTACK",
+    [53] = "route loop: r374w 3-to-1 rolling REJOIN",
+    [54] = "route loop: r374w direct departure stall recovery"
   }
   local command_extra = ""
   if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then
@@ -1337,7 +1337,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37422 then
+  if revision == 37423 then
+    log("NCTC runtime build=37423 r374w rolling bay control rays")
+  elseif revision == 37422 then
     log("NCTC runtime build=37422 r374v calibrated narrow-bay geometry + departure recovery")
   elseif revision == 37421 then
     log("NCTC runtime build=37421 r374u bay-width calibration")
