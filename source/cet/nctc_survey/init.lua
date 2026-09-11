@@ -1114,11 +1114,13 @@ local function log_service_loop(quests)
     [38] = "route loop: native stop detected; forward berth correction sent",
     [41] = "route loop: r372n outgoing corridor armed",
     [42] = "route loop: r372n rolling post-passage handoff",
-    [43] = "route loop: r374h shallow bay MERGE command sent",
-    [44] = "route loop: r374i continuous berth CORRIDOR command sent",
-    [45] = "route loop: legacy final BERTH command sent (unexpected in r374i)",
+    [43] = "route loop: r374j early-nose bay ENTRY command sent",
+    [44] = "route loop: r374j rear-follow ALIGN corridor command sent",
+    [45] = "route loop: legacy final BERTH command sent (unexpected in r374j)",
     [46] = "route loop: r374b rolling slow traffic handoff",
-    [47] = "route loop: r374g road brake armed before ENTRY"
+    [47] = "route loop: r374g road brake armed before ENTRY",
+    [48] = "route loop: r374j immediate departure ARC sent",
+    [49] = "route loop: r374j rolling departure handoff to traffic"
   }
   local command_extra = ""
   if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then
@@ -1154,6 +1156,15 @@ local function log_service_loop(quests)
       .. " forcedStartSpeed=" .. string.format("%.2f", fact(quests, "nctc_dev_command_forced_start_speed_mm") / 1000.0)
       .. " generation=" .. tostring(fact(quests, "nctc_dev_drive_generation"))
       .. string.format(" aiTarget=(%.3f, %.3f, %.3f)", ai_target_x, ai_target_y, ai_target_z)
+  end
+  if code == 48 or code == 49 then
+    command_extra = command_extra
+      .. string.format(" departureTarget=(%.3f, %.3f, %.3f)",
+        fact(quests, "nctc_dev_departure_target_x_mm") / 1000.0,
+        fact(quests, "nctc_dev_departure_target_y_mm") / 1000.0,
+        fact(quests, "nctc_dev_departure_target_z_mm") / 1000.0)
+      .. " departureProgress=" .. string.format("%.1fm", fact(quests, "nctc_dev_departure_progress_mm") / 1000.0)
+      .. " departureSpeed=" .. string.format("%.2f", fact(quests, "nctc_dev_departure_speed_mm") / 1000.0)
   end
   if berth_active == 1 or code == 43 or code == 44 or code == 45 then
     command_extra = command_extra
@@ -1219,7 +1230,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37409 then
+  if revision == 37410 then
+    log("NCTC runtime build=37410 r374j early bay entry + immediate departure arc")
+  elseif revision == 37409 then
     log("NCTC runtime build=37409 r374i continuous corridor, no final berth retarget")
   elseif revision == 37408 then
     log("NCTC runtime build=37408 r374h progressive shallow berth merge on development")

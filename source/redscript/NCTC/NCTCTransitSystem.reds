@@ -134,7 +134,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37409);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37410);
     return true;
   }
 
@@ -733,8 +733,13 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let approachBrakeTarget: Vector4;
   // r374h: signed road offset captured once when the slow bay merge begins.
   // Keeping this fixed prevents the virtual merge target from drifting as the
-  // bus changes heading.
+  // bus changes heading. r374j also reuses the captured road line to arc back
+  // out of the bay immediately on departure.
   private let berthMergeSignedLateral: Float;
+  private let departureManeuverActive: Bool;
+  private let departureStart: Vector4;
+  private let departureForward: Vector4;
+  private let departureRoadTarget: Vector4;
   private let passageAfterStopId: Int32;
   private let passageOrdinal: Int32;
   private let passageTarget: Vector4;
@@ -759,21 +764,50 @@ public class NCTCTransitSystem extends ScriptableSystem {
     return new Vector4(0.00, 0.00, 0.00, 0.00);
   }
 
-  // r374h: do NOT aim the first off-lane command directly at the berth axis.
-  // At H2/Cannery the road center is ~4-5 m outside the bay; r373/r374g tried
-  // to erase that full lateral error in only ~10-15 m, forcing the long Mahir
-  // into a sharp S-turn. First remove only 30% of the captured road offset,
-  // then let the continuous corridor command remove the rest over roughly 22-26 m.
+  // r374j: put the FRONT of the Mahir into the bay early, then spend the
+  // remaining distance straightening the rear. r374h kept 70% of the road
+  // offset at its first target, so most lateral correction happened too late.
+  // Keep only 35% now: roughly 65% of the road-to-bay offset is removed before
+  // the bus reaches 12 m before the berth, leaving a long gentle alignment.
   private func GetBerthEntryTarget() -> Vector4 {
     let forward: Vector4 = this.GetBerthForward();
     let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
     return this.GetServiceBerth()
-      - forward * 18.00
-      - right * this.berthMergeSignedLateral * 0.70;
+      - forward * 12.00
+      - right * this.berthMergeSignedLateral * 0.35;
   }
 
   private func GetBerthCorridorTarget() -> Vector4 {
     return this.GetServiceBerth() + this.GetBerthForward() * 4.00;
+  }
+
+  // r374j departure: start turning toward the road immediately. The entry
+  // maneuver already measured the road line relative to the berth axis, so
+  // reuse that signed offset instead of asking traffic navigation to snap the
+  // parked bus back onto a lane. The direct target remains well ahead so the
+  // rolling handoff can happen while the Mahir is still moving.
+  private func ArmDepartureManeuver() -> Void {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    let forward: Vector4 = this.GetBerthForward();
+    let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
+    this.departureStart = this.controller.GetWorldPosition();
+    this.departureForward = forward;
+    this.departureRoadTarget = this.GetServiceBerth()
+      + forward * 14.00
+      - right * this.berthMergeSignedLateral;
+    this.departureManeuverActive = true;
+    if IsDefined(quests) {
+      quests.SetFact(n"nctc_dev_departure_target_x_mm", Cast<Int32>(this.departureRoadTarget.X * 1000.00));
+      quests.SetFact(n"nctc_dev_departure_target_y_mm", Cast<Int32>(this.departureRoadTarget.Y * 1000.00));
+      quests.SetFact(n"nctc_dev_departure_target_z_mm", Cast<Int32>(this.departureRoadTarget.Z * 1000.00));
+      quests.SetFact(n"nctc_dev_departure_progress_mm", 0);
+      quests.SetFact(n"nctc_dev_departure_speed_mm", 0);
+    };
+  }
+
+  private func GetDepartureProgress() -> Float {
+    let delta: Vector4 = this.controller.GetWorldPosition() - this.departureStart;
+    return Vector4.Dot(delta, this.departureForward);
   }
 
   // r374g: braking target on the current road line. Preserve the signed
@@ -1019,6 +1053,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.berthManeuverActive = false;
     this.berthManeuverStage = 0;
     this.berthMergeSignedLateral = 0.00;
+    this.departureManeuverActive = false;
     this.approachSlowdownApplied = false;
     this.legPolls = 0;
     GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_passenger_departure_requested", 0);
@@ -1060,6 +1095,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.dwellPolls = 0;
     this.boardingDoorWasOpen = false;
     this.departureRequested = false;
+    this.departureManeuverActive = false;
     this.legPolls = 0;
     GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_passenger_departure_requested", 0);
     this.ClearRouteWaypoint();
@@ -1133,11 +1169,14 @@ public class NCTCTransitSystem extends ScriptableSystem {
       quests.SetFact(n"nctc_passenger_departure_requested", 0);
       quests.SetFact(n"nctc_service_bus_at_stop", 0);
       this.controller.ClosePassengerDoor();
-      // The called stop has now been served. Future player stop requests will
-      // set serviceStopId again; until then the bus follows its route without
-      // opening its doors at intermediate points.
+      // The called stop has now been served. r374j first leaves the bay with a
+      // direct arc toward the road line measured on entry. This lets the Mahir
+      // steer immediately from rest instead of asking traffic mode to relocate
+      // a parked off-lane vehicle.
       this.serviceStopId = 0;
+      this.ArmDepartureManeuver();
       if !this.AdvanceToNextStop() {
+        this.departureManeuverActive = false;
         this.PublishLoopDiagnostic(34, 0);
         this.ScheduleDispatch(1.00);
         return;
@@ -1145,9 +1184,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.arrived = false;
       this.dwellPolls = 0;
       this.legPolls = 0;
-      this.driveCommandSent = this.controller.DriveToTraffic(this.GetTrafficTarget(), 0.00);
-      this.PublishLoopDiagnostic(this.driveCommandSent ? (this.followingPassage ? 41 : 32) : 33, this.requestedStopId);
-      this.ScheduleDispatch(0.25);
+      this.driveCommandSent = this.controller.DriveToBerthDirect(this.departureRoadTarget, 0.00);
+      this.PublishLoopDiagnostic(this.driveCommandSent ? 48 : 33, this.requestedStopId);
+      this.ScheduleDispatch(0.05);
       return;
     };
 
@@ -1159,6 +1198,29 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.ScheduleDispatch(0.25);
       return;
     };
+
+    // r374j: while leaving a served bay, keep the direct departure arc active
+    // for the first eight metres. Then hand off while rolling to normal traffic
+    // navigation, using the same generation-safe lifecycle as passage points.
+    if this.departureManeuverActive {
+      if this.GetDepartureProgress() >= 8.00 || this.controller.IsNear(this.departureRoadTarget, 5.00) {
+        let departureProgress: Float = this.GetDepartureProgress();
+        let departureSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
+        quests.SetFact(n"nctc_dev_departure_progress_mm", Cast<Int32>(departureProgress * 1000.00));
+        quests.SetFact(n"nctc_dev_departure_speed_mm", Cast<Int32>(departureSpeed * 1000.00));
+        this.departureManeuverActive = false;
+        this.driveCommandSent = this.controller.DriveToTrafficAfterRollingPassage(this.GetTrafficTarget(), 0.00, departureSpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 49 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.05);
+        return;
+      };
+      if this.controller.IsRouteCommandFailed() {
+        this.driveCommandSent = this.controller.DriveToBerthDirect(this.departureRoadTarget, AbsF(this.controller.GetCurrentSpeed()));
+      };
+      this.ScheduleDispatch(0.10);
+      return;
+    };
+
     this.legPolls += 1;
     // Every five seconds, log the exact state of the command object NCTC
     // submitted to the native AI. This is diagnostic-only and distinguishes
@@ -1229,10 +1291,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
       };
     };
 
-    // r374h progressive berth corridor. The only authored point remains the
-    // real berth. Its yaw plus the captured road offset generates a shallow
-    // partial merge before the long +10 m corridor pull. This avoids asking
-    // the Mahir to erase the full road-to-bay offset in a single sharp turn.
+    // r374j early-nose berth entry. The only authored point remains the real
+    // berth. Its yaw plus the captured road offset puts most of the lateral
+    // movement into the first part of the bay, then leaves the rest of the
+    // approach for the rear to follow and the Mahir to straighten.
     if !this.followingPassage && this.hasSurveyProfile && !this.berthManeuverActive
       && Equals(this.requestedStopId, this.serviceStopId)
       && this.controller.IsNear(this.GetServiceBerth(), 35.00)
@@ -1248,14 +1310,14 @@ public class NCTCTransitSystem extends ScriptableSystem {
         let berthForward: Vector4 = this.GetBerthForward();
         let berthRight: Vector4 = new Vector4(-berthForward.Y, berthForward.X, 0.00, 0.00);
         let berthDelta: Vector4 = this.GetServiceBerth() - this.controller.GetWorldPosition();
-        // Capture the ROAD offset once. The first merge target keeps 70% of
-        // it, so the bus starts drifting toward the bay instead of steering
-        // sharply at the berth axis.
+        // Capture the ROAD offset once. r374j keeps only 35% at the first
+        // target: the nose enters early, while the remaining 35% is removed
+        // progressively as the rear follows into the bay.
         this.berthMergeSignedLateral = Vector4.Dot(berthDelta, berthRight);
         this.berthManeuverActive = true;
         this.approachSlowdownApplied = false;
         this.legPolls = 0;
-        if berthEntryLongitudinal > 18.00 {
+        if berthEntryLongitudinal > 12.00 {
           this.berthManeuverStage = 1;
           this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBerthEntryTarget(), berthEntrySpeed);
           this.PublishLoopDiagnostic(this.driveCommandSent ? 43 : 33, this.requestedStopId);
@@ -1269,8 +1331,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
       };
     };
 
-    // Stage 1: after the shallow partial merge, aim far beyond the berth.
-    // The remaining lateral correction still has roughly 22-26 m to happen progressively.
+    // Stage 1: once the nose has entered, aim beyond the berth and let the
+    // rear follow while steering unwinds. Only 35% of the original lateral
+    // offset remains at this point, so the final approach should become nearly
+    // parallel rather than staying diagonal until the stop.
     if this.berthManeuverActive && Equals(this.berthManeuverStage, 1)
       && this.controller.IsNear(this.GetBerthEntryTarget(), 4.00) {
       this.berthManeuverStage = 2;
@@ -1294,7 +1358,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
         this.arrived = true;
         this.berthManeuverActive = false;
         this.berthManeuverStage = 0;
-        this.berthMergeSignedLateral = 0.00;
+        // Keep berthMergeSignedLateral through dwell: r374j reuses the measured
+        // road line for the immediate departure arc. AdvanceToNextStop resets it
+        // only after departureRoadTarget has been captured.
         this.approachSlowdownApplied = false;
         this.driveCommandSent = false;
         this.dwellPolls = 0;
