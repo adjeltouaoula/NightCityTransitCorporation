@@ -118,12 +118,55 @@ public class NCTCDeferredBerthDriveCommand extends DelayCallback {
 }
 
 
+// r376a: one native vehicle-spline command owns the complete H2 bay arc.
+// Unlike DriveToPoint, intermediate control points are geometry, not destinations.
+public class NCTCDeferredSplineDriveCommand extends DelayCallback {
+  private let bus: wref<VehicleObject>;
+  private let controller: wref<NCTCServiceBusController>;
+  private let splineRef: NodeRef;
+  private let startSpeed: Float;
+  private let commandGeneration: Int32;
+
+  public func Configure(bus: ref<VehicleObject>, controller: ref<NCTCServiceBusController>, splineRef: NodeRef, startSpeed: Float, commandGeneration: Int32) -> ref<NCTCDeferredSplineDriveCommand> {
+    this.bus = bus;
+    this.controller = controller;
+    this.splineRef = splineRef;
+    this.startSpeed = startSpeed;
+    this.commandGeneration = commandGeneration;
+    return this;
+  }
+
+  public func Call() -> Void {
+    let command: ref<AIVehicleOnSplineCommand>;
+    if !IsDefined(this.bus) || !this.bus.IsAttached() || !IsDefined(this.bus.GetAIComponent()) { return; };
+    if IsDefined(this.controller) && !this.controller.IsDriveGenerationCurrent(this.commandGeneration) {
+      this.controller.ReportStaleDriveCallback(this.commandGeneration);
+      return;
+    };
+    command = new AIVehicleOnSplineCommand();
+    command.splineRef = this.splineRef;
+    command.secureTimeOut = 120.00;
+    command.driveBackwards = false;
+    command.reverseSpline = false;
+    command.startFromClosest = true;
+    command.forcedStartSpeed = MaxF(this.startSpeed, 0.00);
+    command.stopAtPathEnd = true;
+    command.needDriver = false;
+    command.useKinematic = false;
+    this.bus.GetAIComponent().SendCommand(command);
+    if IsDefined(this.controller) { this.controller.SetActiveSplineCommand(command, this.commandGeneration); };
+  }
+}
+
+
 // NCTC owns the native autonomous command lifecycle. V remains an ordinary
 // passenger and no player AutoDrive system participates in service routing.
 public class NCTCServiceBusController extends IScriptable {
   private let bus: wref<VehicleObject>;
   private let playerAboardSignal: Bool;
   private let activeRouteCommand: ref<AIVehicleDriveToPointCommand>;
+  // r376a H2 prototype: native curve follower, isolated from ordinary route commands.
+  private let activeSplineCommand: ref<AIVehicleOnSplineCommand>;
   // Diagnostic-only: retain the command that was active immediately before a
   // route handoff, so the dev log can prove whether it was replaced or left
   // alive alongside the command for the next stop.
@@ -136,7 +179,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37502);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37601);
     return true;
   }
 
@@ -292,19 +335,72 @@ public class NCTCServiceBusController extends IScriptable {
     return true;
   }
 
-  // r373a: keep normal traffic navigation for the route, then hand the last
-  // metres to the autonomous point driver so the Mahir may leave the traffic
-  // lane and enter a surveyed bus bay / berth.
+  private func IsH2SplinePrototypeTarget(target: Vector4) -> Bool {
+    return target.X > -2200.00 && target.X < -2100.00 && target.Y > -1100.00 && target.Y < -950.00;
+  }
+
+  private func IsH2ServicePoint(target: Vector4) -> Bool {
+    let service: Vector4 = new Vector4(-2161.824, -1032.987, 7.848, 1.00);
+    return Vector4.Distance(target, service) <= 6.00;
+  }
+
+  private func DriveH2SplinePrototype(target: Vector4, startSpeed: Float) -> Bool {
+    let callback: ref<NCTCDeferredSplineDriveCommand>;
+    let noDriver: ref<AIEvent>;
+    let driverReady: ref<AIEvent>;
+    let generation: Int32;
+    let splineRef: NodeRef;
+    let isExit: Bool;
+    if !this.IsReady() { return false; };
+
+    if this.IsH2ServicePoint(target) && IsDefined(this.activeSplineCommand)
+      && !Equals(this.activeSplineCommand.state, AICommandState.Failure)
+      && !Equals(this.activeSplineCommand.state, AICommandState.Cancelled)
+      && !Equals(this.activeSplineCommand.state, AICommandState.Interrupted) {
+      return true;
+    };
+
+    isExit = target.Y < -1045.00 && target.X > -2160.50;
+    splineRef = isExit
+      ? CreateNodeRef("$/03_night_city/#nctc/#h2_bay_exit")
+      : CreateNodeRef("$/03_night_city/#nctc/#h2_bay_entry");
+
+    generation = this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleOnSplineCommand", false, true);
+    this.activeRouteCommand = null;
+    this.activeSplineCommand = null;
+
+    noDriver = new AIEvent();
+    driverReady = new AIEvent();
+    noDriver.name = n"NoDriver";
+    driverReady.name = n"DriverReady";
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.030);
+
+    callback = new NCTCDeferredSplineDriveCommand();
+    callback.Configure(this.bus, this, splineRef, MaxF(startSpeed, 1.00), generation);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_h2_spline_phase", isExit ? 2 : 1);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_h2_spline_id", GameInstance.GetQuestsSystem(this.bus.GetGame()).GetFact(n"nctc_dev_h2_spline_id") + 1);
+    return true;
+  }
+
+  // r376a: H2 uses a native continuous spline. Other bays keep r375b only as
+  // a compatibility fallback and are not part of this prototype validation.
   public func DriveToBerthDirect(target: Vector4, startSpeed: Float, maxSpeed: Float) -> Bool {
     let callback: ref<NCTCDeferredBerthDriveCommand>;
     let noDriver: ref<AIEvent>;
     let driverReady: ref<AIEvent>;
     let generation: Int32;
     if !this.IsReady() { return false; };
+    if this.IsH2SplinePrototypeTarget(target) { return this.DriveH2SplinePrototype(target, startSpeed); };
     generation = this.NextDriveGeneration();
     this.previousRouteCommand = this.activeRouteCommand;
     this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
     this.activeRouteCommand = null;
+    this.activeSplineCommand = null;
     noDriver = new AIEvent();
     driverReady = new AIEvent();
     noDriver.name = n"NoDriver";
@@ -428,16 +524,31 @@ public class NCTCServiceBusController extends IScriptable {
 
   public func SetActiveRouteCommand(command: ref<AIVehicleDriveToPointCommand>, generation: Int32) -> Void {
     if !this.IsDriveGenerationCurrent(generation) { return; };
+    this.activeSplineCommand = null;
     this.activeRouteCommand = command;
   }
 
+  public func SetActiveSplineCommand(command: ref<AIVehicleOnSplineCommand>, generation: Int32) -> Void {
+    if !this.IsDriveGenerationCurrent(generation) { return; };
+    this.activeRouteCommand = null;
+    this.activeSplineCommand = command;
+  }
+
   public func IsRouteCommandSuccessful() -> Bool {
+    if IsDefined(this.activeSplineCommand) { return Equals(this.activeSplineCommand.state, AICommandState.Success); };
     return IsDefined(this.activeRouteCommand) && Equals(this.activeRouteCommand.state, AICommandState.Success);
   }
 
   // Telemetry only. The command state is exposed so the dev runtime can prove
   // whether the native controller completes, replaces, or leaves our command active.
   public func GetRouteCommandStatusCode() -> Int32 {
+    if IsDefined(this.activeSplineCommand) {
+      if Equals(this.activeSplineCommand.state, AICommandState.Success) { return 2; };
+      if Equals(this.activeSplineCommand.state, AICommandState.Failure)
+        || Equals(this.activeSplineCommand.state, AICommandState.Cancelled)
+        || Equals(this.activeSplineCommand.state, AICommandState.Interrupted) { return 3; };
+      return 1;
+    };
     if !IsDefined(this.activeRouteCommand) { return 0; };
     if Equals(this.activeRouteCommand.state, AICommandState.Success) { return 2; };
     if Equals(this.activeRouteCommand.state, AICommandState.Failure)
@@ -456,6 +567,11 @@ public class NCTCServiceBusController extends IScriptable {
   }
 
   public func IsRouteCommandFailed() -> Bool {
+    if IsDefined(this.activeSplineCommand) {
+      return Equals(this.activeSplineCommand.state, AICommandState.Failure)
+        || Equals(this.activeSplineCommand.state, AICommandState.Cancelled)
+        || Equals(this.activeSplineCommand.state, AICommandState.Interrupted);
+    };
     if !IsDefined(this.activeRouteCommand) { return false; };
     return Equals(this.activeRouteCommand.state, AICommandState.Failure)
       || Equals(this.activeRouteCommand.state, AICommandState.Cancelled)
