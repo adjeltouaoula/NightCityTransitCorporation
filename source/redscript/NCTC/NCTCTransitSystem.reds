@@ -134,7 +134,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37421);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37422);
     return true;
   }
 
@@ -617,6 +617,14 @@ public class NCTCServiceProfiles {
     return true;
   }
 
+  public static func TryGetBayWidth(game: GameInstance, stopId: Int32, out width: Float) -> Bool {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
+    let prefix: String = "nctc_external_capture_id" + ToString(stopId) + "_bay_width_";
+    if !IsDefined(quests) || !Equals(quests.GetFact(StringToName(prefix + "valid")), 1) { return false; };
+    width = Cast<Float>(quests.GetFact(StringToName(prefix + "mm"))) / 1000.00;
+    return width >= 2.00 && width <= 5.00;
+  }
+
 
   public static func TryGetNextStop(game: GameInstance, line: String, currentStopId: Int32, out nextStopId: Int32, out nextStop: Vector4) -> Bool {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
@@ -734,6 +742,8 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let surveyBerth2: Vector4;
   private let surveyBerth2Forward: Vector4;
   private let hasSurveyBerth2: Bool;
+  private let surveyBayWidth: Float;
+  private let hasSurveyBayWidth: Bool;
   private let surveyYaw: Float;
   private let approachCommandSent: Bool;
   private let routeStarted: Bool;
@@ -769,8 +779,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let departureForward: Vector4;
   private let departureExitPoint: Vector4;
   private let departureAttackTarget: Vector4;
+  private let departureRecoveryTarget: Vector4;
   private let departureRoadTarget: Vector4;
   private let departureCurveStage: Int32;
+  private let departureStallPolls: Int32;
   private let passageAfterStopId: Int32;
   private let passageOrdinal: Int32;
   private let passageTarget: Vector4;
@@ -848,24 +860,26 @@ public class NCTCTransitSystem extends ScriptableSystem {
     return this.GetServiceBerth() + forward * 4.00;
   }
 
-  // r374t: Point targets are curve controls, not destinations. Every stage
-  // hands off before the target so the Mahir keeps rolling through an S-curve.
+  // r374v: the calibrated bay is a narrow physical corridor. Never manufacture
+  // steering angle by aiming through the far edge. The first target stays on
+  // the bay centreline; the real S comes from a short 5-6:1 road-to-bay run-in
+  // followed by an on-axis counter-steer.
+  private func GetBayWidth() -> Float {
+    return this.hasSurveyBayWidth ? ClampF(this.surveyBayWidth, 2.20, 3.60) : 2.90;
+  }
+
   private func GetBayEntryLeadTarget() -> Vector4 {
     let entry: Vector4 = this.GetBayEntryPoint();
     let forward: Vector4 = this.GetBayForward();
-    let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
-    let length: Float = Vector4.Distance(this.GetBayEntryPoint(), this.GetBayExitPoint());
-    let side: Float = this.berthMergeSignedLateral >= 0.00 ? 1.00 : -1.00;
-    let overshoot: Float = ClampF(AbsF(this.berthMergeSignedLateral) * 0.12, 1.50, 2.40);
-    let lead: Float = ClampF(length * 0.20, 5.50, 7.50);
-    return entry + forward * lead + right * side * overshoot;
+    let lead: Float = ClampF(this.GetBayWidth() * 1.05, 2.60, 3.40);
+    return entry + forward * lead;
   }
 
   private func GetBayCounterTarget() -> Vector4 {
     let entry: Vector4 = this.GetBayEntryPoint();
     let forward: Vector4 = this.GetBayForward();
     let length: Float = Vector4.Distance(entry, this.GetBayExitPoint());
-    return entry + forward * length * 0.42;
+    return entry + forward * ClampF(length * 0.38, 9.00, 13.00);
   }
 
   private func GetBayTrackTarget() -> Vector4 {
@@ -902,20 +916,26 @@ public class NCTCTransitSystem extends ScriptableSystem {
   }
 
   private func GetBayExitAttackTarget() -> Vector4 {
-    let entry: Vector4 = this.GetBayEntryPoint();
     let exit: Vector4 = this.GetBayExitPoint();
     let forward: Vector4 = this.GetBayForward();
     let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
-    let length: Float = Vector4.Distance(entry, exit);
     let roadLateral: Float = this.GetBayRoadLateral();
-    return exit - forward * ClampF(length * 0.10, 3.00, 4.25) + right * roadLateral * 0.68;
+    let width: Float = this.GetBayWidth();
+    let attackMagnitude: Float = ClampF(AbsF(roadLateral) * 0.20, 0.45, width * 0.28);
+    let attackLateral: Float = roadLateral >= 0.00 ? attackMagnitude : -attackMagnitude;
+    let preExit: Float = ClampF(width * 1.20, 3.20, 4.00);
+    return exit - forward * preExit + right * attackLateral;
   }
 
   private func GetBayRoadRejoinTarget() -> Vector4 {
     let forward: Vector4 = this.GetBayForward();
     let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
     let roadLateral: Float = this.GetBayRoadLateral();
-    return this.GetBayExitPoint() + forward * 4.50 + right * roadLateral;
+    // Real pull-out geometry is much closer to a 3:1 taper than r374t's
+    // 4.5-m diagonal. Give the rear axle room to clear the bay before native
+    // traffic is restored.
+    let rejoinLead: Float = ClampF(AbsF(roadLateral) * 3.00, 8.00, 12.50);
+    return this.GetBayExitPoint() + forward * rejoinLead + right * roadLateral;
   }
 
   // Native physics overlap is authoritative for bay occupancy. TargetingSystem
@@ -946,22 +966,21 @@ public class NCTCTransitSystem extends ScriptableSystem {
     return spatial.Overlap(dimensions, center, rotation, n"Vehicle", result);
   }
 
-  // r374t: service departure starts steering toward the road before P2,
-  // then counter-steers to the stored road envelope after P2.
+  // r374v: start the nose toward the exit while keeping the pivot inside the
+  // calibrated bay envelope. A direct-mode centreline recovery target is kept
+  // as a watchdog escape; it never hands the bus to native traffic while deep.
   private func ArmDepartureManeuver() -> Void {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
     let forward: Vector4 = this.GetBayForward();
-    let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
-    let entry: Vector4 = this.GetBayEntryPoint();
     let exit: Vector4 = this.GetBayExitPoint();
-    let length: Float = Vector4.Distance(entry, exit);
-    let roadLateral: Float = this.GetBayRoadLateral();
     this.departureStart = this.controller.GetWorldPosition();
     this.departureForward = forward;
     this.departureExitPoint = exit;
-    this.departureAttackTarget = exit - forward * ClampF(length * 0.10, 3.00, 4.25) + right * roadLateral * 0.68;
-    this.departureRoadTarget = exit + forward * 4.50 + right * roadLateral;
+    this.departureAttackTarget = this.GetBayExitAttackTarget();
+    this.departureRecoveryTarget = exit + forward * ClampF(this.GetBayWidth() * 0.65, 1.75, 2.25);
+    this.departureRoadTarget = this.GetBayRoadRejoinTarget();
     this.departureCurveStage = 1;
+    this.departureStallPolls = 0;
     this.departureManeuverActive = true;
     if IsDefined(quests) {
       quests.SetFact(n"nctc_dev_departure_target_x_mm", Cast<Int32>(this.departureRoadTarget.X * 1000.00));
@@ -1158,6 +1177,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     quests.SetFact(n"nctc_dev_loop_bay_p2_x_mm", Cast<Int32>(this.surveyBerth2.X * 1000.00));
     quests.SetFact(n"nctc_dev_loop_bay_p2_y_mm", Cast<Int32>(this.surveyBerth2.Y * 1000.00));
     quests.SetFact(n"nctc_dev_loop_bay_length_mm", this.HasServiceBay() ? Cast<Int32>(Vector4.Distance(this.surveyBerth, this.surveyBerth2) * 1000.00) : 0);
+    quests.SetFact(n"nctc_dev_loop_bay_width_mm", this.HasServiceBay() ? Cast<Int32>(this.GetBayWidth() * 1000.00) : 0);
     if IsDefined(this.controller) && this.controller.IsReady() {
       busPosition = this.controller.GetWorldPosition();
       quests.SetFact(n"nctc_dev_loop_bus_x_mm", Cast<Int32>(busPosition.X * 1000.00));
@@ -1217,9 +1237,12 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.surveyBerth2 = new Vector4(0.00, 0.00, 0.00, 0.00);
     this.surveyBerth2Forward = new Vector4(0.00, 0.00, 0.00, 0.00);
     this.hasSurveyBerth2 = false;
+    this.surveyBayWidth = 0.00;
+    this.hasSurveyBayWidth = false;
     this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), line, stopId, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);
     NCTCServiceProfiles.TryGetBerthForward(this.GetGameInstance(), stopId, this.surveyBerthForward);
     this.hasSurveyBerth2 = NCTCServiceProfiles.TryGetBerth2(this.GetGameInstance(), stopId, this.surveyBerth2, this.surveyBerth2Forward);
+    this.hasSurveyBayWidth = NCTCServiceProfiles.TryGetBayWidth(this.GetGameInstance(), stopId, this.surveyBayWidth);
     quests = GameInstance.GetQuestsSystem(this.GetGameInstance());
     player = GetPlayer(this.GetGameInstance());
     if !this.hasSurveyProfile {
@@ -1264,6 +1287,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.berthGateRoadSignedLateral = 0.00;
     this.departureManeuverActive = false;
     this.departureCurveStage = 0;
+    this.departureStallPolls = 0;
     this.approachSlowdownApplied = false;
     this.legPolls = 0;
     GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_passenger_departure_requested", 0);
@@ -1394,7 +1418,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       };
       this.arrived = false; this.dwellPolls = 0; this.legPolls = 0;
       if leaveBayDirect {
-        this.driveCommandSent = this.controller.DriveToBerthDirect(this.departureAttackTarget, 0.00);
+        this.driveCommandSent = this.controller.DriveToBerthDirect(this.departureAttackTarget, 1.50);
         this.PublishLoopDiagnostic(this.driveCommandSent ? 48 : 33, this.requestedStopId);
         this.ScheduleDispatch(0.05);
       } else {
@@ -1417,30 +1441,41 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if this.departureManeuverActive {
       let departureProgress: Float = this.GetDepartureProgress();
       let departureSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
+      let departureKickSpeed: Float = MaxF(MinF(departureSpeed, 7.00), 1.50);
+      this.departureStallPolls += 1;
+      if departureSpeed > 0.40 { this.departureStallPolls = 0; };
       quests.SetFact(n"nctc_dev_departure_progress_mm", Cast<Int32>(departureProgress * 1000.00));
       quests.SetFact(n"nctc_dev_departure_speed_mm", Cast<Int32>(departureSpeed * 1000.00));
       if Equals(this.departureCurveStage, 1) {
-        if departureProgress >= -4.25 || this.controller.IsNear(this.departureAttackTarget, 3.50) {
+        if departureProgress >= -3.25 || this.controller.IsNear(this.departureAttackTarget, 2.75) {
           this.departureCurveStage = 2;
-          this.driveCommandSent = this.controller.DriveToBerthDirect(this.departureRoadTarget, MinF(departureSpeed, 7.00));
+          this.departureStallPolls = 0;
+          this.driveCommandSent = this.controller.DriveToBerthDirect(this.departureRoadTarget, departureKickSpeed);
           this.PublishLoopDiagnostic(this.driveCommandSent ? 53 : 33, this.requestedStopId);
           this.ScheduleDispatch(0.05); return;
         };
+        if this.departureStallPolls >= 25 {
+          this.departureStallPolls = 0;
+          this.driveCommandSent = this.controller.DriveToBerthDirect(this.departureRecoveryTarget, 1.50);
+          this.PublishLoopDiagnostic(this.driveCommandSent ? 54 : 33, this.requestedStopId);
+          this.ScheduleDispatch(0.08); return;
+        };
         if this.controller.IsRouteCommandFailed() {
-          this.driveCommandSent = this.controller.DriveToBerthDirect(this.departureAttackTarget, MinF(departureSpeed, 7.00));
+          this.driveCommandSent = this.controller.DriveToBerthDirect(this.departureAttackTarget, departureKickSpeed);
           this.PublishLoopDiagnostic(this.driveCommandSent ? 52 : 33, this.requestedStopId);
         };
         this.ScheduleDispatch(0.08); return;
       };
-      if this.controller.IsNear(this.departureRoadTarget, 3.50) && departureProgress >= 0.75 {
-        this.departureManeuverActive = false; this.departureCurveStage = 0; this.legPolls = 0;
+      if this.controller.IsNear(this.departureRoadTarget, 4.00) && departureProgress >= 1.00 {
+        this.departureManeuverActive = false; this.departureCurveStage = 0; this.departureStallPolls = 0; this.legPolls = 0;
         this.driveCommandSent = this.controller.DriveToTrafficAfterRollingPassage(this.GetTrafficTarget(), 0.00, departureSpeed);
         this.PublishLoopDiagnostic(this.driveCommandSent ? 49 : 33, this.requestedStopId);
         this.ScheduleDispatch(0.05); return;
       };
-      if this.controller.IsRouteCommandFailed() {
-        this.driveCommandSent = this.controller.DriveToBerthDirect(this.departureRoadTarget, MinF(departureSpeed, 7.00));
-        this.PublishLoopDiagnostic(this.driveCommandSent ? 53 : 33, this.requestedStopId);
+      if this.departureStallPolls >= 25 || this.controller.IsRouteCommandFailed() {
+        this.departureStallPolls = 0;
+        this.driveCommandSent = this.controller.DriveToBerthDirect(this.departureRoadTarget, departureKickSpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 54 : 33, this.requestedStopId);
       };
       this.ScheduleDispatch(0.08); return;
     };
@@ -1520,13 +1555,15 @@ public class NCTCTransitSystem extends ScriptableSystem {
       let entryLateral: Float;
       let entryLongitudinal: Float = this.GetBayEntryProgress(entryLateral);
       let entryDistance: Float = Vector4.Distance(this.controller.GetWorldPosition(), this.GetBayEntryPoint());
+      let attackRunIn: Float = ClampF(entryLateral * 6.00, 18.00, 28.00);
       if entryLongitudinal > 0.50
-        && entryDistance <= 46.00
-        && (entryLateral <= 18.50 || entryDistance <= 25.00) {
+        && entryLongitudinal <= attackRunIn
+        && entryDistance <= 32.00
+        && entryLateral <= 12.00 {
         let berthForward: Vector4 = this.GetBerthForward();
         let berthRight: Vector4 = new Vector4(-berthForward.Y, berthForward.X, 0.00, 0.00);
         let berthDelta: Vector4 = this.GetServiceBerth() - this.controller.GetWorldPosition();
-        let berthEntrySpeed: Float = MinF(AbsF(this.controller.GetCurrentSpeed()), 7.00);
+        let berthEntrySpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 7.00), 1.00);
         this.berthMergeSignedLateral = Vector4.Dot(berthDelta, berthRight);
         this.berthManeuverActive = true;
         this.berthManeuverStage = 1;
@@ -1549,7 +1586,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
       if gateProgress >= -12.00 && gateProgress <= -1.00 && AbsF(gateLateral) <= 6.00 {
         this.berthGateRoadSignedLateral = gateLateral;
       };
-      if gateProgress >= -0.75 || this.controller.IsNear(this.GetBayEntryLeadTarget(), 4.00) {
+      let entryTolerance: Float = ClampF(this.GetBayWidth() * 0.45, 1.10, 1.45);
+      if (gateProgress >= -0.25 && AbsF(gateLateral) <= entryTolerance)
+        || gateProgress >= this.GetBayWidth() * 0.80 {
         this.berthWasEntered = true;
         this.berthManeuverStage = 2;
         this.legPolls = 0;
@@ -1572,8 +1611,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
       let counterProgress: Float = this.GetBayProgress(counterLateral);
       let bayLength: Float = Vector4.Distance(this.GetBayEntryPoint(), this.GetBayExitPoint());
       let stageSpeed: Float = MinF(AbsF(this.controller.GetCurrentSpeed()), 7.00);
-      if (counterProgress >= bayLength * 0.24 && AbsF(counterLateral) <= 3.00)
-        || counterProgress >= bayLength * 0.34 {
+      let counterTolerance: Float = ClampF(this.GetBayWidth() * 0.40, 1.00, 1.30);
+      if (counterProgress >= bayLength * 0.28 && AbsF(counterLateral) <= counterTolerance)
+        || counterProgress >= bayLength * 0.42 {
         this.berthManeuverStage = 3;
         this.legPolls = 0;
         this.driveCommandSent = this.controller.DriveToBerthDirect(
@@ -1598,7 +1638,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       let trackProgress: Float = this.GetBayProgress(trackLateral);
       let bayLength: Float = Vector4.Distance(this.GetBayEntryPoint(), this.GetBayExitPoint());
       let stageSpeed: Float = MinF(AbsF(this.controller.GetCurrentSpeed()), 7.00);
-      if trackProgress >= bayLength * 0.54 {
+      if trackProgress >= bayLength * 0.58 {
         this.berthManeuverStage = 4;
         this.legPolls = 0;
         this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBayExitAttackTarget(), stageSpeed);
@@ -1621,7 +1661,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       let exitProgress: Float = this.GetBayProgress(exitLateral);
       let bayLength: Float = Vector4.Distance(this.GetBayEntryPoint(), this.GetBayExitPoint());
       let stageSpeed: Float = MinF(AbsF(this.controller.GetCurrentSpeed()), 7.00);
-      if exitProgress >= bayLength * 0.78 || this.controller.IsNear(this.GetBayExitAttackTarget(), 4.00) {
+      if exitProgress >= bayLength * 0.84 || this.controller.IsNear(this.GetBayExitAttackTarget(), 2.75) {
         this.berthManeuverStage = 5;
         this.legPolls = 0;
         this.driveCommandSent = this.controller.DriveToBerthDirect(this.GetBayRoadRejoinTarget(), stageSpeed);
@@ -1748,8 +1788,11 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.surveyBerth2 = new Vector4(0.00, 0.00, 0.00, 0.00);
     this.surveyBerth2Forward = new Vector4(0.00, 0.00, 0.00, 0.00);
     this.hasSurveyBerth2 = false;
+    this.surveyBayWidth = 0.00;
+    this.hasSurveyBayWidth = false;
     NCTCServiceProfiles.TryGetBerthForward(this.GetGameInstance(), nextStopId, this.surveyBerthForward);
     this.hasSurveyBerth2 = NCTCServiceProfiles.TryGetBerth2(this.GetGameInstance(), nextStopId, this.surveyBerth2, this.surveyBerth2Forward);
+    this.hasSurveyBayWidth = NCTCServiceProfiles.TryGetBayWidth(this.GetGameInstance(), nextStopId, this.surveyBayWidth);
     this.surveyYaw = nextYaw;
     this.hasSurveyProfile = true;
     this.arrived = false;
