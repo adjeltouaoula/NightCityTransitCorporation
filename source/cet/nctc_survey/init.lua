@@ -1024,6 +1024,17 @@ local function publish_capture(quests, capture)
   publish_vector("approach", capture.approach)
   publish_vector("berth", capture.berth)
   publish_vector("berth2", capture.berth2)
+  local width_prefix = "nctc_external_capture_id" .. tostring(capture.stopId or 0) .. "_bay_width_"
+  if vector_has_position(capture.bayWidthA) and vector_has_position(capture.bayWidthB) then
+    local dx = (capture.bayWidthA.x or 0) - (capture.bayWidthB.x or 0)
+    local dy = (capture.bayWidthA.y or 0) - (capture.bayWidthB.y or 0)
+    local width = math.sqrt(dx * dx + dy * dy)
+    set_fact(quests, width_prefix .. "mm", math.floor(width * 1000))
+    set_fact(quests, width_prefix .. "valid", 1)
+  else
+    set_fact(quests, width_prefix .. "mm", 0)
+    set_fact(quests, width_prefix .. "valid", 0)
+  end
 end
 
 local function synchronize_external_survey(quests)
@@ -1142,6 +1153,7 @@ local function log_service_loop(quests)
   local mount_request = fact(quests, "nctc_dev_loop_mount_request")
   local has_bay = fact(quests, "nctc_dev_loop_has_bay")
   local bay_length = fact(quests, "nctc_dev_loop_bay_length_mm") / 1000.0
+  local bay_width = fact(quests, "nctc_dev_loop_bay_width_mm") / 1000.0
   local bay_p1_x = fact(quests, "nctc_dev_loop_bay_p1_x_mm") / 1000.0
   local bay_p1_y = fact(quests, "nctc_dev_loop_bay_p1_y_mm") / 1000.0
   local bay_p2_x = fact(quests, "nctc_dev_loop_bay_p2_x_mm") / 1000.0
@@ -1174,17 +1186,18 @@ local function log_service_loop(quests)
     [38] = "route loop: native stop detected; forward berth correction sent",
     [41] = "route loop: r372n outgoing corridor armed",
     [42] = "route loop: r372n rolling post-passage handoff",
-    [43] = "route loop: r374t S-curve ENTRY ATTACK",
-    [44] = "route loop: r374t S-curve COUNTER-STEER",
+    [43] = "route loop: r374v WIDTH-AWARE ENTRY ATTACK",
+    [44] = "route loop: r374v centreline COUNTER-STEER",
     [45] = "route loop: legacy final BERTH command sent (unexpected in r374m)",
     [46] = "route loop: r374b rolling slow traffic handoff",
     [47] = "route loop: legacy road brake (unexpected in r374s)",
-    [48] = "route loop: r374t service departure S-curve armed",
-    [49] = "route loop: r374t traffic handoff after S-curve rejoin",
-    [50] = "route loop: r374t native Vehicle overlap -> stay on road",
-    [51] = "route loop: r374t TRACK BAY",
-    [52] = "route loop: r374t EXIT ATTACK",
-    [53] = "route loop: r374t REJOIN counter-steer"
+    [48] = "route loop: r374v service departure armed",
+    [49] = "route loop: r374v traffic handoff after measured rejoin",
+    [50] = "route loop: r374v native Vehicle overlap -> stay on road",
+    [51] = "route loop: r374v TRACK narrow bay",
+    [52] = "route loop: r374v EXIT ATTACK inside bay envelope",
+    [53] = "route loop: r374v 3-to-1 REJOIN counter-steer",
+    [54] = "route loop: r374v direct departure stall recovery"
   }
   local command_extra = ""
   if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then
@@ -1221,7 +1234,7 @@ local function log_service_loop(quests)
       .. " generation=" .. tostring(fact(quests, "nctc_dev_drive_generation"))
       .. string.format(" aiTarget=(%.3f, %.3f, %.3f)", ai_target_x, ai_target_y, ai_target_z)
   end
-  if code == 48 or code == 49 then
+  if code == 48 or code == 49 or code == 54 then
     command_extra = command_extra
       .. string.format(" departureTarget=(%.3f, %.3f, %.3f)",
         fact(quests, "nctc_dev_departure_target_x_mm") / 1000.0,
@@ -1230,10 +1243,11 @@ local function log_service_loop(quests)
       .. " departureProgress=" .. string.format("%.1fm", fact(quests, "nctc_dev_departure_progress_mm") / 1000.0)
       .. " departureSpeed=" .. string.format("%.2f", fact(quests, "nctc_dev_departure_speed_mm") / 1000.0)
   end
-  if code == 29 or code == 30 or code == 36 or code == 43 or code == 47 or code == 48 or code == 49 or code == 50 or code == 51 or code == 52 or code == 53 then
+  if code == 29 or code == 30 or code == 36 or code == 43 or code == 47 or code == 48 or code == 49 or code == 50 or code == 51 or code == 52 or code == 53 or code == 54 then
     command_extra = command_extra
       .. " hasBay=" .. tostring(has_bay)
       .. " bayLen=" .. string.format("%.2fm", bay_length)
+      .. " bayWidth=" .. string.format("%.3fm", bay_width)
       .. string.format(" P1=(%.3f, %.3f) P2=(%.3f, %.3f)", bay_p1_x, bay_p1_y, bay_p2_x, bay_p2_y)
   end
   if berth_active == 1 or code == 43 or code == 44 or code == 45 or code == 51 or code == 52 or code == 53 then
@@ -1323,7 +1337,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37421 then
+  if revision == 37422 then
+    log("NCTC runtime build=37422 r374v calibrated narrow-bay geometry + departure recovery")
+  elseif revision == 37421 then
     log("NCTC runtime build=37421 r374u bay-width calibration")
   elseif revision == 37420 then
     log("NCTC runtime build=37420 r374t real-bus S-curve bay path")
