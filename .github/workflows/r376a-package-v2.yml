@@ -1,0 +1,70 @@
+name: r376a clean native spline package
+
+on:
+  push:
+    branches:
+      - automation/r376a-package-builder-v2
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 857c92b7068a4b7bf026bfbb9b9712884f154090
+      - name: Verify clean r376a sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object source/redscript/NCTC/NCTCTransitSystem.reds)" = "479c8652822adee5550babb6c61f536e064b75af"
+          test "$(git hash-object source/cet/nctc_survey/init.lua)" = "08f6f0df2a4be8a0ba0133eec43aeda557e6e68b"
+          test "$(git hash-object source/archive/pc/mod/NCTCH2Spline.archive)" = "ff0be26fb781cf5f2aaf9dd75ce5b668f777a0f6"
+          test "$(git hash-object source/archive/pc/mod/NCTCH2Spline.archive.xl)" = "6e934a5637bfe3300832eea2fef179386576c5e1"
+          test "$(sha256sum source/archive/pc/mod/NCTCDisplayPrototype.archive | awk '{print $1}')" = "09a8fb10c2e027b2250c1ec647f8c3d466129bea907f5421771795093ae37d0a"
+          test "$(sha256sum source/archive/pc/mod/NCTCTrafficRuntime.archive | awk '{print $1}')" = "98701118d1f5a4da6ac47ca070300ec607012ccad51e91406fb657b034736a7d"
+          grep -q 'nctc_dev_build_revision.*, 37601' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q '\$/nctc/bays/h2/arrival_spline' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'nctc\\bays\\h2\\all.streamingblock' source/archive/pc/mod/NCTCH2Spline.archive.xl
+      - name: Build installable devkit
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/nctc-r376a"
+          mkdir -p "$ROOT/archive/pc/mod" "$ROOT/r6/scripts/NCTC" "$ROOT/r6/tweaks/NCTC"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger"
+          cp source/archive/pc/mod/*.archive "$ROOT/archive/pc/mod/"
+          cp source/archive/pc/mod/*.archive.xl "$ROOT/archive/pc/mod/"
+          cp source/redscript/NCTC/*.reds "$ROOT/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$ROOT/r6/tweaks/NCTC/"
+          cp source/cet/nctc_survey/init.lua "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_survey/nctc_network.default.json "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_survey/nctc_survey_settings.json "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_passenger/* "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp README.md THIRD_PARTY_NOTICES.md "$ROOT/"
+          cat > "$ROOT/NCTC_BUILD_INFO.txt" <<'EOF'
+          Night City Transit Corporation
+          Devkit: r376a H2 native spline arrival prototype
+          Runtime build: 37601
+          Branch: experiment/r376a-h2-native-spline-prototype
+          Commit: 857c92b7068a4b7bf026bfbb9b9712884f154090
+          Scope: H2 arrival only. Native AIVehicleOnSplineCommand follows a 7-point worldSplineNode. H2 departure is intentionally held for this proof-of-concept. Cannery and Delamain are not part of this spline test.
+          EOF
+          test -f "$ROOT/archive/pc/mod/NCTCH2Spline.archive"
+          test -f "$ROOT/archive/pc/mod/NCTCH2Spline.archive.xl"
+          test ! -e "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+          test "$(git hash-object "$ROOT/r6/scripts/NCTC/NCTCTransitSystem.reds")" = "479c8652822adee5550babb6c61f536e064b75af"
+          test "$(git hash-object "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/init.lua")" = "08f6f0df2a4be8a0ba0133eec43aeda557e6e68b"
+          test "$(git hash-object "$ROOT/archive/pc/mod/NCTCH2Spline.archive")" = "ff0be26fb781cf5f2aaf9dd75ce5b668f777a0f6"
+          test "$(git hash-object "$ROOT/archive/pc/mod/NCTCH2Spline.archive.xl")" = "6e934a5637bfe3300832eea2fef179386576c5e1"
+          test "$(sha256sum "$ROOT/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')" = "09a8fb10c2e027b2250c1ec647f8c3d466129bea907f5421771795093ae37d0a"
+          cd "$ROOT"
+          ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376a-h2-native-spline-arrival-development.zip"
+          zip -qr "$ZIP" .
+          unzip -t "$ZIP"
+          sha256sum "$ZIP"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r376a-native-spline-package
+          path: ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r376a-h2-native-spline-arrival-development.zip
+          compression-level: 0
