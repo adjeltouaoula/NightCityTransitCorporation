@@ -37,8 +37,13 @@ sone(
 )
 
 sone(
-    '    this.lastBayPoint2EditMode = this.editBayPoint2;\n    this.PublishSurveySettings();',
-    '    this.lastBayPoint2EditMode = this.editBayPoint2;\n    this.bayEditorMode = this.editBayPoint2 ? 1 : 0;\n    this.PublishSurveySettings();'
+'''    this.RegisterSettings();
+    this.lastBayPoint2EditMode = this.editBayPoint2;
+    this.PublishSurveySettings();''',
+'''    this.RegisterSettings();
+    this.lastBayPoint2EditMode = this.editBayPoint2;
+    this.bayEditorMode = this.editBayPoint2 ? 1 : 0;
+    this.PublishSurveySettings();'''
 )
 
 sone(
