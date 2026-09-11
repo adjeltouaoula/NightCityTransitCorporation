@@ -25,3 +25,4 @@ jobs:
           git add source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_survey/init.lua
           git commit -m "feat: r374t real-bus S-curve bay path"
           git push origin HEAD:automation/r374t-builder
+# retry current script
