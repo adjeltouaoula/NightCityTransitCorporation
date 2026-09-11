@@ -1,0 +1,33 @@
+name: r374m-exact-builder
+
+on:
+  push:
+    branches:
+      - automation/r374m-exact-builder
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply exact r374m package patch
+        shell: bash
+        run: |
+          base64 -d r374m.patch.b64 > /tmp/r374m.patch
+          git apply --check /tmp/r374m.patch
+          git apply /tmp/r374m.patch
+          grep -q 'nctc_dev_build_revision", 37413' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'scan_service_berth_occupancy' source/cet/nctc_survey/init.lua
+      - name: Commit and clean builder files
+        run: |
+          git config user.name 'NCTC build bot'
+          git config user.email 'nctc-build-bot@users.noreply.github.com'
+          git rm .github/workflows/r374m-exact-builder.yml r374m.patch.b64
+          git add source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_survey/init.lua
+          git commit -m 'feat: r374m single bay arc and native lane recovery'
+          git push origin HEAD:automation/r374m-exact-builder
