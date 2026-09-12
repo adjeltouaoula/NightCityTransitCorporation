@@ -79,8 +79,8 @@ jobs:
           p = patch.read_text()
           # The patch still installs the exact r376b runtime state machine; only
           # its identifying revision/log is advanced for this geometry build.
-          if p.count('37602') != 2:
-              raise SystemExit(f'patch revision count: expected 2, got {p.count("37602")}')
+          if p.count('37602') != 3:
+              raise SystemExit(f'patch revision count: expected 3, got {p.count("37602")}')
           p = p.replace('37602', '37603')
           p = p.replace('r376b H2 native spline arrival + departure', 'r376c H2 curb-safe departure geometry')
           patch.write_text(p)
