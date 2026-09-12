@@ -1,0 +1,156 @@
+name: r379b H2 yield vanilla query builder
+
+on:
+  push:
+    branches:
+      - automation/r379b-h2-yield-vanilla-query-builder
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch r376f and package r379b
+        shell: bash
+        run: |
+          set -euo pipefail
+          CLEAN_BRANCH="experiment/r379b-h2-yield-vanilla-query"
+          BASE_SHA="411eadf5628fcbc4199feaa63fd0deaa122faf51"
+          CLEAN="$RUNNER_TEMP/r379b-clean"
+          rm -rf "$CLEAN"
+          git fetch origin "$CLEAN_BRANCH"
+          git worktree prune
+          git worktree add -B "$CLEAN_BRANCH" "$CLEAN" "origin/$CLEAN_BRANCH"
+          test "$(git -C "$CLEAN" rev-parse HEAD)" = "$BASE_SHA"
+
+          ARRIVAL_BEFORE="$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Spline.archive)"
+          DEPARTURE_BEFORE="$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Departure.archive)"
+          DISPLAY_BEFORE="$(sha256sum "$CLEAN/source/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')"
+
+          python3 - "$CLEAN" <<'PY'
+          from pathlib import Path
+          import sys
+
+          root = Path(sys.argv[1])
+
+          def replace_once(text, old, new, label):
+              n = text.count(old)
+              if n != 1:
+                  raise SystemExit(f"{label}: expected 1 match, got {n}")
+              return text.replace(old, new, 1)
+
+          transit = root / 'source/redscript/NCTC/NCTCTransitSystem.reds'
+          s = transit.read_text()
+
+          s = replace_once(
+              s,
+              'GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37606);',
+              'GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37902);',
+              'runtime revision')
+
+          s = replace_once(
+              s,
+              '    // These must remain false for the service bus. Enabling either one lets\n    // the traffic controller snap the long Mahir to a neighboring lane when\n    // a route command starts or ends, which can eject standing passengers.\n    command.trafficTryNeighborsForStart = false;\n    command.trafficTryNeighborsForEnd = false;',
+              '    // Keep neighbor snapping disabled for the service bus: on the long Mahir\n    // it can visibly teleport the vehicle sideways, which is not acceptable RP.\n    command.trafficTryNeighborsForStart = false;\n    command.trafficTryNeighborsForEnd = false;',
+              'neighbor comment')
+
+          anchor = '''  public func DistanceToPlayer() -> Float {\n    let player: ref<PlayerPuppet>;\n    if !this.IsReady() { return 0.00; };\n    player = GetPlayer(this.bus.GetGame());\n    return IsDefined(player) ? Vector4.Distance(player.GetWorldPosition(), this.bus.GetWorldPosition()) : 0.00;\n  }\n'''
+          addition = anchor + '''\n  // r379b: use the same native TrafficSystem primitive used by vanilla scripts.\n  // No TrafficSystem ref variable and no Entity -> VehicleObject cast: the native\n  // query itself returns the number of traffic entities inside the corridor.\n  public func CountTrafficEntitiesInDepartureCorridor(forward: Vector4, rearDistance: Float, corridorDepth: Float, corridorWidth: Float) -> Int32 {\n    let trafficEntities: array<wref<Entity>>;\n    let queryBoxPoints: array<Vector4>;\n    let direction: Vector4;\n    let right: Vector4;\n    let origin: Vector4;\n    if !this.IsReady() { return 0; };\n    direction = Vector4.Normalize2D(forward);\n    if AbsF(direction.X) <= 0.01 && AbsF(direction.Y) <= 0.01 { return 0; };\n    right = new Vector4(-direction.Y, direction.X, 0.00, 0.00);\n    origin = this.bus.GetWorldPosition() - direction * MaxF(rearDistance, 0.00);\n    ArrayPush(queryBoxPoints, origin + new Vector4(0.00, 0.00, -1.00, 0.00));\n    ArrayPush(queryBoxPoints, origin + direction * MaxF(corridorDepth, 1.00) + new Vector4(0.00, 0.00, 3.00, 0.00));\n    ArrayPush(queryBoxPoints, origin + right * MaxF(corridorWidth * 0.50, 1.00));\n    ArrayPush(queryBoxPoints, origin - right * MaxF(corridorWidth * 0.50, 1.00));\n    return Cast<Int32>(GameInstance.GetTrafficSystem(this.bus.GetGame()).FindEntitiesNearPlane(this.bus, queryBoxPoints, origin, right, MaxF(corridorWidth * 0.50, 1.00), 32, trafficEntities));\n  }\n'''
+          s = replace_once(s, anchor, addition, 'vanilla traffic query method')
+
+          old_departure = '''        if Equals(this.requestedStopId, 70) {\n          this.bayParkingStage = 12;\n          this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/departure_spline", exitSpeed, false);\n          this.PublishLoopDiagnostic(this.driveCommandSent ? 72 : 33, this.requestedStopId);\n          this.ScheduleDispatch(0.10);\n          return;\n        };'''
+          new_departure = '''        if Equals(this.requestedStopId, 70) {\n          // r379b: hold at the berth until the road corridor is clear.\n          this.bayParkingStage = 14;\n          this.driveCommandSent = true;\n          quests.SetFact(n"nctc_dev_exit_traffic_count", 0);\n          quests.SetFact(n"nctc_dev_exit_clear_polls", 0);\n          this.PublishLoopDiagnostic(76, this.requestedStopId);\n          this.ScheduleDispatch(0.10);\n          return;\n        };'''
+          s = replace_once(s, old_departure, new_departure, 'H2 departure gate')
+
+          stage12 = '''    if this.bayParkingActive && Equals(this.bayParkingStage, 12) {\n      if this.controller.IsSplineCommandSuccessful() {'''
+          stage14 = '''    if this.bayParkingActive && Equals(this.bayParkingStage, 14) {\n      let trafficCount: Int32 = this.controller.CountTrafficEntitiesInDepartureCorridor(this.GetBayForward(), 12.00, 80.00, 16.00);\n      quests.SetFact(n"nctc_dev_exit_traffic_count", trafficCount);\n      if trafficCount > 0 {\n        this.bayParkingRetryCount = 0;\n        quests.SetFact(n"nctc_dev_exit_clear_polls", 0);\n        this.PublishLoopDiagnostic(77, this.requestedStopId);\n        this.ScheduleDispatch(0.25);\n        return;\n      };\n      this.bayParkingRetryCount += 1;\n      quests.SetFact(n"nctc_dev_exit_clear_polls", this.bayParkingRetryCount);\n      if this.bayParkingRetryCount < 3 {\n        this.ScheduleDispatch(0.25);\n        return;\n      };\n      this.bayParkingRetryCount = 0;\n      this.bayParkingStage = 12;\n      this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/departure_spline", 1.25, true);\n      this.PublishLoopDiagnostic(this.driveCommandSent ? 78 : 33, this.requestedStopId);\n      this.ScheduleDispatch(0.10);\n      return;\n    };\n\n''' + stage12
+          s = replace_once(s, stage12, stage14, 'yield stage')
+          transit.write_text(s)
+
+          cet = root / 'source/cet/nctc_survey/init.lua'
+          c = cet.read_text()
+          c = replace_once(
+              c,
+              '    [74] = "route loop: r376b H2 spline exit -> native traffic handoff",\n    [75] = "route loop: r376b H2 native departure spline FAILED"',
+              '    [74] = "route loop: r376b H2 spline exit -> native traffic handoff",\n    [75] = "route loop: r376b H2 native departure spline FAILED",\n    [76] = "route loop: r379b H2 yield gate armed",\n    [77] = "route loop: r379b H2 yield: traffic present",\n    [78] = "route loop: r379b H2 clear gap -> slow departure spline armed"',
+              'CET states')
+          c = replace_once(
+              c,
+              '  local command_extra = ""\n  if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then',
+              '  local command_extra = ""\n  if code == 76 or code == 77 or code == 78 then\n    command_extra = " trafficEntities=" .. tostring(fact(quests, "nctc_dev_exit_traffic_count"))\n      .. " clearPolls=" .. tostring(fact(quests, "nctc_dev_exit_clear_polls"))\n  end\n  if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then',
+              'CET extras')
+          c = replace_once(
+              c,
+              '  if revision == 37606 then\n    log("NCTC runtime build=37606 r376f H2 final nose clearance")',
+              '  if revision == 37902 then\n    log("NCTC runtime build=37902 r379b H2 vanilla traffic yield POC")\n  elseif revision == 37606 then\n    log("NCTC runtime build=37606 r376f H2 final nose clearance")',
+              'CET runtime')
+          cet.write_text(c)
+          PY
+
+          test "$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Spline.archive)" = "$ARRIVAL_BEFORE"
+          test "$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Departure.archive)" = "$DEPARTURE_BEFORE"
+          test "$(sha256sum "$CLEAN/source/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')" = "$DISPLAY_BEFORE"
+          grep -Fq 'CountTrafficEntitiesInDepartureCorridor' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+          grep -Fq 'FindEntitiesNearPlane(this.bus' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+          grep -Fq 'DriveOnBaySpline("$/nctc/bays/h2/departure_spline", 1.25, true)' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+          grep -Fq 'nctc_dev_build_revision", 37902' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+
+          mapfile -t CHANGED < <(git -C "$CLEAN" diff --name-only)
+          test "${#CHANGED[@]}" -eq 2
+          git -C "$CLEAN" config user.name "github-actions[bot]"
+          git -C "$CLEAN" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$CLEAN" add source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_survey/init.lua
+          git -C "$CLEAN" commit -m "test: r379b H2 vanilla traffic yield"
+          CLEAN_SHA="$(git -C "$CLEAN" rev-parse HEAD)"
+          git -C "$CLEAN" push origin "HEAD:refs/heads/$CLEAN_BRANCH"
+
+          ROOT="$RUNNER_TEMP/nctc-r379b"
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/archive/pc/mod" "$ROOT/r6/scripts/NCTC" "$ROOT/r6/tweaks/NCTC"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger"
+          cp "$CLEAN"/source/archive/pc/mod/*.archive "$ROOT/archive/pc/mod/"
+          cp "$CLEAN"/source/archive/pc/mod/*.archive.xl "$ROOT/archive/pc/mod/"
+          cp "$CLEAN"/source/redscript/NCTC/*.reds "$ROOT/r6/scripts/NCTC/"
+          cp "$CLEAN"/source/tweaks/NCTC/* "$ROOT/r6/tweaks/NCTC/"
+          cp "$CLEAN/source/cet/nctc_survey/init.lua" "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp "$CLEAN/source/cet/nctc_survey/nctc_network.default.json" "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp "$CLEAN/source/cet/nctc_survey/nctc_survey_settings.json" "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp "$CLEAN"/source/cet/nctc_passenger/* "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp "$CLEAN/README.md" "$CLEAN/THIRD_PARTY_NOTICES.md" "$ROOT/"
+
+          cat > "$ROOT/NCTC_BUILD_INFO.txt" <<EOF
+          Night City Transit Corporation
+          Devkit: r379b H2 vanilla traffic yield POC
+          Runtime build: 37902
+          Branch: $CLEAN_BRANCH
+          Commit: $CLEAN_SHA
+          Base: r376f 411eadf5628fcbc4199feaa63fd0deaa122faf51
+          Scope: validated r376f geometry unchanged. Before H2 departure, use vanilla TrafficSystem.FindEntitiesNearPlane and wait for three consecutive clear polls, then run the original r376f departure spline slowly with stopAtPathEnd=true. No lane snap, no JoinTraffic, no spline extension.
+          Arrival blob: $ARRIVAL_BEFORE
+          Departure blob: $DEPARTURE_BEFORE
+          Display SHA256: $DISPLAY_BEFORE
+          EOF
+
+          ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r379b-h2-yield-vanilla-query-development.zip"
+          pushd "$ROOT" >/dev/null
+          zip -qr "$ZIP" .
+          popd >/dev/null
+          unzip -t "$ZIP"
+          sha256sum "$ZIP" | tee "$RUNNER_TEMP/r379b.sha256"
+          printf 'CLEAN_SHA=%s\nARRIVAL_BLOB=%s\nDEPARTURE_BLOB=%s\nDISPLAY_SHA=%s\n' "$CLEAN_SHA" "$ARRIVAL_BEFORE" "$DEPARTURE_BEFORE" "$DISPLAY_BEFORE" > "$RUNNER_TEMP/r379b-metadata.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r379b-h2-yield-vanilla-query
+          path: |
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r379b-h2-yield-vanilla-query-development.zip
+            ${{ runner.temp }}/r379b.sha256
+            ${{ runner.temp }}/r379b-metadata.txt
+          compression-level: 0
