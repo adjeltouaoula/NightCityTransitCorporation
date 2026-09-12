@@ -33,19 +33,29 @@ const string nodeRefText = "$/nctc/bays/h2/departure_spline";
 const string sectorDepotPath = "nctc\\bays\\h2\\departure\\sectors\\h2_departure.streamingsector";
 NodeRef nodeRef = nodeRefText;
 
-// H2 departure only. Local coordinates use the exact same P1 origin as the
-// validated r376a arrival. Hold the bus on the bay axis until P2, merge only
-// after the bay end, then finish with a straight road-aligned tail.
+// H2 departure only. Points 1-9 preserve the user-validated r376f bay exit.
+// Points 10-16 continue through surveyed passage-3 and roughly 20 m down its
+// outgoing lane so native traffic reacquires from an unambiguous lane state.
 var spline = new Spline { Looped = false, Reversed = false, HasDirection = true };
 spline.Points.Add(Point(-0.45f, -17.20f, 0.0f, 1));
 spline.Points.Add(Point(-0.65f, -23.00f, 0.0f, 2));
 spline.Points.Add(Point(-0.90f, -29.00f, 0.0f, 3));
 spline.Points.Add(Point(-0.80f, -33.00f, 0.0f, 4));
-spline.Points.Add(Point( 0.20f, -37.00f, 0.0f, 5));
-spline.Points.Add(Point( 2.00f, -41.00f, 0.0f, 6));
-spline.Points.Add(Point( 3.50f, -45.50f, 0.0f, 7));
-spline.Points.Add(Point( 4.10f, -50.00f, 0.0f, 8));
-spline.Points.Add(Point( 4.15f, -62.00f, 0.0f, 9));
+spline.Points.Add(Point( 1.20f, -37.00f, 0.0f, 5));
+spline.Points.Add(Point( 4.10f, -41.00f, 0.0f, 6));
+spline.Points.Add(Point( 6.60f, -45.50f, 0.0f, 7));
+spline.Points.Add(Point( 7.40f, -50.00f, 0.0f, 8));
+spline.Points.Add(Point( 7.40f, -62.00f, 0.0f, 9));
+// passage-3 world=(-2103.407,-1090.684), yaw=-92.59 deg.
+// With the spline node origin (-2161.015,-1012.713), passage local is
+// (57.608,-77.971). The last point is ~20 m farther along yaw -92.59.
+spline.Points.Add(Point( 7.60f, -67.00f, 0.0f, 10));
+spline.Points.Add(Point(10.00f, -71.50f, 0.0f, 11));
+spline.Points.Add(Point(16.00f, -75.00f, 0.0f, 12));
+spline.Points.Add(Point(26.00f, -77.00f, 0.0f, 13));
+spline.Points.Add(Point(40.00f, -77.50f, 0.0f, 14));
+spline.Points.Add(Point(57.608f, -77.971f, 0.0f, 15));
+spline.Points.Add(Point(77.588f, -78.875f, 0.0f, 16));
 
 var splineNode = new worldSplineNode { SplineData = new CHandle<Spline>(spline) };
 var sector = new worldStreamingSector
@@ -67,7 +77,7 @@ nodeData.Add(new worldNodeData
     Orientation = new Quaternion { R = 1.0f },
     Scale = V3(1.0f, 1.0f, 1.0f),
     Pivot = V3(-2161.015f, -1012.713f, 7.851f),
-    Bounds = Box4(-2170f, -1080f, 5f, -2150f, -1025f, 12f),
+    Bounds = Box4(-2170f, -1110f, 5f, -2075f, -1025f, 12f),
     QuestPrefabRefHash = nodeRef,
     MaxStreamingDistance = 250.0f,
     UkFloat1 = 300.0f,
@@ -83,7 +93,7 @@ var block = new worldStreamingBlock();
 block.Descriptors.Add(new worldStreamingSectorDescriptor
 {
     Data = new CResourceAsyncReference<worldStreamingSector>((ResourcePath)sectorDepotPath),
-    StreamingBox = Box4(-2220f, -1150f, 0f, -2100f, -1000f, 30f),
+    StreamingBox = Box4(-2220f, -1150f, 0f, -2050f, -1000f, 30f),
     NumNodeRanges = 1,
     Level = 0,
     Category = worldStreamingSectorCategory.Exterior
@@ -102,8 +112,8 @@ if (rr.ReadFile(out var parsedSectorFile) != EFileReadErrorCodes.NoError)
     throw new Exception("sector verify failed");
 var parsedSector = (worldStreamingSector)parsedSectorFile!.RootChunk;
 var parsedSplineNode = parsedSector.Nodes[0].Chunk as worldSplineNode ?? throw new Exception("not spline node");
-if (parsedSplineNode.SplineData.Chunk?.Points.Count != 9)
+if (parsedSplineNode.SplineData.Chunk?.Points.Count != 16)
     throw new Exception("wrong departure spline point count");
 if (parsedSector.NodeRefs.Count != 1)
     throw new Exception("missing departure node ref");
-Console.WriteLine($"R376B_WORLD_OK nodeRef={parsedSector.NodeRefs[0]} points={parsedSplineNode.SplineData.Chunk.Points.Count}");
+Console.WriteLine($"R377A_WORLD_OK nodeRef={parsedSector.NodeRefs[0]} points={parsedSplineNode.SplineData.Chunk.Points.Count}");
