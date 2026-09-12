@@ -14,14 +14,14 @@ s = transit_path.read_text()
 s = replace_once(
     s,
     'GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37601);',
-    'GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37602);',
+    'GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37607);',
     "runtime",
 )
 
 marker = "  // r374e: generation-safe traffic replacement, but unlike r372n the\n"
-method = '''  // r376b: the departure spline has already completed successfully here,
+method = '''  // r377a: the departure spline has already completed successfully here,
   // so do not interrupt it again. Hand the measured rolling speed to the
-  // normal traffic navigator through the established generation-safe pulse.
+  // native traffic navigator only after the spline has lane-locked the Mahir.
   public func DriveToTrafficAfterSpline(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {
     let callback: ref<NCTCDeferredDriveCommand>;
     let noDriver: ref<AIEvent>;
@@ -54,8 +54,9 @@ method = '''  // r376b: the departure spline has already completed successfully 
 '''
 s = replace_once(s, marker, method + marker, "insert traffic-after-spline")
 
-# r376a intentionally froze at H2 after proving arrival. r376b restores the
-# existing dwell path and changes only the physical departure that follows it.
+# r376a intentionally froze at H2 after proving arrival. r377a restores the
+# dwell/departure path, keeps r376f bay geometry, then extends the departure
+# spline through the surveyed post-H2 passage before traffic reacquisition.
 hold = '''      if Equals(this.requestedStopId, 70) && this.HasServiceBay() && this.bayParkingWasEntered {
         this.ScheduleDispatch(0.25);
         return;
@@ -128,6 +129,17 @@ departure = '''    if this.bayParkingActive && Equals(this.bayParkingStage, 12) 
           this.ScheduleDispatch(1.00);
           return;
         };
+        // r377a: the authored H2 departure spline already crosses the first
+        // passage after stop 70 and ends ~20 m down its outgoing lane. Consume
+        // that passage before handing control to traffic, otherwise the runtime
+        // would briefly issue a redundant command toward a waypoint behind us.
+        if this.followingPassage && Equals(this.passageAfterStopId, 70) {
+          if !this.AdvancePassageOrDestination() {
+            this.PublishLoopDiagnostic(34, 0);
+            this.ScheduleDispatch(1.00);
+            return;
+          };
+        };
         this.legPolls = 0;
         this.bayParkingActive = false;
         this.bayParkingStage = 0;
@@ -166,10 +178,10 @@ new_codes = '''    [68] = "route loop: r376a H2 native spline armed",
     [69] = "route loop: r376a H2 native spline reached path end",
     [70] = "route loop: r376a H2 native spline FAILED",
     [71] = "route loop: r376a H2 native spline active telemetry",
-    [72] = "route loop: r376b H2 native departure spline armed",
-    [73] = "route loop: r376b H2 native departure spline active telemetry",
-    [74] = "route loop: r376b H2 spline exit -> native traffic handoff",
-    [75] = "route loop: r376b H2 native departure spline FAILED"
+    [72] = "route loop: r377a H2 lane-lock departure spline armed",
+    [73] = "route loop: r377a H2 lane-lock departure spline active telemetry",
+    [74] = "route loop: r377a H2 lane-locked spline exit -> native traffic handoff",
+    [75] = "route loop: r377a H2 lane-lock departure spline FAILED"
 '''
 c = replace_once(c, old_codes, new_codes, "CET codes")
 
@@ -180,12 +192,12 @@ c = replace_once(c, old_list, new_list, "CET bay-code list")
 old_build = '''  if revision == 37601 then
     log("NCTC runtime build=37601 r376a H2 native spline arrival POC")
 '''
-new_build = '''  if revision == 37602 then
-    log("NCTC runtime build=37602 r376b H2 native spline arrival + departure")
+new_build = '''  if revision == 37607 then
+    log("NCTC runtime build=37607 r377a H2 lane-locked handoff")
   elseif revision == 37601 then
     log("NCTC runtime build=37601 r376a H2 native spline arrival POC")
 '''
 c = replace_once(c, old_build, new_build, "CET build marker")
 cet_path.write_text(c)
 
-print("R376B_PATCH_OK")
+print("R377A_PATCH_OK")
