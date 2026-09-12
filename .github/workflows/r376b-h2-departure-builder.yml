@@ -1,9 +1,9 @@
-name: r377b H2 lane-center slow handoff builder
+name: r378c H2 exact lane spline handoff builder
 
 on:
   push:
     branches:
-      - automation/r377b-h2-lane-center-slow-handoff-builder
+      - automation/r378c-exact-lane-spline-builder
 
 permissions:
   contents: write
@@ -20,7 +20,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Prepare r377b geometry, slow exit and labels
+      - name: Prepare r378c exact lane geometry and labels
         shell: bash
         run: |
           python3 - <<'PY'
@@ -32,10 +32,11 @@ jobs:
                   raise SystemExit(f"{label}: expected 1 match, got {n}")
               return text.replace(old, new, 1)
 
-          # Keep the visually validated r376f curb-clearance shape through p8,
-          # then return the bus to the observed native southbound lane center
-          # (world X ~= -2155.5) BEFORE the immediately adjacent intersection.
-          # Do not spline through the intersection; native traffic should own it.
+          # Preserve the visually validated r376f curb/pole clearance through p8.
+          # The old spline then ended around world X=-2153.6, while the native
+          # southbound lane extrapolates to X~-2159.2 here. Recenter only after
+          # p8, and finish with a tangent matching the measured bay/road direction
+          # (-0.039,-0.999), before the nearby junction.
           program = Path('tools/r376b/Program.cs')
           s = program.read_text()
           geometry = [
@@ -49,34 +50,38 @@ jobs:
           s = replace_once(
               s,
               'spline.Points.Add(Point( 4.15f, -62.00f, 0.0f, 9));',
-              'spline.Points.Add(Point( 6.80f, -53.00f, 0.0f, 9));\n'
-              'spline.Points.Add(Point( 5.80f, -56.00f, 0.0f, 10));\n'
-              'spline.Points.Add(Point( 5.40f, -58.00f, 0.0f, 11));',
-              'lane-center tail')
+              'spline.Points.Add(Point( 6.30f, -53.00f, 0.0f, 9));\n'
+              'spline.Points.Add(Point( 4.60f, -56.00f, 0.0f, 10));\n'
+              'spline.Points.Add(Point( 3.00f, -59.00f, 0.0f, 11));\n'
+              'spline.Points.Add(Point( 2.10f, -62.00f, 0.0f, 12));\n'
+              'spline.Points.Add(Point( 1.90f, -67.00f, 0.0f, 13));',
+              'exact lane tail')
           s = replace_once(
               s,
               '// H2 departure only. Local coordinates use the exact same P1 origin as the\n// validated r376a arrival. Hold the bus on the bay axis until P2, merge only\n// after the bay end, then finish with a straight road-aligned tail.',
-              '// H2 departure only. Preserve r376f curb clearance through p8, then return\n// smoothly to the observed native southbound lane center before the nearby\n// intersection. The spline ends before the junction so traffic AI owns it.',
+              '// H2 departure only. Preserve validated r376f clearance through p8, then\n// converge to the extrapolated native southbound lane centre before the nearby\n// junction. The final segment matches the measured road direction.',
               'geometry comment')
-          s = replace_once(s, 'Points.Count != 9', 'Points.Count != 11', 'point-count verify')
-          s = replace_once(s, 'R376B_WORLD_OK', 'R377B_WORLD_OK', 'world label')
+          s = replace_once(s, 'Points.Count != 9', 'Points.Count != 13', 'point-count verify')
+          s = replace_once(s, 'Bounds = Box4(-2170f, -1080f, 5f, -2150f, -1025f, 12f)', 'Bounds = Box4(-2170f, -1085f, 5f, -2150f, -1025f, 12f)', 'bounds')
+          s = replace_once(s, 'R376B_WORLD_OK', 'R378C_WORLD_OK', 'world label')
           program.write_text(s)
 
           build = Path('tools/r376b/build.sh')
           b = build.read_text()
           replacements = [
-              ('CLEAN_BRANCH="experiment/r376b-h2-native-spline-departure"', 'CLEAN_BRANCH="experiment/r377b-h2-lane-center-slow-handoff"'),
-              ("grep -q 'nctc_dev_build_revision.*, 37602'", "grep -q 'nctc_dev_build_revision.*, 37608'"),
-              ("grep -q 'r376b H2 native spline arrival + departure'", "grep -q 'r377b H2 lane-center slow handoff'"),
-              ('git -C "$CLEAN" commit -m "feat: r376b H2 native spline departure"', 'git -C "$CLEAN" commit -m "fix: r377b H2 lane-center slow handoff"'),
-              ('Devkit: r376b H2 native spline arrival + departure', 'Devkit: r377b H2 lane-center slow handoff'),
-              ('Runtime build: 37602', 'Runtime build: 37608'),
-              ('Scope: H2 only. The user-validated r376a arrival archive is byte-identical. r376b adds a separate native worldSplineNode departure spline and rolling handoff back to native traffic.', 'Scope: H2 only. Arrival remains byte-identical. r377b preserves r376f curb clearance through p8, returns to the observed native lane center before the adjacent intersection, ends the spline with braking enabled, then hands off to native traffic at low speed.'),
-              ('ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376b-h2-native-spline-departure-development.zip"', 'ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r377b-h2-lane-center-slow-handoff-development.zip"'),
-              ('rm -f "$ZIP" "$RUNNER_TEMP/r376b.sha256"', 'rm -f "$ZIP" "$RUNNER_TEMP/r377b.sha256"'),
-              ('sha256sum "$ZIP" | tee "$RUNNER_TEMP/r376b.sha256"', 'sha256sum "$ZIP" | tee "$RUNNER_TEMP/r377b.sha256"'),
-              ('cat > "$RUNNER_TEMP/r376b-metadata.txt" <<EOF', 'cat > "$RUNNER_TEMP/r377b-metadata.txt" <<EOF'),
-              ('cat "$RUNNER_TEMP/r376b-metadata.txt"', 'cat "$RUNNER_TEMP/r377b-metadata.txt"'),
+              ('BASE="857c92b7068a4b7bf026bfbb9b9712884f154090"', 'BASE="411eadf5628fcbc4199feaa63fd0deaa122faf51"'),
+              ('CLEAN_BRANCH="experiment/r376b-h2-native-spline-departure"', 'CLEAN_BRANCH="experiment/r378c-h2-exact-lane-spline-handoff"'),
+              ("grep -q 'nctc_dev_build_revision.*, 37602'", "grep -q 'nctc_dev_build_revision.*, 37803'"),
+              ("grep -q 'r376b H2 native spline arrival + departure'", "grep -q 'r378c H2 exact lane spline handoff'"),
+              ('git -C "$CLEAN" commit -m "feat: r376b H2 native spline departure"', 'git -C "$CLEAN" commit -m "fix: r378c H2 exact lane spline handoff"'),
+              ('Devkit: r376b H2 native spline arrival + departure', 'Devkit: r378c H2 exact lane spline handoff'),
+              ('Runtime build: 37602', 'Runtime build: 37803'),
+              ('Scope: H2 only. The user-validated r376a arrival archive is byte-identical. r376b adds a separate native worldSplineNode departure spline and rolling handoff back to native traffic.', 'Scope: H2 only. Base is validated r376f. Arrival is byte-identical; departure keeps r376f curb clearance through p8, then converges to the extrapolated native southbound lane centre (world X about -2159.2) and ends aligned to road direction before handing directly to normal useTraffic navigation. No JoinTraffic command.'),
+              ('ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376b-h2-native-spline-departure-development.zip"', 'ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r378c-h2-exact-lane-spline-handoff-development.zip"'),
+              ('rm -f "$ZIP" "$RUNNER_TEMP/r376b.sha256"', 'rm -f "$ZIP" "$RUNNER_TEMP/r378c.sha256"'),
+              ('sha256sum "$ZIP" | tee "$RUNNER_TEMP/r376b.sha256"', 'sha256sum "$ZIP" | tee "$RUNNER_TEMP/r378c.sha256"'),
+              ('cat > "$RUNNER_TEMP/r376b-metadata.txt" <<EOF', 'cat > "$RUNNER_TEMP/r378c-metadata.txt" <<EOF'),
+              ('cat "$RUNNER_TEMP/r376b-metadata.txt"', 'cat "$RUNNER_TEMP/r378c-metadata.txt"'),
           ]
           for idx, (old, new) in enumerate(replacements):
               b = replace_once(b, old, new, f'build replacement {idx}')
@@ -86,34 +91,24 @@ jobs:
           p = patch.read_text()
           if p.count('37602') != 3:
               raise SystemExit(f'patch revision count: expected 3, got {p.count("37602")}')
-          p = p.replace('37602', '37608')
-          p = p.replace('r376b H2 native spline arrival + departure', 'r377b H2 lane-center slow handoff')
-          p = replace_once(
-              p,
-              'this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/departure_spline", exitSpeed, false);',
-              'this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/departure_spline", 1.25, true);',
-              'slow spline arm')
-          p = replace_once(
-              p,
-              'this.driveCommandSent = this.controller.DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, rollingSpeed);',
-              'this.driveCommandSent = this.controller.DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, MaxF(rollingSpeed, 2.50));',
-              'low-speed traffic handoff')
-          p = p.replace('r376b H2 native departure spline armed', 'r377b H2 lane-center slow departure spline armed')
-          p = p.replace('r376b H2 native departure spline active telemetry', 'r377b H2 lane-center slow departure spline active telemetry')
-          p = p.replace('r376b H2 spline exit -> native traffic handoff', 'r377b H2 lane-center slow spline -> native traffic handoff')
-          p = p.replace('r376b H2 native departure spline FAILED', 'r377b H2 lane-center slow departure spline FAILED')
+          p = p.replace('37602', '37803')
+          p = p.replace('r376b H2 native spline arrival + departure', 'r378c H2 exact lane spline handoff')
+          p = p.replace('r376b H2 native departure spline armed', 'r378c H2 exact-lane departure spline armed')
+          p = p.replace('r376b H2 native departure spline active telemetry', 'r378c H2 exact-lane departure spline active telemetry')
+          p = p.replace('r376b H2 spline exit -> native traffic handoff', 'r378c H2 exact-lane spline -> native traffic handoff')
+          p = p.replace('r376b H2 native departure spline FAILED', 'r378c H2 exact-lane departure spline FAILED')
           patch.write_text(p)
           PY
 
-      - name: Build r377b
+      - name: Build r378c
         shell: bash
         run: bash tools/r376b/build.sh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nctc-r377b-h2-lane-center-slow-handoff
+          name: nctc-r378c-h2-exact-lane-spline-handoff
           path: |
-            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r377b-h2-lane-center-slow-handoff-development.zip
-            ${{ runner.temp }}/r377b.sha256
-            ${{ runner.temp }}/r377b-metadata.txt
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r378c-h2-exact-lane-spline-handoff-development.zip
+            ${{ runner.temp }}/r378c.sha256
+            ${{ runner.temp }}/r378c-metadata.txt
           compression-level: 0
