@@ -1,9 +1,9 @@
-name: r376f H2 final nose-clearance builder
+name: r377a H2 lane-locked handoff builder
 
 on:
   push:
     branches:
-      - automation/r376f-h2-final-nose-clearance-builder
+      - automation/r377a-h2-lane-locked-handoff-builder
 
 permissions:
   contents: write
@@ -20,7 +20,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Prepare r376f geometry and labels
+      - name: Prepare r377a lane-lock geometry and handoff
         shell: bash
         run: |
           python3 - <<'PY'
@@ -32,10 +32,10 @@ jobs:
                   raise SystemExit(f"{label}: expected 1 match, got {n}")
               return text.replace(old, new, 1)
 
-          # r376e is the first visually validated departure geometry: the Mahir
-          # nose clears the curb and poles. r376f is deliberately only a finishing
-          # pass: preserve the early merge shape and move points 6-9 another
-          # ~0.3-0.4 m road-side for a little more front-bumper safety margin.
+          # Preserve the validated r376f bay entry/exit shape through point 9.
+          # Then extend the SAME native spline through the surveyed passage-3
+          # after H2 and about 20 m down its authored outgoing heading. This
+          # gives useTraffic=true an unambiguous lane-aligned starting state.
           program = Path('tools/r376b/Program.cs')
           s = program.read_text()
           geometry = [
@@ -46,29 +46,49 @@ jobs:
               ('spline.Points.Add(Point( 4.15f, -62.00f, 0.0f, 9));', 'spline.Points.Add(Point( 7.40f, -62.00f, 0.0f, 9));'),
           ]
           for i, (old, new) in enumerate(geometry, 5):
-              s = replace_once(s, old, new, f'geometry point {i}')
+              s = replace_once(s, old, new, f'r376f geometry point {i}')
+
+          p9 = 'spline.Points.Add(Point( 7.40f, -62.00f, 0.0f, 9));'
+          extension = '''spline.Points.Add(Point( 7.40f, -62.00f, 0.0f, 9));
+// r377a: smooth turn from the validated r376f exit into the surveyed
+// post-H2 passage. Passage-3 world=(-2103.407,-1090.684), yaw=-92.59 deg.
+// Relative to the spline node origin this is (57.608,-77.971). Point 16
+// continues ~20 m along that heading so traffic lane acquisition happens
+// only after the intersection ambiguity is behind the Mahir.
+spline.Points.Add(Point( 7.60f, -67.00f, 0.0f, 10));
+spline.Points.Add(Point(10.00f, -71.50f, 0.0f, 11));
+spline.Points.Add(Point(16.00f, -75.00f, 0.0f, 12));
+spline.Points.Add(Point(26.00f, -77.00f, 0.0f, 13));
+spline.Points.Add(Point(40.00f, -77.50f, 0.0f, 14));
+spline.Points.Add(Point(57.608f, -77.971f, 0.0f, 15));
+spline.Points.Add(Point(77.588f, -78.875f, 0.0f, 16));'''
+          s = replace_once(s, p9, extension, 'lane-lock spline extension')
           s = replace_once(
               s,
               '// validated r376a arrival. Hold the bus on the bay axis until P2, merge only\n// after the bay end, then finish with a straight road-aligned tail.',
-              '// validated r376a arrival. Keep the r376e road-side departure shape and add\n// only a small final nose-clearance margin on points 6-9.',
+              '// validated r376a arrival and r376f curb-safe exit. r377a continues through\n// surveyed passage-3 so native traffic reacquires the correct outgoing lane.',
               'geometry comment')
+          s = replace_once(s, 'parsedSplineNode.SplineData.Chunk?.Points.Count != 9', 'parsedSplineNode.SplineData.Chunk?.Points.Count != 16', 'point-count check')
+          s = replace_once(s, 'Bounds = Box4(-2170f, -1080f, 5f, -2150f, -1025f, 12f),', 'Bounds = Box4(-2170f, -1110f, 5f, -2075f, -1025f, 12f),', 'node bounds')
+          s = replace_once(s, 'StreamingBox = Box4(-2220f, -1150f, 0f, -2100f, -1000f, 30f),', 'StreamingBox = Box4(-2220f, -1150f, 0f, -2050f, -1000f, 30f),', 'streaming bounds')
+          s = s.replace('R376B_WORLD_OK', 'R377A_WORLD_OK')
           program.write_text(s)
 
           build = Path('tools/r376b/build.sh')
           b = build.read_text()
           replacements = [
-              ('CLEAN_BRANCH="experiment/r376b-h2-native-spline-departure"', 'CLEAN_BRANCH="experiment/r376f-h2-final-nose-clearance"'),
-              ("grep -q 'nctc_dev_build_revision.*, 37602'", "grep -q 'nctc_dev_build_revision.*, 37606'"),
-              ("grep -q 'r376b H2 native spline arrival + departure'", "grep -q 'r376f H2 final nose clearance'"),
-              ('git -C "$CLEAN" commit -m "feat: r376b H2 native spline departure"', 'git -C "$CLEAN" commit -m "fix: r376f H2 final nose clearance"'),
-              ('Devkit: r376b H2 native spline arrival + departure', 'Devkit: r376f H2 final nose clearance'),
-              ('Runtime build: 37602', 'Runtime build: 37606'),
-              ('Scope: H2 only. The user-validated r376a arrival archive is byte-identical. r376b adds a separate native worldSplineNode departure spline and rolling handoff back to native traffic.', 'Scope: H2 only. The user-validated r376a arrival archive is byte-identical. r376f keeps the validated r376e departure geometry concept and moves only departure spline points 6-9 slightly farther road-side for extra front-bumper curb/pole margin.'),
-              ('ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376b-h2-native-spline-departure-development.zip"', 'ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376f-h2-final-nose-clearance-development.zip"'),
-              ('rm -f "$ZIP" "$RUNNER_TEMP/r376b.sha256"', 'rm -f "$ZIP" "$RUNNER_TEMP/r376f.sha256"'),
-              ('sha256sum "$ZIP" | tee "$RUNNER_TEMP/r376b.sha256"', 'sha256sum "$ZIP" | tee "$RUNNER_TEMP/r376f.sha256"'),
-              ('cat > "$RUNNER_TEMP/r376b-metadata.txt" <<EOF', 'cat > "$RUNNER_TEMP/r376f-metadata.txt" <<EOF'),
-              ('cat "$RUNNER_TEMP/r376b-metadata.txt"', 'cat "$RUNNER_TEMP/r376f-metadata.txt"'),
+              ('CLEAN_BRANCH="experiment/r376b-h2-native-spline-departure"', 'CLEAN_BRANCH="experiment/r377a-h2-lane-locked-handoff"'),
+              ("grep -q 'nctc_dev_build_revision.*, 37602'", "grep -q 'nctc_dev_build_revision.*, 37607'"),
+              ("grep -q 'r376b H2 native spline arrival + departure'", "grep -q 'r377a H2 lane-locked handoff'"),
+              ('git -C "$CLEAN" commit -m "feat: r376b H2 native spline departure"', 'git -C "$CLEAN" commit -m "feat: r377a H2 lane-locked traffic handoff"'),
+              ('Devkit: r376b H2 native spline arrival + departure', 'Devkit: r377a H2 lane-locked handoff'),
+              ('Runtime build: 37602', 'Runtime build: 37607'),
+              ('Scope: H2 only. The user-validated r376a arrival archive is byte-identical. r376b adds a separate native worldSplineNode departure spline and rolling handoff back to native traffic.', 'Scope: H2 only. r376f entry/exit geometry is preserved through departure point 9. r377a extends that spline through surveyed passage-3 and ~20 m down its outgoing lane, consumes the already-crossed passage, then performs one rolling handoff to native traffic.'),
+              ('ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376b-h2-native-spline-departure-development.zip"', 'ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r377a-h2-lane-locked-handoff-development.zip"'),
+              ('rm -f "$ZIP" "$RUNNER_TEMP/r376b.sha256"', 'rm -f "$ZIP" "$RUNNER_TEMP/r377a.sha256"'),
+              ('sha256sum "$ZIP" | tee "$RUNNER_TEMP/r376b.sha256"', 'sha256sum "$ZIP" | tee "$RUNNER_TEMP/r377a.sha256"'),
+              ('cat > "$RUNNER_TEMP/r376b-metadata.txt" <<EOF', 'cat > "$RUNNER_TEMP/r377a-metadata.txt" <<EOF'),
+              ('cat "$RUNNER_TEMP/r376b-metadata.txt"', 'cat "$RUNNER_TEMP/r377a-metadata.txt"'),
           ]
           for idx, (old, new) in enumerate(replacements):
               b = replace_once(b, old, new, f'build replacement {idx}')
@@ -78,20 +98,49 @@ jobs:
           p = patch.read_text()
           if p.count('37602') != 3:
               raise SystemExit(f'patch revision count: expected 3, got {p.count("37602")}')
-          p = p.replace('37602', '37606')
-          p = p.replace('r376b H2 native spline arrival + departure', 'r376f H2 final nose clearance')
+          p = p.replace('37602', '37607')
+          p = p.replace('r376b H2 native spline arrival + departure', 'r377a H2 lane-locked handoff')
+          p = p.replace('r376b H2 native departure spline armed', 'r377a H2 lane-lock departure spline armed')
+          p = p.replace('r376b H2 native departure spline active telemetry', 'r377a H2 lane-lock departure spline active telemetry')
+          p = p.replace('r376b H2 spline exit -> native traffic handoff', 'r377a H2 lane-locked spline exit -> native traffic handoff')
+          p = p.replace('r376b H2 native departure spline FAILED', 'r377a H2 lane-lock departure spline FAILED')
+
+          old_advance = '''        if !this.AdvanceToNextStop() {
+          this.PublishLoopDiagnostic(34, 0);
+          this.ScheduleDispatch(1.00);
+          return;
+        };
+        this.legPolls = 0;'''
+          new_advance = '''        if !this.AdvanceToNextStop() {
+          this.PublishLoopDiagnostic(34, 0);
+          this.ScheduleDispatch(1.00);
+          return;
+        };
+        // r377a: this H2 departure spline physically crosses passage-3 and
+        // finishes ~20 m down its authored outgoing lane. Consume that first
+        // passage now so we do not submit a redundant traffic command back
+        // toward a waypoint the bus has already crossed.
+        if this.followingPassage && Equals(this.passageAfterStopId, 70) {
+          if !this.AdvancePassageOrDestination() {
+            this.PublishLoopDiagnostic(34, 0);
+            this.ScheduleDispatch(1.00);
+            return;
+          };
+        };
+        this.legPolls = 0;'''
+          p = replace_once(p, old_advance, new_advance, 'consume H2 passage before traffic handoff')
           patch.write_text(p)
           PY
 
-      - name: Build r376f
+      - name: Build r377a
         shell: bash
         run: bash tools/r376b/build.sh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nctc-r376f-h2-final-nose-clearance
+          name: nctc-r377a-h2-lane-locked-handoff
           path: |
-            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r376f-h2-final-nose-clearance-development.zip
-            ${{ runner.temp }}/r376f.sha256
-            ${{ runner.temp }}/r376f-metadata.txt
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r377a-h2-lane-locked-handoff-development.zip
+            ${{ runner.temp }}/r377a.sha256
+            ${{ runner.temp }}/r377a-metadata.txt
           compression-level: 0
