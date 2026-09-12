@@ -97,19 +97,18 @@ jobs:
               'this.driveCommandSent = this.controller.DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, rollingSpeed);',
               'this.driveCommandSent = this.controller.DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, MaxF(rollingSpeed, 2.50));',
               'low-speed traffic handoff')
-          p = replace_once(
-              p,
-              'transit_path.write_text(s)\n\ncet_path = Path("source/cet/nctc_survey/init.lua")',
-              '''s = replace_once(
-    s,
-    'let bayOccupied: Bool = this.IsBayOccupiedByVehicle();',
-    'let bayOccupied: Bool = !Equals(this.requestedStopId, 70) && this.IsBayOccupiedByVehicle();',
-    "H2 deterministic bay occupancy",
-)
-transit_path.write_text(s)
-
-cet_path = Path("source/cet/nctc_survey/init.lua")''',
-              'H2 deterministic bay patch')
+          marker = 'transit_path.write_text(s)\n\ncet_path = Path("source/cet/nctc_survey/init.lua")'
+          injected = (
+              "s = replace_once(\n"
+              "    s,\n"
+              "    'let bayOccupied: Bool = this.IsBayOccupiedByVehicle();',\n"
+              "    'let bayOccupied: Bool = !Equals(this.requestedStopId, 70) && this.IsBayOccupiedByVehicle();',\n"
+              "    \"H2 deterministic bay occupancy\",\n"
+              ")\n"
+              "transit_path.write_text(s)\n\n"
+              "cet_path = Path(\"source/cet/nctc_survey/init.lua\")"
+          )
+          p = replace_once(p, marker, injected, 'H2 deterministic bay patch')
           p = p.replace('r376b H2 native departure spline armed', 'r377c H2 right-lane departure spline armed')
           p = p.replace('r376b H2 native departure spline active telemetry', 'r377c H2 right-lane departure spline active telemetry')
           p = p.replace('r376b H2 spline exit -> native traffic handoff', 'r377c H2 right-lane spline -> native traffic handoff')
