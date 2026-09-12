@@ -178,7 +178,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37803);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37804);
     return true;
   }
 
@@ -1421,7 +1421,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
         this.bayParkingRetryCount = 0;
         if Equals(this.requestedStopId, 70) {
           this.bayParkingStage = 12;
-          this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/departure_spline", exitSpeed, false);
+          this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/departure_spline", 1.25, true);
           this.PublishLoopDiagnostic(this.driveCommandSent ? 72 : 33, this.requestedStopId);
           this.ScheduleDispatch(0.10);
           return;
@@ -1605,7 +1605,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
         this.legPolls = 0;
         this.bayParkingActive = false;
         this.bayParkingStage = 0;
-        this.driveCommandSent = this.controller.DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, rollingSpeed);
+        this.driveCommandSent = this.controller.DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, MaxF(rollingSpeed, 3.00));
         this.PublishLoopDiagnostic(this.driveCommandSent ? 74 : 33, this.requestedStopId);
         this.ScheduleDispatch(0.05);
         return;
