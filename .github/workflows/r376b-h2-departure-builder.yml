@@ -1,9 +1,9 @@
-name: r376c H2 curb-safe departure builder
+name: r376d H2 roadside nose-clearance builder
 
 on:
   push:
     branches:
-      - automation/r376c-h2-curb-safe-departure-builder
+      - automation/r376d-h2-roadside-nose-clearance-builder
 
 permissions:
   contents: write
@@ -20,7 +20,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Prepare r376c geometry and labels
+      - name: Prepare r376d geometry and labels
         shell: bash
         run: |
           python3 - <<'PY'
@@ -32,44 +32,46 @@ jobs:
                   raise SystemExit(f"{label}: expected 1 match, got {n}")
               return text.replace(old, new, 1)
 
-          # Keep the validated r376b departure lifecycle and change only the
-          # world spline geometry. The last half of the merge is pulled ~2 m
-          # inward, close to the original P1/P2-derived r376a exit corridor.
+          # Keep the validated r376b native departure lifecycle and change only
+          # the world spline geometry. r376c moved the exit inward and the user
+          # still observed the FRONT of the Mahir taking the curb/poles. r376d
+          # therefore moves the merge decisively in the opposite direction as a
+          # road-side nose-clearance test; arrival and traffic handoff stay fixed.
           program = Path('tools/r376b/Program.cs')
           s = program.read_text()
           geometry = [
-              ('spline.Points.Add(Point( 0.20f, -37.00f, 0.0f, 5));', 'spline.Points.Add(Point( 0.00f, -37.00f, 0.0f, 5));'),
-              ('spline.Points.Add(Point( 2.00f, -41.00f, 0.0f, 6));', 'spline.Points.Add(Point( 1.10f, -41.00f, 0.0f, 6));'),
-              ('spline.Points.Add(Point( 3.50f, -45.50f, 0.0f, 7));', 'spline.Points.Add(Point( 2.00f, -45.50f, 0.0f, 7));'),
-              ('spline.Points.Add(Point( 4.10f, -50.00f, 0.0f, 8));', 'spline.Points.Add(Point( 2.25f, -50.00f, 0.0f, 8));'),
-              ('spline.Points.Add(Point( 4.15f, -62.00f, 0.0f, 9));', 'spline.Points.Add(Point( 2.00f, -62.00f, 0.0f, 9));'),
+              ('spline.Points.Add(Point( 0.20f, -37.00f, 0.0f, 5));', 'spline.Points.Add(Point( 0.80f, -37.00f, 0.0f, 5));'),
+              ('spline.Points.Add(Point( 2.00f, -41.00f, 0.0f, 6));', 'spline.Points.Add(Point( 3.00f, -41.00f, 0.0f, 6));'),
+              ('spline.Points.Add(Point( 3.50f, -45.50f, 0.0f, 7));', 'spline.Points.Add(Point( 5.00f, -45.50f, 0.0f, 7));'),
+              ('spline.Points.Add(Point( 4.10f, -50.00f, 0.0f, 8));', 'spline.Points.Add(Point( 5.80f, -50.00f, 0.0f, 8));'),
+              ('spline.Points.Add(Point( 4.15f, -62.00f, 0.0f, 9));', 'spline.Points.Add(Point( 5.80f, -62.00f, 0.0f, 9));'),
           ]
           for i, (old, new) in enumerate(geometry, 5):
               s = replace_once(s, old, new, f'geometry point {i}')
           s = replace_once(
               s,
               '// validated r376a arrival. Hold the bus on the bay axis until P2, merge only\n// after the bay end, then finish with a straight road-aligned tail.',
-              '// validated r376a arrival. Hold the bus on the bay axis until P2, then use\n// a curb-safe inner merge derived from the original P1/P2 road corridor.',
+              '// validated r376a arrival. Hold the bus on the bay axis until P2, then move\n// the departure merge road-side to clear the curb/poles with the bus nose.',
               'geometry comment')
           program.write_text(s)
 
-          # Reuse the proven r376b builder, but publish an isolated r376c clean
-          # branch/build so this geometry test cannot overwrite the good base.
+          # Reuse the proven r376b builder, publishing an isolated r376d branch
+          # so this direction test cannot overwrite any previous known-good base.
           build = Path('tools/r376b/build.sh')
           b = build.read_text()
           replacements = [
-              ('CLEAN_BRANCH="experiment/r376b-h2-native-spline-departure"', 'CLEAN_BRANCH="experiment/r376c-h2-curb-safe-departure"'),
-              ("grep -q 'nctc_dev_build_revision.*, 37602'", "grep -q 'nctc_dev_build_revision.*, 37603'"),
-              ("grep -q 'r376b H2 native spline arrival + departure'", "grep -q 'r376c H2 curb-safe departure geometry'"),
-              ('git -C "$CLEAN" commit -m "feat: r376b H2 native spline departure"', 'git -C "$CLEAN" commit -m "fix: r376c H2 curb-safe departure geometry"'),
-              ('Devkit: r376b H2 native spline arrival + departure', 'Devkit: r376c H2 curb-safe departure geometry'),
-              ('Runtime build: 37602', 'Runtime build: 37603'),
-              ('Scope: H2 only. The user-validated r376a arrival archive is byte-identical. r376b adds a separate native worldSplineNode departure spline and rolling handoff back to native traffic.', 'Scope: H2 only. The user-validated r376a arrival archive is byte-identical. r376c keeps the r376b native departure/handoff and only pulls the exit spline inward away from the curb and pole.'),
-              ('ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376b-h2-native-spline-departure-development.zip"', 'ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376c-h2-curb-safe-departure-development.zip"'),
-              ('rm -f "$ZIP" "$RUNNER_TEMP/r376b.sha256"', 'rm -f "$ZIP" "$RUNNER_TEMP/r376c.sha256"'),
-              ('sha256sum "$ZIP" | tee "$RUNNER_TEMP/r376b.sha256"', 'sha256sum "$ZIP" | tee "$RUNNER_TEMP/r376c.sha256"'),
-              ('cat > "$RUNNER_TEMP/r376b-metadata.txt" <<EOF', 'cat > "$RUNNER_TEMP/r376c-metadata.txt" <<EOF'),
-              ('cat "$RUNNER_TEMP/r376b-metadata.txt"', 'cat "$RUNNER_TEMP/r376c-metadata.txt"'),
+              ('CLEAN_BRANCH="experiment/r376b-h2-native-spline-departure"', 'CLEAN_BRANCH="experiment/r376d-h2-roadside-nose-clearance"'),
+              ("grep -q 'nctc_dev_build_revision.*, 37602'", "grep -q 'nctc_dev_build_revision.*, 37604'"),
+              ("grep -q 'r376b H2 native spline arrival + departure'", "grep -q 'r376d H2 roadside nose clearance'"),
+              ('git -C "$CLEAN" commit -m "feat: r376b H2 native spline departure"', 'git -C "$CLEAN" commit -m "fix: r376d H2 roadside nose clearance"'),
+              ('Devkit: r376b H2 native spline arrival + departure', 'Devkit: r376d H2 roadside nose clearance'),
+              ('Runtime build: 37602', 'Runtime build: 37604'),
+              ('Scope: H2 only. The user-validated r376a arrival archive is byte-identical. r376b adds a separate native worldSplineNode departure spline and rolling handoff back to native traffic.', 'Scope: H2 only. The user-validated r376a arrival archive is byte-identical. r376d keeps the native r376b departure/handoff and moves only departure spline points 5-9 road-side, opposite r376c, to test front-bumper curb/pole clearance.'),
+              ('ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376b-h2-native-spline-departure-development.zip"', 'ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376d-h2-roadside-nose-clearance-development.zip"'),
+              ('rm -f "$ZIP" "$RUNNER_TEMP/r376b.sha256"', 'rm -f "$ZIP" "$RUNNER_TEMP/r376d.sha256"'),
+              ('sha256sum "$ZIP" | tee "$RUNNER_TEMP/r376b.sha256"', 'sha256sum "$ZIP" | tee "$RUNNER_TEMP/r376d.sha256"'),
+              ('cat > "$RUNNER_TEMP/r376b-metadata.txt" <<EOF', 'cat > "$RUNNER_TEMP/r376d-metadata.txt" <<EOF'),
+              ('cat "$RUNNER_TEMP/r376b-metadata.txt"', 'cat "$RUNNER_TEMP/r376d-metadata.txt"'),
           ]
           for idx, (old, new) in enumerate(replacements):
               b = replace_once(b, old, new, f'build replacement {idx}')
@@ -77,24 +79,23 @@ jobs:
 
           patch = Path('tools/r376b/patch.py')
           p = patch.read_text()
-          # The patch still installs the exact r376b runtime state machine; only
-          # its identifying revision/log is advanced for this geometry build.
+          # Runtime behavior remains r376b; only identification advances.
           if p.count('37602') != 3:
               raise SystemExit(f'patch revision count: expected 3, got {p.count("37602")}')
-          p = p.replace('37602', '37603')
-          p = p.replace('r376b H2 native spline arrival + departure', 'r376c H2 curb-safe departure geometry')
+          p = p.replace('37602', '37604')
+          p = p.replace('r376b H2 native spline arrival + departure', 'r376d H2 roadside nose clearance')
           patch.write_text(p)
           PY
 
-      - name: Build r376c
+      - name: Build r376d
         shell: bash
         run: bash tools/r376b/build.sh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nctc-r376c-h2-curb-safe-departure
+          name: nctc-r376d-h2-roadside-nose-clearance
           path: |
-            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r376c-h2-curb-safe-departure-development.zip
-            ${{ runner.temp }}/r376c.sha256
-            ${{ runner.temp }}/r376c-metadata.txt
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r376d-h2-roadside-nose-clearance-development.zip
+            ${{ runner.temp }}/r376d.sha256
+            ${{ runner.temp }}/r376d-metadata.txt
           compression-level: 0
