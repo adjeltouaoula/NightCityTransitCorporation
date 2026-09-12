@@ -144,7 +144,7 @@ public class NCTCDeferredSplineDriveCommand extends DelayCallback {
       return;
     };
     command = new AIVehicleOnSplineCommand();
-    command.splineRef = CreateNodeRef(this.splinePath);
+    command.splineRef = ToNodeRef(this.splinePath);
     command.secureTimeOut = 120.00;
     command.driveBackwards = false;
     command.reverseSpline = false;
@@ -1361,10 +1361,6 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if this.arrived {
       quests.SetFact(n"nctc_service_bus_at_stop", 1);
       this.controller.KeepPassengerDoorOpen();
-      if Equals(this.requestedStopId, 70) && this.HasServiceBay() && this.bayParkingWasEntered {
-        this.ScheduleDispatch(0.25);
-        return;
-      };
       boarded = this.controller.IsPlayerAboard()
         || Equals(quests.GetFact(n"nctc_passenger_departure_requested"), 1);
       // Always leave enough time for the door animation to be visible.
@@ -1387,14 +1383,13 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.arrived = false;
       this.dwellPolls = 0;
       this.legPolls = 0;
-      if leaveBayDirect {
-        let exitSpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 5.00), 2.00);
+      if leaveBayDirect && Equals(this.requestedStopId, 70) {
+        let exitSpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 3.00), 1.50);
         this.bayParkingActive = true;
-        this.bayParkingStage = 3;
+        this.bayParkingStage = 12;
         this.bayParkingRetryCount = 0;
-        this.bayParkingRoadTarget = this.GetBayParkingRoadTarget();
-        this.driveCommandSent = this.controller.DriveToBerthDirect(this.bayParkingRoadTarget, exitSpeed, 5.00);
-        this.PublishLoopDiagnostic(this.driveCommandSent ? 63 : 33, this.requestedStopId);
+        this.driveCommandSent = this.controller.DriveOnBaySpline("$/03_night_city/#nctc/#h2_bay_exit", exitSpeed, true);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 72 : 33, this.requestedStopId);
         this.ScheduleDispatch(0.10);
         return;
       };
@@ -1425,7 +1420,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.telemetryPolls += 1;
     if this.telemetryPolls >= 10 {
       this.telemetryPolls = 0;
-      if this.bayParkingActive && Equals(this.bayParkingStage, 10) {
+      if this.bayParkingActive && (Equals(this.bayParkingStage, 10) || Equals(this.bayParkingStage, 12)) {
         this.PublishLoopDiagnostic(71, this.requestedStopId);
       } else {
         this.PublishRouteCommandTelemetry();
@@ -1515,12 +1510,12 @@ public class NCTCTransitSystem extends ScriptableSystem {
       let entryLateral: Float;
       let entryLongitudinal: Float = this.GetBayEntryProgress(entryLateral);
       if entryLongitudinal > 0.50 && entryLongitudinal <= 24.00 && entryLateral <= 12.00 {
-        let entrySpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 6.00), 2.00);
+        let entrySpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 4.00), 1.50);
         this.bayParkingActive = true;
         this.bayParkingStage = 10;
         this.bayParkingWasEntered = true;
         this.bayParkingRetryCount = 0;
-        this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/arrival_spline", entrySpeed, true);
+        this.driveCommandSent = this.controller.DriveOnBaySpline("$/03_night_city/#nctc/#h2_bay_entry", entrySpeed, true);
         this.PublishLoopDiagnostic(this.driveCommandSent ? 68 : 33, this.requestedStopId);
         this.ScheduleDispatch(0.10);
         return;
@@ -1551,6 +1546,38 @@ public class NCTCTransitSystem extends ScriptableSystem {
     };
 
     if this.bayParkingActive && Equals(this.bayParkingStage, 11) {
+      this.ScheduleDispatch(0.25);
+      return;
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 12) {
+      if this.controller.IsSplineCommandSuccessful() {
+        let exitRollingSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
+        this.bayParkingActive = false;
+        this.bayParkingStage = 0;
+        this.bayParkingRetryCount = 0;
+        this.bayParkingWasEntered = false;
+        if !this.AdvanceToNextStop() {
+          this.PublishLoopDiagnostic(34, 0);
+          this.ScheduleDispatch(1.00);
+          return;
+        };
+        this.driveCommandSent = this.controller.DriveToTrafficAfterRollingPassage(this.GetTrafficTarget(), 0.00, exitRollingSpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 73 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.10);
+        return;
+      };
+      if this.controller.IsSplineCommandFailed() {
+        this.bayParkingStage = 13;
+        this.PublishLoopDiagnostic(74, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      this.ScheduleDispatch(0.10);
+      return;
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 13) {
       this.ScheduleDispatch(0.25);
       return;
     };
