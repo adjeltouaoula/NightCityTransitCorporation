@@ -170,6 +170,7 @@ public class NCTCServiceBusController extends IScriptable {
   // alive alongside the command for the next stop.
   private let previousRouteCommand: ref<AIVehicleDriveToPointCommand>;
   private let activeSplineCommand: ref<AIVehicleOnSplineCommand>;
+  private let activeJoinTrafficCommand: ref<AIVehicleJoinTrafficCommand>;
   private let driveGeneration: Int32;
 
   public func Bind(bus: ref<VehicleObject>) -> Bool {
@@ -178,7 +179,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37606);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37802);
     return true;
   }
 
@@ -304,10 +305,77 @@ public class NCTCServiceBusController extends IScriptable {
     return true;
   }
 
-  // r376b: the departure spline has already completed successfully here,
-  // so do not interrupt it again. Hand the measured rolling speed to the
-  // normal traffic navigator through the established generation-safe pulse.
-  public func DriveToTrafficAfterSpline(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {
+  // r378b: r376f already gets the Mahir cleanly out of H2. Use native
+  // JoinTraffic only as a local lane-acquisition phase, then validate the
+  // traffic movement direction before giving the route navigator control.
+  public func JoinTrafficAfterSpline() -> Bool {
+    let command: ref<AIVehicleJoinTrafficCommand>;
+    if !this.IsReady() { return false; };
+
+    this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.activeRouteCommand = null;
+    this.activeSplineCommand = null;
+    this.activeJoinTrafficCommand = null;
+
+    command = new AIVehicleJoinTrafficCommand();
+    command.needDriver = false;
+    command.useKinematic = false;
+    this.bus.GetAIComponent().SendCommand(command);
+    this.activeJoinTrafficCommand = command;
+    return true;
+  }
+
+  public func IsInTrafficLane() -> Bool {
+    return this.IsReady() && this.bus.IsInTrafficLane();
+  }
+
+  // VehicleObject owns a CrowdMemberBaseComponent, the same native traffic
+  // component used by the game's crowd/traffic behavior. Its movement vector
+  // tells us which direction the selected traffic path actually runs.
+  public func GetTrafficMovementDirection() -> Vector4 {
+    let crowd: ref<CrowdMemberBaseComponent>;
+    let direction: Vector4;
+    if !this.IsReady() { return new Vector4(0.00, 0.00, 0.00, 0.00); };
+    crowd = this.bus.GetCrowdMemberComponent();
+    if !IsDefined(crowd) { return new Vector4(0.00, 0.00, 0.00, 0.00); };
+    direction = crowd.GetMovementDirection();
+    direction.Z = 0.00;
+    direction.W = 0.00;
+    if AbsF(direction.X) <= 0.01 && AbsF(direction.Y) <= 0.01 {
+      return new Vector4(0.00, 0.00, 0.00, 0.00);
+    };
+    return Vector4.Normalize2D(direction);
+  }
+
+  public func TryChangeTrafficMovementDirection() -> Bool {
+    let crowd: ref<CrowdMemberBaseComponent>;
+    if !this.IsReady() { return false; };
+    crowd = this.bus.GetCrowdMemberComponent();
+    if !IsDefined(crowd) { return false; };
+    crowd.TryChangeMovementDirection();
+    return true;
+  }
+
+  public func IsJoinTrafficCommandSuccessful() -> Bool {
+    return IsDefined(this.activeJoinTrafficCommand) && Equals(this.activeJoinTrafficCommand.state, AICommandState.Success);
+  }
+
+  public func IsJoinTrafficCommandFailed() -> Bool {
+    if !IsDefined(this.activeJoinTrafficCommand) { return false; };
+    return Equals(this.activeJoinTrafficCommand.state, AICommandState.Failure)
+      || Equals(this.activeJoinTrafficCommand.state, AICommandState.Cancelled)
+      || Equals(this.activeJoinTrafficCommand.state, AICommandState.Interrupted);
+  }
+
+  public func GetJoinTrafficCommandStatusCode() -> Int32 {
+    if !IsDefined(this.activeJoinTrafficCommand) { return 0; };
+    if Equals(this.activeJoinTrafficCommand.state, AICommandState.Success) { return 2; };
+    if this.IsJoinTrafficCommandFailed() { return 3; };
+    return 1;
+  }
+
+  public func DriveToTrafficAfterJoin(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {
     let callback: ref<NCTCDeferredDriveCommand>;
     let noDriver: ref<AIEvent>;
     let driverReady: ref<AIEvent>;
@@ -318,8 +386,9 @@ public class NCTCServiceBusController extends IScriptable {
 
     generation = this.NextDriveGeneration();
     this.previousRouteCommand = this.activeRouteCommand;
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleJoinTrafficCommand", false, true);
+    this.activeJoinTrafficCommand = null;
     this.activeRouteCommand = null;
-    this.activeSplineCommand = null;
 
     noDriver = new AIEvent();
     driverReady = new AIEvent();
@@ -896,6 +965,8 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let passageTarget: Vector4;
   private let passageForward: Vector4;
   private let passageForwardRecorded: Bool;
+  private let departureJoinForward: Vector4;
+  private let departureJoinFlipCount: Int32;
 
   private func HasServiceBay() -> Bool {
     return this.hasSurveyProfile && this.hasSurveyBerth2 && Vector4.Distance(this.surveyBerth, this.surveyBerth2) > 1.00;
@@ -1196,6 +1267,25 @@ public class NCTCTransitSystem extends ScriptableSystem {
     quests.SetFact(n"nctc_dev_loop_id", quests.GetFact(n"nctc_dev_loop_id") + 1);
   }
 
+  private func PublishJoinDirectionFacts(quests: ref<QuestsSystem>) -> Void {
+    let movement: Vector4;
+    let dot: Float = -2.00;
+    if !IsDefined(quests) || !IsDefined(this.controller) { return; };
+    movement = this.controller.GetTrafficMovementDirection();
+    if (AbsF(movement.X) > 0.01 || AbsF(movement.Y) > 0.01)
+      && (AbsF(this.departureJoinForward.X) > 0.01 || AbsF(this.departureJoinForward.Y) > 0.01) {
+      dot = Vector4.Dot(movement, this.departureJoinForward);
+    };
+    quests.SetFact(n"nctc_dev_join_traffic_state", this.controller.GetJoinTrafficCommandStatusCode());
+    quests.SetFact(n"nctc_dev_bus_in_traffic_lane", this.controller.IsInTrafficLane() ? 1 : 0);
+    quests.SetFact(n"nctc_dev_join_move_x_mm", Cast<Int32>(movement.X * 1000.00));
+    quests.SetFact(n"nctc_dev_join_move_y_mm", Cast<Int32>(movement.Y * 1000.00));
+    quests.SetFact(n"nctc_dev_join_desired_x_mm", Cast<Int32>(this.departureJoinForward.X * 1000.00));
+    quests.SetFact(n"nctc_dev_join_desired_y_mm", Cast<Int32>(this.departureJoinForward.Y * 1000.00));
+    quests.SetFact(n"nctc_dev_join_direction_dot_x1000", Cast<Int32>(dot * 1000.00));
+    quests.SetFact(n"nctc_dev_join_flip_count", this.departureJoinFlipCount);
+  }
+
   private func PublishRouteCommandTelemetry() -> Void {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
     if !IsDefined(quests) { return; };
@@ -1466,7 +1556,12 @@ public class NCTCTransitSystem extends ScriptableSystem {
         if this.bayParkingActive && Equals(this.bayParkingStage, 12) {
           this.PublishLoopDiagnostic(73, this.requestedStopId);
         } else {
-          this.PublishRouteCommandTelemetry();
+          if this.bayParkingActive && (Equals(this.bayParkingStage, 14) || Equals(this.bayParkingStage, 15)) {
+            this.PublishJoinDirectionFacts(quests);
+            this.PublishLoopDiagnostic(76, this.requestedStopId);
+          } else {
+            this.PublishRouteCommandTelemetry();
+          };
         };
       };
     };
@@ -1596,18 +1691,25 @@ public class NCTCTransitSystem extends ScriptableSystem {
 
     if this.bayParkingActive && Equals(this.bayParkingStage, 12) {
       if this.controller.IsSplineCommandSuccessful() {
-        let rollingSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
+        // Capture the bay's authored travel direction BEFORE loading the next
+        // stop, because AdvanceToNextStop replaces surveyBerth/P2/forward.
+        this.departureJoinForward = Vector4.Normalize2D(this.GetBayForward());
         if !this.AdvanceToNextStop() {
           this.PublishLoopDiagnostic(34, 0);
           this.ScheduleDispatch(1.00);
           return;
         };
         this.legPolls = 0;
-        this.bayParkingActive = false;
-        this.bayParkingStage = 0;
-        this.driveCommandSent = this.controller.DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, rollingSpeed);
+        // AdvanceToNextStop deliberately resets bay state; re-arm the join
+        // phase explicitly. This fixes the r378a state-machine bug.
+        this.bayParkingActive = true;
+        this.bayParkingStage = 14;
+        this.bayParkingRetryCount = 0;
+        this.departureJoinFlipCount = 0;
+        this.driveCommandSent = this.controller.JoinTrafficAfterSpline();
+        this.PublishJoinDirectionFacts(quests);
         this.PublishLoopDiagnostic(this.driveCommandSent ? 74 : 33, this.requestedStopId);
-        this.ScheduleDispatch(0.05);
+        this.ScheduleDispatch(0.10);
         return;
       };
       if this.controller.IsSplineCommandFailed() {
@@ -1621,6 +1723,69 @@ public class NCTCTransitSystem extends ScriptableSystem {
     };
 
     if this.bayParkingActive && Equals(this.bayParkingStage, 13) {
+      this.ScheduleDispatch(0.25);
+      return;
+    };
+
+    // Direction-filtered native traffic join. A movement vector aligned with
+    // the bay forward is accepted; the opposite traffic path is rejected and
+    // asked to reverse once through the vehicle's native CrowdMember component.
+    if this.bayParkingActive && (Equals(this.bayParkingStage, 14) || Equals(this.bayParkingStage, 15)) {
+      let movement: Vector4 = this.controller.GetTrafficMovementDirection();
+      let movementValid: Bool = AbsF(movement.X) > 0.01 || AbsF(movement.Y) > 0.01;
+      let directionDot: Float = movementValid ? Vector4.Dot(movement, this.departureJoinForward) : -2.00;
+      this.bayParkingRetryCount += 1;
+      this.PublishJoinDirectionFacts(quests);
+
+      // Reject an explicitly opposite path immediately. Vanilla exposes this
+      // exact direction-change operation on the vehicle CrowdMember component.
+      if movementValid && directionDot <= -0.25 && this.departureJoinFlipCount < 1 {
+        if this.controller.TryChangeTrafficMovementDirection() {
+          this.departureJoinFlipCount += 1;
+          this.bayParkingStage = 15;
+          this.PublishJoinDirectionFacts(quests);
+          this.PublishLoopDiagnostic(79, this.requestedStopId);
+          this.ScheduleDispatch(0.10);
+          return;
+        };
+      };
+
+      // Do not hand a cross-street/opposite lane to DriveToPoint. Require both
+      // native lane membership and a clearly compatible path direction.
+      if this.controller.IsInTrafficLane() && movementValid && directionDot >= 0.30 {
+        let rollingSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
+        this.bayParkingActive = false;
+        this.bayParkingStage = 0;
+        this.bayParkingRetryCount = 0;
+        this.driveCommandSent = this.controller.DriveToTrafficAfterJoin(this.GetTrafficTarget(), 0.00, rollingSpeed);
+        this.PublishJoinDirectionFacts(quests);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 77 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.05);
+        return;
+      };
+
+      if this.controller.IsJoinTrafficCommandFailed() {
+        this.bayParkingStage = 16;
+        this.PublishJoinDirectionFacts(quests);
+        this.PublishLoopDiagnostic(78, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+
+      // Five seconds is ample for a local native join. On a bad/ambiguous lane
+      // hold the experiment instead of reproducing r376f's unsafe handoff.
+      if this.bayParkingRetryCount >= 50 {
+        this.bayParkingStage = 16;
+        this.PublishJoinDirectionFacts(quests);
+        this.PublishLoopDiagnostic(80, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      this.ScheduleDispatch(0.10);
+      return;
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 16) {
       this.ScheduleDispatch(0.25);
       return;
     };
