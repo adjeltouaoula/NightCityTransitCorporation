@@ -8,6 +8,7 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
   private let trafficSpeedLimit: Float;
   private let trafficSpeedProfile: Int32;
   private let forcedStartSpeed: Float;
+  private let trafficTryNeighborsForStart: Bool;
   private let commandGeneration: Int32;
 
   public func Configure(bus: ref<VehicleObject>, controller: ref<NCTCServiceBusController>, target: Vector4, minimumDistance: Float, trafficSpeedLimit: Float, trafficSpeedProfile: Int32, forcedStartSpeed: Float, commandGeneration: Int32) -> ref<NCTCDeferredDriveCommand> {
@@ -18,8 +19,13 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
     this.trafficSpeedLimit = trafficSpeedLimit;
     this.trafficSpeedProfile = trafficSpeedProfile;
     this.forcedStartSpeed = forcedStartSpeed;
+    this.trafficTryNeighborsForStart = false;
     this.commandGeneration = commandGeneration;
     return this;
+  }
+
+  public func EnableNeighborStart() -> Void {
+    this.trafficTryNeighborsForStart = true;
   }
 
   public func Call() -> Void {
@@ -49,10 +55,10 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
       command.speedInTraffic = this.trafficSpeedLimit;
     };
     command.forceGreenLights = false;
-    // These must remain false for the service bus. Enabling either one lets
-    // the traffic controller snap the long Mahir to a neighboring lane when
-    // a route command starts or ends, which can eject standing passengers.
-    command.trafficTryNeighborsForStart = false;
+    // Normally keep neighbor snapping disabled because it can visibly teleport
+    // the long Mahir. r378f enables start-neighbor search only for the H2
+    // post-spline reattachment POC; end-neighbor search stays disabled.
+    command.trafficTryNeighborsForStart = this.trafficTryNeighborsForStart;
     command.trafficTryNeighborsForEnd = false;
     // r372n: standard service commands still use zero completion radius, but
     // rolling handoffs can preserve the actual bus speed on the replacement
@@ -66,6 +72,7 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_speed_limit_x10", Cast<Int32>(this.trafficSpeedLimit * 10.00));
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_speed_profile", this.trafficSpeedProfile);
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_forced_start_speed_mm", Cast<Int32>(this.forcedStartSpeed * 1000.00));
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_try_neighbors_start", this.trafficTryNeighborsForStart ? 1 : 0);
     command.needDriver = false;
     command.driveDownTheRoadIndefinitely = false;
     // SendCommand is the path used by Delamain while V is mounted as a
@@ -178,7 +185,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37804);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37806);
     return true;
   }
 
@@ -332,6 +339,7 @@ public class NCTCServiceBusController extends IScriptable {
     callback = new NCTCDeferredDriveCommand();
     speedLimit = this.ResolveTrafficSpeed(target, speedProfile);
     callback.Configure(this.bus, this, target, minimumDistance, speedLimit, speedProfile, MaxF(startSpeed, 0.00), generation);
+    callback.EnableNeighborStart();
     GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);
     return true;
   }

@@ -1210,10 +1210,10 @@ local function log_service_loop(quests)
     [69] = "route loop: r376a H2 native spline reached path end",
     [70] = "route loop: r376a H2 native spline FAILED",
     [71] = "route loop: r376a H2 native spline active telemetry",
-    [72] = "route loop: r378d H2 braked exact-lane departure spline armed",
-    [73] = "route loop: r378d H2 braked exact-lane departure spline active telemetry",
-    [74] = "route loop: r378d H2 braked exact-lane spline -> low-speed native traffic handoff",
-    [75] = "route loop: r378d H2 braked exact-lane departure spline FAILED"
+    [72] = "route loop: r378f H2 neighbor-start departure spline armed",
+    [73] = "route loop: r378f H2 neighbor-start departure spline active telemetry",
+    [74] = "route loop: r378f H2 spline -> neighbor-start traffic reattach",
+    [75] = "route loop: r378f H2 neighbor-start departure spline FAILED"
   }
   local command_extra = ""
   if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then
@@ -1354,8 +1354,8 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37804 then
-    log("NCTC runtime build=37804 r378d H2 braked exact-lane handoff")
+  if revision == 37806 then
+    log("NCTC runtime build=37806 r378f H2 neighbor-start reattach")
   elseif revision == 37601 then
     log("NCTC runtime build=37601 r376a H2 native spline arrival POC")
   elseif revision == 37502 then
