@@ -1,0 +1,194 @@
+name: r378f H2 neighbor-start reattach builder
+
+on:
+  push:
+    branches:
+      - automation/r378f-h2-neighbor-start-builder
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch r378d neighbor-start only and package r378f
+        shell: bash
+        run: |
+          set -euo pipefail
+          CLEAN_BRANCH="experiment/r378f-h2-neighbor-start-reattach"
+          BASE_SHA="8e70a3bf5404022380ff678ef2a8e046b032dbb9"
+          CLEAN="$RUNNER_TEMP/r378f-clean"
+          rm -rf "$CLEAN"
+          git fetch origin "$CLEAN_BRANCH"
+          git worktree prune
+          git worktree add -B "$CLEAN_BRANCH" "$CLEAN" "origin/$CLEAN_BRANCH"
+          test "$(git -C "$CLEAN" rev-parse HEAD)" = "$BASE_SHA"
+
+          ARRIVAL_BEFORE="$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Spline.archive)"
+          DEPARTURE_BEFORE="$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Departure.archive)"
+          DISPLAY_BEFORE="$(sha256sum "$CLEAN/source/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')"
+
+          python3 - "$CLEAN" <<'PY'
+          from pathlib import Path
+          import sys
+
+          root = Path(sys.argv[1])
+
+          def replace_once(text, old, new, label):
+              n = text.count(old)
+              if n != 1:
+                  raise SystemExit(f"{label}: expected 1 match, got {n}")
+              return text.replace(old, new, 1)
+
+          transit = root / 'source/redscript/NCTC/NCTCTransitSystem.reds'
+          s = transit.read_text()
+          s = replace_once(
+              s,
+              'GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37804);',
+              'GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37806);',
+              'runtime revision')
+
+          s = replace_once(
+              s,
+              '  private let forcedStartSpeed: Float;\n  private let commandGeneration: Int32;',
+              '  private let forcedStartSpeed: Float;\n  private let trafficTryNeighborsForStart: Bool;\n  private let commandGeneration: Int32;',
+              'neighbor field')
+
+          s = replace_once(
+              s,
+              '    this.forcedStartSpeed = forcedStartSpeed;\n    this.commandGeneration = commandGeneration;',
+              '    this.forcedStartSpeed = forcedStartSpeed;\n    this.trafficTryNeighborsForStart = false;\n    this.commandGeneration = commandGeneration;',
+              'neighbor default')
+
+          s = replace_once(
+              s,
+              '    return this;\n  }\n\n  public func Call() -> Void {',
+              '    return this;\n  }\n\n  public func EnableNeighborStart() -> Void {\n    this.trafficTryNeighborsForStart = true;\n  }\n\n  public func Call() -> Void {',
+              'neighbor enable method')
+
+          s = replace_once(
+              s,
+              '    // These must remain false for the service bus. Enabling either one lets\n    // the traffic controller snap the long Mahir to a neighboring lane when\n    // a route command starts or ends, which can eject standing passengers.\n    command.trafficTryNeighborsForStart = false;\n    command.trafficTryNeighborsForEnd = false;',
+              '    // Normally keep neighbor snapping disabled because it can visibly teleport\n    // the long Mahir. r378f enables start-neighbor search only for the H2\n    // post-spline reattachment POC; end-neighbor search stays disabled.\n    command.trafficTryNeighborsForStart = this.trafficTryNeighborsForStart;\n    command.trafficTryNeighborsForEnd = false;',
+              'neighbor command flag')
+
+          s = replace_once(
+              s,
+              '    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_forced_start_speed_mm", Cast<Int32>(this.forcedStartSpeed * 1000.00));',
+              '    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_forced_start_speed_mm", Cast<Int32>(this.forcedStartSpeed * 1000.00));\n    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_try_neighbors_start", this.trafficTryNeighborsForStart ? 1 : 0);',
+              'neighbor telemetry fact')
+
+          start = s.index('  public func DriveToTrafficAfterSpline(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {')
+          end = s.index('\n  // r374e:', start)
+          block = s[start:end]
+          old = '    callback.Configure(this.bus, this, target, minimumDistance, speedLimit, speedProfile, MaxF(startSpeed, 0.00), generation);\n    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);'
+          new = '    callback.Configure(this.bus, this, target, minimumDistance, speedLimit, speedProfile, MaxF(startSpeed, 0.00), generation);\n    callback.EnableNeighborStart();\n    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);'
+          block = replace_once(block, old, new, 'H2 post-spline enable')
+          s = s[:start] + block + s[end:]
+          transit.write_text(s)
+
+          cet = root / 'source/cet/nctc_survey/init.lua'
+          c = cet.read_text()
+          replacements = [
+              ('route loop: r378d H2 braked exact-lane departure spline armed', 'route loop: r378f H2 neighbor-start departure spline armed'),
+              ('route loop: r378d H2 braked exact-lane departure spline active telemetry', 'route loop: r378f H2 neighbor-start departure spline active telemetry'),
+              ('route loop: r378d H2 braked exact-lane spline -> low-speed native traffic handoff', 'route loop: r378f H2 spline -> neighbor-start traffic reattach'),
+              ('route loop: r378d H2 braked exact-lane departure spline FAILED', 'route loop: r378f H2 neighbor-start departure spline FAILED'),
+              ('if revision == 37804 then', 'if revision == 37806 then'),
+              ('NCTC runtime build=37804 r378d H2 braked exact-lane handoff', 'NCTC runtime build=37806 r378f H2 neighbor-start reattach'),
+          ]
+          for i, (old, new) in enumerate(replacements):
+              c = replace_once(c, old, new, f'CET replacement {i}')
+          cet.write_text(c)
+          PY
+
+          # Geometry and speed behavior must remain byte/text identical to r378d.
+          test "$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Spline.archive)" = "$ARRIVAL_BEFORE"
+          test "$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Departure.archive)" = "$DEPARTURE_BEFORE"
+          test "$(sha256sum "$CLEAN/source/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')" = "$DISPLAY_BEFORE"
+          grep -Fq 'DriveOnBaySpline("$/nctc/bays/h2/departure_spline", 1.25, true)' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+          grep -Fq 'DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, MaxF(rollingSpeed, 3.00))' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+          grep -Fq 'command.trafficTryNeighborsForStart = this.trafficTryNeighborsForStart;' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+          grep -Fq 'callback.EnableNeighborStart();' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+          grep -Fq 'command.trafficTryNeighborsForEnd = false;' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+          grep -Fq 'nctc_dev_build_revision", 37806' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+
+          mapfile -t CHANGED < <(git -C "$CLEAN" diff --name-only)
+          test "${#CHANGED[@]}" -eq 2
+          printf '%s\n' "${CHANGED[@]}" | grep -Fxq 'source/redscript/NCTC/NCTCTransitSystem.reds'
+          printf '%s\n' "${CHANGED[@]}" | grep -Fxq 'source/cet/nctc_survey/init.lua'
+
+          git -C "$CLEAN" config user.name "github-actions[bot]"
+          git -C "$CLEAN" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$CLEAN" add source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_survey/init.lua
+          git -C "$CLEAN" commit -m "test: r378f H2 neighbor-start traffic reattach"
+          CLEAN_SHA="$(git -C "$CLEAN" rev-parse HEAD)"
+          git -C "$CLEAN" push origin "HEAD:refs/heads/$CLEAN_BRANCH"
+
+          ROOT="$RUNNER_TEMP/nctc-r378f"
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/archive/pc/mod" "$ROOT/r6/scripts/NCTC" "$ROOT/r6/tweaks/NCTC"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger"
+          cp "$CLEAN"/source/archive/pc/mod/*.archive "$ROOT/archive/pc/mod/"
+          cp "$CLEAN"/source/archive/pc/mod/*.archive.xl "$ROOT/archive/pc/mod/"
+          cp "$CLEAN"/source/redscript/NCTC/*.reds "$ROOT/r6/scripts/NCTC/"
+          cp "$CLEAN"/source/tweaks/NCTC/* "$ROOT/r6/tweaks/NCTC/"
+          cp "$CLEAN/source/cet/nctc_survey/init.lua" "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp "$CLEAN/source/cet/nctc_survey/nctc_network.default.json" "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp "$CLEAN/source/cet/nctc_survey/nctc_survey_settings.json" "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp "$CLEAN"/source/cet/nctc_passenger/* "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp "$CLEAN/README.md" "$CLEAN/THIRD_PARTY_NOTICES.md" "$ROOT/"
+
+          TRANSIT_BLOB="$(git -C "$CLEAN" hash-object source/redscript/NCTC/NCTCTransitSystem.reds)"
+          CET_BLOB="$(git -C "$CLEAN" hash-object source/cet/nctc_survey/init.lua)"
+          cat > "$ROOT/NCTC_BUILD_INFO.txt" <<EOF
+          Night City Transit Corporation
+          Devkit: r378f H2 neighbor-start traffic reattach POC
+          Runtime build: 37806
+          Branch: $CLEAN_BRANCH
+          Commit: $CLEAN_SHA
+          Scope: H2 only. Based directly on r378d. Arrival/departure spline archives, braking, endpoint and low-speed handoff are unchanged. The only behavior change is trafficTryNeighborsForStart=true on the AIVehicleDriveToPointCommand created specifically by DriveToTrafficAfterSpline. trafficTryNeighborsForEnd remains false. This POC tests whether native start-neighbor lane acquisition fixes the post-spline wrong-lane drift; visible lateral snap/teleport is an expected possible failure mode.
+          Arrival archive blob: $ARRIVAL_BEFORE
+          Departure archive blob: $DEPARTURE_BEFORE
+          Display SHA256: $DISPLAY_BEFORE
+          EOF
+
+          test ! -e "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+          test "$(git hash-object "$ROOT/r6/scripts/NCTC/NCTCTransitSystem.reds")" = "$TRANSIT_BLOB"
+          test "$(git hash-object "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/init.lua")" = "$CET_BLOB"
+          test "$(git hash-object "$ROOT/archive/pc/mod/NCTCH2Spline.archive")" = "$ARRIVAL_BEFORE"
+          test "$(git hash-object "$ROOT/archive/pc/mod/NCTCH2Departure.archive")" = "$DEPARTURE_BEFORE"
+          test "$(sha256sum "$ROOT/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')" = "$DISPLAY_BEFORE"
+
+          ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r378f-h2-neighbor-start-reattach-development.zip"
+          rm -f "$ZIP" "$RUNNER_TEMP/r378f.sha256"
+          pushd "$ROOT" >/dev/null
+          zip -qr "$ZIP" .
+          popd >/dev/null
+          unzip -t "$ZIP"
+          sha256sum "$ZIP" | tee "$RUNNER_TEMP/r378f.sha256"
+
+          cat > "$RUNNER_TEMP/r378f-metadata.txt" <<EOF
+          CLEAN_SHA=$CLEAN_SHA
+          TRANSIT_BLOB=$TRANSIT_BLOB
+          CET_BLOB=$CET_BLOB
+          ARRIVAL_BLOB=$ARRIVAL_BEFORE
+          DEPARTURE_BLOB=$DEPARTURE_BEFORE
+          DISPLAY_SHA=$DISPLAY_BEFORE
+          EOF
+          cat "$RUNNER_TEMP/r378f-metadata.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r378f-h2-neighbor-start-reattach
+          path: |
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r378f-h2-neighbor-start-reattach-development.zip
+            ${{ runner.temp }}/r378f.sha256
+            ${{ runner.temp }}/r378f-metadata.txt
+          compression-level: 0
