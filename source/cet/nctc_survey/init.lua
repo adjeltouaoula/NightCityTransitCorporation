@@ -1212,8 +1212,11 @@ local function log_service_loop(quests)
     [71] = "route loop: r376a H2 native spline active telemetry",
     [72] = "route loop: r376b H2 native departure spline armed",
     [73] = "route loop: r376b H2 native departure spline active telemetry",
-    [74] = "route loop: r376b H2 spline exit -> native traffic handoff",
-    [75] = "route loop: r376b H2 native departure spline FAILED"
+    [74] = "route loop: r378a H2 spline exit -> native JoinTraffic armed",
+    [75] = "route loop: r376b H2 native departure spline FAILED",
+    [76] = "route loop: r378a native JoinTraffic active telemetry",
+    [77] = "route loop: r378a native JoinTraffic -> route handoff",
+    [78] = "route loop: r378a native JoinTraffic FAILED"
   }
   local command_extra = ""
   if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then
@@ -1250,6 +1253,12 @@ local function log_service_loop(quests)
       .. " generation=" .. tostring(fact(quests, "nctc_dev_drive_generation"))
       .. string.format(" aiTarget=(%.3f, %.3f, %.3f)", ai_target_x, ai_target_y, ai_target_z)
   end
+  if code == 74 or code == 76 or code == 77 or code == 78 then
+    local join_states = { [0] = "missing", [1] = "active", [2] = "success", [3] = "failed/cancelled" }
+    command_extra = command_extra
+      .. " joinState=" .. (join_states[fact(quests, "nctc_dev_join_traffic_state")] or "unknown")
+      .. " inTrafficLane=" .. tostring(fact(quests, "nctc_dev_bus_in_traffic_lane"))
+  end
   if code == 48 or code == 49 or code == 54 then
     command_extra = command_extra
       .. string.format(" departureTarget=(%.3f, %.3f, %.3f)",
@@ -1260,7 +1269,7 @@ local function log_service_loop(quests)
       .. " departureSpeed=" .. string.format("%.2f", fact(quests, "nctc_dev_departure_speed_mm") / 1000.0)
   end
   if code == 29 or code == 30 or code == 36 or code == 43 or code == 47 or code == 48 or code == 49 or code == 50 or code == 51 or code == 52 or code == 53 or code == 54
-    or code == 60 or code == 61 or code == 62 or code == 63 or code == 64 or code == 65 or code == 66 or code == 67 or code == 68 or code == 69 or code == 70 or code == 71 or code == 72 or code == 73 or code == 74 or code == 75 then
+    or code == 60 or code == 61 or code == 62 or code == 63 or code == 64 or code == 65 or code == 66 or code == 67 or code == 68 or code == 69 or code == 70 or code == 71 or code == 72 or code == 73 or code == 74 or code == 75 or code == 76 or code == 77 or code == 78 then
     command_extra = command_extra
       .. " hasBay=" .. tostring(has_bay)
       .. " bayLen=" .. string.format("%.2fm", bay_length)
@@ -1354,7 +1363,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37606 then
+  if revision == 37801 then
+    log("NCTC runtime build=37801 r378a H2 native JoinTraffic handoff")
+  elseif revision == 37606 then
     log("NCTC runtime build=37606 r376f H2 final nose clearance")
   elseif revision == 37601 then
     log("NCTC runtime build=37601 r376a H2 native spline arrival POC")
