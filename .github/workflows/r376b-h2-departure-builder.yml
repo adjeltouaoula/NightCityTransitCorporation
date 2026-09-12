@@ -1,9 +1,9 @@
-name: r378c H2 exact lane spline handoff builder
+name: r378d H2 braked exact-lane handoff builder
 
 on:
   push:
     branches:
-      - automation/r378c-exact-lane-spline-builder
+      - automation/r378d-h2-braked-lane-handoff-builder
 
 permissions:
   contents: write
@@ -16,15 +16,28 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-
-      - name: Prepare r378c exact lane geometry and labels
+      - name: Patch r378c speed only and package r378d
         shell: bash
         run: |
-          python3 - <<'PY'
+          set -euo pipefail
+          CLEAN_BRANCH="experiment/r378d-h2-braked-lane-handoff"
+          BASE_SHA="c4914be45f6b34b844e13c3f62d914d3d32d997f"
+          CLEAN="$RUNNER_TEMP/r378d-clean"
+          rm -rf "$CLEAN"
+          git fetch origin "$CLEAN_BRANCH"
+          git worktree prune
+          git worktree add -B "$CLEAN_BRANCH" "$CLEAN" "origin/$CLEAN_BRANCH"
+          test "$(git -C "$CLEAN" rev-parse HEAD)" = "$BASE_SHA"
+
+          ARRIVAL_BEFORE="$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Spline.archive)"
+          DEPARTURE_BEFORE="$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Departure.archive)"
+          DISPLAY_BEFORE="$(sha256sum "$CLEAN/source/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')"
+
+          python3 - "$CLEAN" <<'PY'
           from pathlib import Path
+          import sys
+
+          root = Path(sys.argv[1])
 
           def replace_once(text, old, new, label):
               n = text.count(old)
@@ -32,83 +45,116 @@ jobs:
                   raise SystemExit(f"{label}: expected 1 match, got {n}")
               return text.replace(old, new, 1)
 
-          # Preserve the visually validated r376f curb/pole clearance through p8.
-          # The old spline then ended around world X=-2153.6, while the native
-          # southbound lane extrapolates to X~-2159.2 here. Recenter only after
-          # p8, and finish with a tangent matching the measured bay/road direction
-          # (-0.039,-0.999), before the nearby junction.
-          program = Path('tools/r376b/Program.cs')
-          s = program.read_text()
-          geometry = [
-              ('spline.Points.Add(Point( 0.20f, -37.00f, 0.0f, 5));', 'spline.Points.Add(Point( 1.20f, -37.00f, 0.0f, 5));'),
-              ('spline.Points.Add(Point( 2.00f, -41.00f, 0.0f, 6));', 'spline.Points.Add(Point( 4.10f, -41.00f, 0.0f, 6));'),
-              ('spline.Points.Add(Point( 3.50f, -45.50f, 0.0f, 7));', 'spline.Points.Add(Point( 6.60f, -45.50f, 0.0f, 7));'),
-              ('spline.Points.Add(Point( 4.10f, -50.00f, 0.0f, 8));', 'spline.Points.Add(Point( 7.40f, -50.00f, 0.0f, 8));'),
-          ]
-          for i, (old, new) in enumerate(geometry, 5):
-              s = replace_once(s, old, new, f'geometry point {i}')
+          transit = root / 'source/redscript/NCTC/NCTCTransitSystem.reds'
+          s = transit.read_text()
           s = replace_once(
               s,
-              'spline.Points.Add(Point( 4.15f, -62.00f, 0.0f, 9));',
-              'spline.Points.Add(Point( 6.30f, -53.00f, 0.0f, 9));\n'
-              'spline.Points.Add(Point( 4.60f, -56.00f, 0.0f, 10));\n'
-              'spline.Points.Add(Point( 3.00f, -59.00f, 0.0f, 11));\n'
-              'spline.Points.Add(Point( 2.10f, -62.00f, 0.0f, 12));\n'
-              'spline.Points.Add(Point( 1.90f, -67.00f, 0.0f, 13));',
-              'exact lane tail')
+              'GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37803);',
+              'GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37804);',
+              'runtime revision')
           s = replace_once(
               s,
-              '// H2 departure only. Local coordinates use the exact same P1 origin as the\n// validated r376a arrival. Hold the bus on the bay axis until P2, merge only\n// after the bay end, then finish with a straight road-aligned tail.',
-              '// H2 departure only. Preserve validated r376f clearance through p8, then\n// converge to the extrapolated native southbound lane centre before the nearby\n// junction. The final segment matches the measured road direction.',
-              'geometry comment')
-          s = replace_once(s, 'Points.Count != 9', 'Points.Count != 13', 'point-count verify')
-          s = replace_once(s, 'Bounds = Box4(-2170f, -1080f, 5f, -2150f, -1025f, 12f)', 'Bounds = Box4(-2170f, -1085f, 5f, -2150f, -1025f, 12f)', 'bounds')
-          s = replace_once(s, 'R376B_WORLD_OK', 'R378C_WORLD_OK', 'world label')
-          program.write_text(s)
+              'this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/departure_spline", exitSpeed, false);',
+              'this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/departure_spline", 1.25, true);',
+              'braked spline arm')
+          s = replace_once(
+              s,
+              'this.driveCommandSent = this.controller.DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, rollingSpeed);',
+              'this.driveCommandSent = this.controller.DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, MaxF(rollingSpeed, 3.00));',
+              'low-speed traffic handoff')
+          transit.write_text(s)
 
-          build = Path('tools/r376b/build.sh')
-          b = build.read_text()
+          cet = root / 'source/cet/nctc_survey/init.lua'
+          c = cet.read_text()
           replacements = [
-              ('BASE="857c92b7068a4b7bf026bfbb9b9712884f154090"', 'BASE="411eadf5628fcbc4199feaa63fd0deaa122faf51"'),
-              ('CLEAN_BRANCH="experiment/r376b-h2-native-spline-departure"', 'CLEAN_BRANCH="experiment/r378c-h2-exact-lane-spline-handoff"'),
-              ("grep -q 'nctc_dev_build_revision.*, 37602'", "grep -q 'nctc_dev_build_revision.*, 37803'"),
-              ("grep -q 'r376b H2 native spline arrival + departure'", "grep -q 'r378c H2 exact lane spline handoff'"),
-              ('git -C "$CLEAN" commit -m "feat: r376b H2 native spline departure"', 'git -C "$CLEAN" commit -m "fix: r378c H2 exact lane spline handoff"'),
-              ('Devkit: r376b H2 native spline arrival + departure', 'Devkit: r378c H2 exact lane spline handoff'),
-              ('Runtime build: 37602', 'Runtime build: 37803'),
-              ('Scope: H2 only. The user-validated r376a arrival archive is byte-identical. r376b adds a separate native worldSplineNode departure spline and rolling handoff back to native traffic.', 'Scope: H2 only. Base is validated r376f. Arrival is byte-identical; departure keeps r376f curb clearance through p8, then converges to the extrapolated native southbound lane centre (world X about -2159.2) and ends aligned to road direction before handing directly to normal useTraffic navigation. No JoinTraffic command.'),
-              ('ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376b-h2-native-spline-departure-development.zip"', 'ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r378c-h2-exact-lane-spline-handoff-development.zip"'),
-              ('rm -f "$ZIP" "$RUNNER_TEMP/r376b.sha256"', 'rm -f "$ZIP" "$RUNNER_TEMP/r378c.sha256"'),
-              ('sha256sum "$ZIP" | tee "$RUNNER_TEMP/r376b.sha256"', 'sha256sum "$ZIP" | tee "$RUNNER_TEMP/r378c.sha256"'),
-              ('cat > "$RUNNER_TEMP/r376b-metadata.txt" <<EOF', 'cat > "$RUNNER_TEMP/r378c-metadata.txt" <<EOF'),
-              ('cat "$RUNNER_TEMP/r376b-metadata.txt"', 'cat "$RUNNER_TEMP/r378c-metadata.txt"'),
+              ('route loop: r378c H2 exact-lane departure spline armed', 'route loop: r378d H2 braked exact-lane departure spline armed'),
+              ('route loop: r378c H2 exact-lane departure spline active telemetry', 'route loop: r378d H2 braked exact-lane departure spline active telemetry'),
+              ('route loop: r378c H2 exact-lane spline -> native traffic handoff', 'route loop: r378d H2 braked exact-lane spline -> low-speed native traffic handoff'),
+              ('route loop: r378c H2 exact-lane departure spline FAILED', 'route loop: r378d H2 braked exact-lane departure spline FAILED'),
+              ('if revision == 37803 then', 'if revision == 37804 then'),
+              ('NCTC runtime build=37803 r378c H2 exact lane spline handoff', 'NCTC runtime build=37804 r378d H2 braked exact-lane handoff'),
           ]
-          for idx, (old, new) in enumerate(replacements):
-              b = replace_once(b, old, new, f'build replacement {idx}')
-          build.write_text(b)
-
-          patch = Path('tools/r376b/patch.py')
-          p = patch.read_text()
-          if p.count('37602') != 3:
-              raise SystemExit(f'patch revision count: expected 3, got {p.count("37602")}')
-          p = p.replace('37602', '37803')
-          p = p.replace('r376b H2 native spline arrival + departure', 'r378c H2 exact lane spline handoff')
-          p = p.replace('r376b H2 native departure spline armed', 'r378c H2 exact-lane departure spline armed')
-          p = p.replace('r376b H2 native departure spline active telemetry', 'r378c H2 exact-lane departure spline active telemetry')
-          p = p.replace('r376b H2 spline exit -> native traffic handoff', 'r378c H2 exact-lane spline -> native traffic handoff')
-          p = p.replace('r376b H2 native departure spline FAILED', 'r378c H2 exact-lane departure spline FAILED')
-          patch.write_text(p)
+          for i, (old, new) in enumerate(replacements):
+              c = replace_once(c, old, new, f'CET replacement {i}')
+          cet.write_text(c)
           PY
 
-      - name: Build r378c
-        shell: bash
-        run: bash tools/r376b/build.sh
+          test "$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Spline.archive)" = "$ARRIVAL_BEFORE"
+          test "$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Departure.archive)" = "$DEPARTURE_BEFORE"
+          test "$(sha256sum "$CLEAN/source/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')" = "$DISPLAY_BEFORE"
+          test "$(git -C "$CLEAN" diff --name-only | wc -l)" -eq 2
+          git -C "$CLEAN" diff --name-only | grep -Fxq 'source/redscript/NCTC/NCTCTransitSystem.reds'
+          git -C "$CLEAN" diff --name-only | grep -Fxq 'source/cet/nctc_survey/init.lua'
+          grep -Fq 'DriveOnBaySpline("$/nctc/bays/h2/departure_spline", 1.25, true)' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+          grep -Fq 'DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, MaxF(rollingSpeed, 3.00))' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+          grep -Fq 'nctc_dev_build_revision", 37804' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+
+          git -C "$CLEAN" config user.name "github-actions[bot]"
+          git -C "$CLEAN" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$CLEAN" add source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_survey/init.lua
+          git -C "$CLEAN" commit -m "fix: r378d H2 braked exact-lane handoff"
+          CLEAN_SHA="$(git -C "$CLEAN" rev-parse HEAD)"
+          git -C "$CLEAN" push origin "HEAD:refs/heads/$CLEAN_BRANCH"
+
+          ROOT="$RUNNER_TEMP/nctc-r378d"
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/archive/pc/mod" "$ROOT/r6/scripts/NCTC" "$ROOT/r6/tweaks/NCTC"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger"
+          cp "$CLEAN"/source/archive/pc/mod/*.archive "$ROOT/archive/pc/mod/"
+          cp "$CLEAN"/source/archive/pc/mod/*.archive.xl "$ROOT/archive/pc/mod/"
+          cp "$CLEAN"/source/redscript/NCTC/*.reds "$ROOT/r6/scripts/NCTC/"
+          cp "$CLEAN"/source/tweaks/NCTC/* "$ROOT/r6/tweaks/NCTC/"
+          cp "$CLEAN/source/cet/nctc_survey/init.lua" "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp "$CLEAN/source/cet/nctc_survey/nctc_network.default.json" "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp "$CLEAN/source/cet/nctc_survey/nctc_survey_settings.json" "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp "$CLEAN"/source/cet/nctc_passenger/* "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp "$CLEAN/README.md" "$CLEAN/THIRD_PARTY_NOTICES.md" "$ROOT/"
+
+          TRANSIT_BLOB="$(git -C "$CLEAN" hash-object source/redscript/NCTC/NCTCTransitSystem.reds)"
+          CET_BLOB="$(git -C "$CLEAN" hash-object source/cet/nctc_survey/init.lua)"
+          cat > "$ROOT/NCTC_BUILD_INFO.txt" <<EOF
+          Night City Transit Corporation
+          Devkit: r378d H2 braked exact-lane handoff
+          Runtime build: 37804
+          Branch: $CLEAN_BRANCH
+          Commit: $CLEAN_SHA
+          Scope: H2 only. Geometry and both H2 spline archives are byte-identical to r378c. Departure now starts the spline at 1.25 m/s with stopAtPathEnd=true, then resumes normal useTraffic navigation with a minimum forced start speed of 3.00 m/s. No JoinTraffic command.
+          Arrival archive blob: $ARRIVAL_BEFORE
+          Departure archive blob: $DEPARTURE_BEFORE
+          Display SHA256: $DISPLAY_BEFORE
+          EOF
+
+          test ! -e "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+          test "$(git hash-object "$ROOT/r6/scripts/NCTC/NCTCTransitSystem.reds")" = "$TRANSIT_BLOB"
+          test "$(git hash-object "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/init.lua")" = "$CET_BLOB"
+          test "$(git hash-object "$ROOT/archive/pc/mod/NCTCH2Spline.archive")" = "$ARRIVAL_BEFORE"
+          test "$(git hash-object "$ROOT/archive/pc/mod/NCTCH2Departure.archive")" = "$DEPARTURE_BEFORE"
+          test "$(sha256sum "$ROOT/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')" = "$DISPLAY_BEFORE"
+
+          ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r378d-h2-braked-lane-handoff-development.zip"
+          rm -f "$ZIP" "$RUNNER_TEMP/r378d.sha256"
+          pushd "$ROOT" >/dev/null
+          zip -qr "$ZIP" .
+          popd >/dev/null
+          unzip -t "$ZIP"
+          sha256sum "$ZIP" | tee "$RUNNER_TEMP/r378d.sha256"
+
+          cat > "$RUNNER_TEMP/r378d-metadata.txt" <<EOF
+          CLEAN_SHA=$CLEAN_SHA
+          TRANSIT_BLOB=$TRANSIT_BLOB
+          CET_BLOB=$CET_BLOB
+          ARRIVAL_BLOB=$ARRIVAL_BEFORE
+          DEPARTURE_BLOB=$DEPARTURE_BEFORE
+          DISPLAY_SHA=$DISPLAY_BEFORE
+          EOF
+          cat "$RUNNER_TEMP/r378d-metadata.txt"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nctc-r378c-h2-exact-lane-spline-handoff
+          name: nctc-r378d-h2-braked-lane-handoff
           path: |
-            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r378c-h2-exact-lane-spline-handoff-development.zip
-            ${{ runner.temp }}/r378c.sha256
-            ${{ runner.temp }}/r378c-metadata.txt
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r378d-h2-braked-lane-handoff-development.zip
+            ${{ runner.temp }}/r378d.sha256
+            ${{ runner.temp }}/r378d-metadata.txt
           compression-level: 0
