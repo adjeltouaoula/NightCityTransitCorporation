@@ -1213,9 +1213,16 @@ local function log_service_loop(quests)
     [72] = "route loop: r376b H2 native departure spline armed",
     [73] = "route loop: r376b H2 native departure spline active telemetry",
     [74] = "route loop: r376b H2 spline exit -> native traffic handoff",
-    [75] = "route loop: r376b H2 native departure spline FAILED"
+    [75] = "route loop: r376b H2 native departure spline FAILED",
+    [76] = "route loop: r379b H2 yield gate armed",
+    [77] = "route loop: r379b H2 yield: traffic present",
+    [78] = "route loop: r379b H2 clear gap -> slow departure spline armed"
   }
   local command_extra = ""
+  if code == 76 or code == 77 or code == 78 then
+    command_extra = " trafficEntities=" .. tostring(fact(quests, "nctc_dev_exit_traffic_count"))
+      .. " clearPolls=" .. tostring(fact(quests, "nctc_dev_exit_clear_polls"))
+  end
   if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then
     local speed_profiles = { [0] = "fallback/manual", [1] = "dense-city", [2] = "city", [3] = "outer-city", [4] = "badlands" }
     local profile_code = fact(quests, "nctc_dev_command_speed_profile")
@@ -1354,7 +1361,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37606 then
+  if revision == 37902 then
+    log("NCTC runtime build=37902 r379b H2 vanilla traffic yield POC")
+  elseif revision == 37606 then
     log("NCTC runtime build=37606 r376f H2 final nose clearance")
   elseif revision == 37601 then
     log("NCTC runtime build=37601 r376a H2 native spline arrival POC")

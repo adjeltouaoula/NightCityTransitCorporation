@@ -49,9 +49,8 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
       command.speedInTraffic = this.trafficSpeedLimit;
     };
     command.forceGreenLights = false;
-    // These must remain false for the service bus. Enabling either one lets
-    // the traffic controller snap the long Mahir to a neighboring lane when
-    // a route command starts or ends, which can eject standing passengers.
+    // Keep neighbor snapping disabled for the service bus: on the long Mahir
+    // it can visibly teleport the vehicle sideways, which is not acceptable RP.
     command.trafficTryNeighborsForStart = false;
     command.trafficTryNeighborsForEnd = false;
     // r372n: standard service commands still use zero completion radius, but
@@ -178,7 +177,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37606);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37902);
     return true;
   }
 
@@ -247,6 +246,27 @@ public class NCTCServiceBusController extends IScriptable {
     if !this.IsReady() { return 0.00; };
     player = GetPlayer(this.bus.GetGame());
     return IsDefined(player) ? Vector4.Distance(player.GetWorldPosition(), this.bus.GetWorldPosition()) : 0.00;
+  }
+
+  // r379b: use the same native TrafficSystem primitive used by vanilla scripts.
+  // No TrafficSystem ref variable and no Entity -> VehicleObject cast: the native
+  // query itself returns the number of traffic entities inside the corridor.
+  public func CountTrafficEntitiesInDepartureCorridor(forward: Vector4, rearDistance: Float, corridorDepth: Float, corridorWidth: Float) -> Int32 {
+    let trafficEntities: array<wref<Entity>>;
+    let queryBoxPoints: array<Vector4>;
+    let direction: Vector4;
+    let right: Vector4;
+    let origin: Vector4;
+    if !this.IsReady() { return 0; };
+    direction = Vector4.Normalize2D(forward);
+    if AbsF(direction.X) <= 0.01 && AbsF(direction.Y) <= 0.01 { return 0; };
+    right = new Vector4(-direction.Y, direction.X, 0.00, 0.00);
+    origin = this.bus.GetWorldPosition() - direction * MaxF(rearDistance, 0.00);
+    ArrayPush(queryBoxPoints, origin + new Vector4(0.00, 0.00, -1.00, 0.00));
+    ArrayPush(queryBoxPoints, origin + direction * MaxF(corridorDepth, 1.00) + new Vector4(0.00, 0.00, 3.00, 0.00));
+    ArrayPush(queryBoxPoints, origin + right * MaxF(corridorWidth * 0.50, 1.00));
+    ArrayPush(queryBoxPoints, origin - right * MaxF(corridorWidth * 0.50, 1.00));
+    return Cast<Int32>(GameInstance.GetTrafficSystem(this.bus.GetGame()).FindEntitiesNearPlane(this.bus, queryBoxPoints, origin, right, MaxF(corridorWidth * 0.50, 1.00), 32, trafficEntities));
   }
 
   public func DriveToTraffic(target: Vector4, minimumDistance: Float) -> Bool {
@@ -1420,9 +1440,12 @@ public class NCTCTransitSystem extends ScriptableSystem {
         this.bayParkingActive = true;
         this.bayParkingRetryCount = 0;
         if Equals(this.requestedStopId, 70) {
-          this.bayParkingStage = 12;
-          this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/departure_spline", exitSpeed, false);
-          this.PublishLoopDiagnostic(this.driveCommandSent ? 72 : 33, this.requestedStopId);
+          // r379b: hold at the berth until the road corridor is clear.
+          this.bayParkingStage = 14;
+          this.driveCommandSent = true;
+          quests.SetFact(n"nctc_dev_exit_traffic_count", 0);
+          quests.SetFact(n"nctc_dev_exit_clear_polls", 0);
+          this.PublishLoopDiagnostic(76, this.requestedStopId);
           this.ScheduleDispatch(0.10);
           return;
         };
@@ -1591,6 +1614,30 @@ public class NCTCTransitSystem extends ScriptableSystem {
 
     if this.bayParkingActive && Equals(this.bayParkingStage, 11) {
       this.ScheduleDispatch(0.25);
+      return;
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 14) {
+      let trafficCount: Int32 = this.controller.CountTrafficEntitiesInDepartureCorridor(this.GetBayForward(), 12.00, 80.00, 16.00);
+      quests.SetFact(n"nctc_dev_exit_traffic_count", trafficCount);
+      if trafficCount > 0 {
+        this.bayParkingRetryCount = 0;
+        quests.SetFact(n"nctc_dev_exit_clear_polls", 0);
+        this.PublishLoopDiagnostic(77, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      this.bayParkingRetryCount += 1;
+      quests.SetFact(n"nctc_dev_exit_clear_polls", this.bayParkingRetryCount);
+      if this.bayParkingRetryCount < 3 {
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      this.bayParkingRetryCount = 0;
+      this.bayParkingStage = 12;
+      this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/departure_spline", 1.25, true);
+      this.PublishLoopDiagnostic(this.driveCommandSent ? 78 : 33, this.requestedStopId);
+      this.ScheduleDispatch(0.10);
       return;
     };
 
