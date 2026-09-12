@@ -1,0 +1,89 @@
+name: r376a final H2 two-spline build
+
+on:
+  push:
+    branches:
+      - automation/r376a-finalizer-v3
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: ${{ !contains(github.event.head_commit.message, '[r376a-final]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Finalize H2 two-spline controller
+        run: python3 tools/r376a_finalize.py
+
+      - name: Use verified two-spline world archive
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -f source/archive/pc/mod/NCTCH2Spline.archive source/archive/pc/mod/NCTCH2Spline.archive.xl
+          git show e7cbb9ca107e531deb7d24e3f4913bb9f7afc2dd:source/archive/pc/mod/NCTCBaySplinePrototype.archive > source/archive/pc/mod/NCTCBaySplinePrototype.archive
+          git show e7cbb9ca107e531deb7d24e3f4913bb9f7afc2dd:source/archive/pc/mod/NCTCBaySplinePrototype.archive.xl > source/archive/pc/mod/NCTCBaySplinePrototype.archive.xl
+          test "$(git hash-object source/archive/pc/mod/NCTCBaySplinePrototype.archive)" = "01d0411ed90d57c3ed6f78297fb6df0067c60c55"
+          grep -F '#h2_bay_entry' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -F '#h2_bay_exit' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -F 'ToNodeRef(this.splinePath)' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -F 'nctc_dev_build_revision", 37601' source/redscript/NCTC/NCTCTransitSystem.reds
+          test "$(sha256sum source/archive/pc/mod/NCTCDisplayPrototype.archive | awk '{print $1}')" = "09a8fb10c2e027b2250c1ec647f8c3d466129bea907f5421771795093ae37d0a"
+
+      - name: Commit finalized sources on builder branch
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_survey/init.lua source/archive/pc/mod/
+          git commit -m 'feat: finalize r376a H2 two-spline controller [r376a-final]'
+          git push origin HEAD:automation/r376a-finalizer-v3
+
+      - name: Package exact devkit
+        shell: bash
+        run: |
+          set -euxo pipefail
+          PKG="$RUNNER_TEMP/nctc-r376a"
+          OUT="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r376a-h2-native-two-spline-development.zip"
+          mkdir -p "$PKG/archive/pc/mod" "$PKG/r6/scripts/NCTC" "$PKG/r6/tweaks/NCTC"
+          mkdir -p "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+          mkdir -p "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger"
+          cp source/archive/pc/mod/*.archive "$PKG/archive/pc/mod/"
+          cp source/archive/pc/mod/NCTCBaySplinePrototype.archive.xl "$PKG/archive/pc/mod/"
+          cp source/redscript/NCTC/*.reds "$PKG/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$PKG/r6/tweaks/NCTC/"
+          cp source/cet/nctc_survey/init.lua "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_survey/nctc_network.default.json "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_survey/nctc_survey_settings.json "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp source/cet/nctc_passenger/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp README.md THIRD_PARTY_NOTICES.md "$PKG/"
+          cat > "$PKG/NCTC_BUILD_INFO.txt" <<'EOF'
+          Night City Transit Corporation
+          Devkit: r376a H2 native two-spline prototype
+          Runtime build: 37601
+          Scope: H2 bay only. Native entry spline -> normal dwell -> native exit spline -> traffic.
+          H2 entry NodeRef: $/03_night_city/#nctc/#h2_bay_entry
+          H2 exit NodeRef:  $/03_night_city/#nctc/#h2_bay_exit
+          Delamain/Cannery custom bay parking disabled in this prototype; evaluate H2 only.
+          Requires Codeware for ToNodeRef(String), plus ArchiveXL for the streaming block registration.
+          EOF
+          test ! -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+          test "$(sha256sum "$PKG/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')" = "09a8fb10c2e027b2250c1ec647f8c3d466129bea907f5421771795093ae37d0a"
+          test "$(git hash-object "$PKG/archive/pc/mod/NCTCBaySplinePrototype.archive")" = "01d0411ed90d57c3ed6f78297fb6df0067c60c55"
+          cd "$PKG"
+          zip -qr "$OUT" .
+          unzip -t "$OUT"
+          sha256sum "$OUT" > "$OUT.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r376a-final
+          path: |
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r376a-h2-native-two-spline-development.zip
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r376a-h2-native-two-spline-development.zip.sha256
+          compression-level: 0
