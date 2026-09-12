@@ -178,7 +178,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37601);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37604);
     return true;
   }
 
@@ -288,6 +288,38 @@ public class NCTCServiceBusController extends IScriptable {
     this.previousRouteCommand = this.activeRouteCommand;
     this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
     this.activeRouteCommand = null;
+
+    noDriver = new AIEvent();
+    driverReady = new AIEvent();
+    noDriver.name = n"NoDriver";
+    driverReady.name = n"DriverReady";
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.030);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_forced_start_speed_mm", Cast<Int32>(MaxF(startSpeed, 0.00) * 1000.00));
+
+    callback = new NCTCDeferredDriveCommand();
+    speedLimit = this.ResolveTrafficSpeed(target, speedProfile);
+    callback.Configure(this.bus, this, target, minimumDistance, speedLimit, speedProfile, MaxF(startSpeed, 0.00), generation);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);
+    return true;
+  }
+
+  // r376b: the departure spline has already completed successfully here,
+  // so do not interrupt it again. Hand the measured rolling speed to the
+  // normal traffic navigator through the established generation-safe pulse.
+  public func DriveToTrafficAfterSpline(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {
+    let callback: ref<NCTCDeferredDriveCommand>;
+    let noDriver: ref<AIEvent>;
+    let driverReady: ref<AIEvent>;
+    let speedProfile: Int32;
+    let speedLimit: Float;
+    let generation: Int32;
+    if !this.IsReady() { return false; };
+
+    generation = this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.activeRouteCommand = null;
+    this.activeSplineCommand = null;
 
     noDriver = new AIEvent();
     driverReady = new AIEvent();
@@ -1361,10 +1393,6 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if this.arrived {
       quests.SetFact(n"nctc_service_bus_at_stop", 1);
       this.controller.KeepPassengerDoorOpen();
-      if Equals(this.requestedStopId, 70) && this.HasServiceBay() && this.bayParkingWasEntered {
-        this.ScheduleDispatch(0.25);
-        return;
-      };
       boarded = this.controller.IsPlayerAboard()
         || Equals(quests.GetFact(n"nctc_passenger_departure_requested"), 1);
       // Always leave enough time for the door animation to be visible.
@@ -1390,8 +1418,15 @@ public class NCTCTransitSystem extends ScriptableSystem {
       if leaveBayDirect {
         let exitSpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 5.00), 2.00);
         this.bayParkingActive = true;
-        this.bayParkingStage = 3;
         this.bayParkingRetryCount = 0;
+        if Equals(this.requestedStopId, 70) {
+          this.bayParkingStage = 12;
+          this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/departure_spline", exitSpeed, false);
+          this.PublishLoopDiagnostic(this.driveCommandSent ? 72 : 33, this.requestedStopId);
+          this.ScheduleDispatch(0.10);
+          return;
+        };
+        this.bayParkingStage = 3;
         this.bayParkingRoadTarget = this.GetBayParkingRoadTarget();
         this.driveCommandSent = this.controller.DriveToBerthDirect(this.bayParkingRoadTarget, exitSpeed, 5.00);
         this.PublishLoopDiagnostic(this.driveCommandSent ? 63 : 33, this.requestedStopId);
@@ -1428,7 +1463,11 @@ public class NCTCTransitSystem extends ScriptableSystem {
       if this.bayParkingActive && Equals(this.bayParkingStage, 10) {
         this.PublishLoopDiagnostic(71, this.requestedStopId);
       } else {
-        this.PublishRouteCommandTelemetry();
+        if this.bayParkingActive && Equals(this.bayParkingStage, 12) {
+          this.PublishLoopDiagnostic(73, this.requestedStopId);
+        } else {
+          this.PublishRouteCommandTelemetry();
+        };
       };
     };
     // r372n: cross the passage on one long outgoing-road command. Handoff is
@@ -1551,6 +1590,37 @@ public class NCTCTransitSystem extends ScriptableSystem {
     };
 
     if this.bayParkingActive && Equals(this.bayParkingStage, 11) {
+      this.ScheduleDispatch(0.25);
+      return;
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 12) {
+      if this.controller.IsSplineCommandSuccessful() {
+        let rollingSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
+        if !this.AdvanceToNextStop() {
+          this.PublishLoopDiagnostic(34, 0);
+          this.ScheduleDispatch(1.00);
+          return;
+        };
+        this.legPolls = 0;
+        this.bayParkingActive = false;
+        this.bayParkingStage = 0;
+        this.driveCommandSent = this.controller.DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, rollingSpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 74 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.05);
+        return;
+      };
+      if this.controller.IsSplineCommandFailed() {
+        this.bayParkingStage = 13;
+        this.PublishLoopDiagnostic(75, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      this.ScheduleDispatch(0.10);
+      return;
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 13) {
       this.ScheduleDispatch(0.25);
       return;
     };
