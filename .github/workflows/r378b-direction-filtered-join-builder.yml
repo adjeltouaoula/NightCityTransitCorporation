@@ -1,0 +1,30 @@
+name: r378b direction-filtered JoinTraffic builder
+
+on:
+  push:
+    branches:
+      - automation/r378b-direction-filtered-join-builder
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build r378b
+        shell: bash
+        run: bash tools/r378b/build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r378b-h2-direction-filtered-join
+          path: |
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r378b-h2-direction-filtered-join-development.zip
+            ${{ runner.temp }}/r378b.sha256
+            ${{ runner.temp }}/r378b-metadata.txt
+          compression-level: 0
