@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "description": "Sanitized geometry snapshot used only to generate r383b generic-arrival test assets. This is not the player's runtime nctc_network.json.",
+  "bays": [
+    {
+      "stopId": 20,
+      "label": "Delamain HQ",
+      "p1": {"x": -905.679, "y": -78.399, "z": 7.061},
+      "p2": {"x": -928.813, "y": -61.993, "z": 7.209},
+      "spawn": {"x": -927.955, "y": -165.280, "z": 7.145},
+      "width": 2.870
+    },
+    {
+      "stopId": 69,
+      "label": "Cannery Plaza",
+      "p1": {"x": -2392.823, "y": -520.017, "z": 12.674},
+      "p2": {"x": -2394.282, "y": -554.666, "z": 12.674},
+      "spawn": {"x": -2384.807, "y": -393.260, "z": 12.765},
+      "width": 3.156
+    },
+    {
+      "stopId": 70,
+      "label": "Megabuilding H2",
+      "p1": {"x": -2161.015, "y": -1012.713, "z": 7.851},
+      "p2": {"x": -2162.260, "y": -1043.903, "z": 7.846},
+      "spawn": {"x": -2154.087, "y": -924.186, "z": 7.694},
+      "width": 2.723
+    }
+  ]
+}
