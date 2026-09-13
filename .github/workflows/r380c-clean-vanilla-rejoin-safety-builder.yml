@@ -1,0 +1,28 @@
+name: r380c clean vanilla rejoin safety builder
+
+on:
+  push:
+    branches:
+      - automation/r380c-clean-vanilla-rejoin-safety-builder
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build clean r380c from r376f
+        shell: bash
+        run: bash tools/r380c/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r380c-clean-vanilla-rejoin-safety
+          path: |
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r380c-clean-vanilla-rejoin-safety-development.zip
+            ${{ runner.temp }}/r380c.sha256
+            ${{ runner.temp }}/r380c-metadata.txt
+          compression-level: 0
