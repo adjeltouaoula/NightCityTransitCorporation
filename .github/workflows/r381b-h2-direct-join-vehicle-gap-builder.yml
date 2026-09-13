@@ -1,0 +1,28 @@
+name: r381b direct JoinTraffic vehicle-gap builder
+
+on:
+  push:
+    branches:
+      - automation/r381b-h2-direct-join-vehicle-gap-builder
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build r381b
+        shell: bash
+        run: bash tools/r381b/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r381b-h2-direct-join-vehicle-gap
+          path: |
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r381b-h2-direct-join-vehicle-gap-development.zip
+            ${{ runner.temp }}/r381b.sha256
+            ${{ runner.temp }}/r381b-metadata.txt
+          compression-level: 0
