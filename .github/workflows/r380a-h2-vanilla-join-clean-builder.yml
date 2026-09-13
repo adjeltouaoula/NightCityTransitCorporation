@@ -1,0 +1,28 @@
+name: r380a H2 vanilla join clean builder
+
+on:
+  push:
+    branches:
+      - automation/r380a-h2-vanilla-join-clean-builder
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build r380a
+        shell: bash
+        run: bash tools/r380a/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r380a-h2-vanilla-join-clean
+          path: |
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r380a-h2-vanilla-join-clean-development.zip
+            ${{ runner.temp }}/r380a.sha256
+            ${{ runner.temp }}/r380a-metadata.txt
+          compression-level: 0
