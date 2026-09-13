@@ -145,8 +145,12 @@ def generate_bay(sector_template: dict[str, Any], block_template: dict[str, Any]
 
     bay_dir = out / f"stop_{stop_id}"
     bay_dir.mkdir(parents=True, exist_ok=True)
-    (bay_dir / "sector.json").write_text(json.dumps(sector, indent=2), encoding="utf-8", newline="\n")
-    (bay_dir / "block.json").write_text(json.dumps(block, indent=2), encoding="utf-8", newline="\n")
+    (bay_dir / "h2_arrival.streamingsector.json").write_text(
+        json.dumps(sector, indent=2), encoding="utf-8", newline="\n"
+    )
+    (bay_dir / "all.streamingblock.json").write_text(
+        json.dumps(block, indent=2), encoding="utf-8", newline="\n"
+    )
     report = {
         "stopId": stop_id,
         "label": bay.get("label", ""),
