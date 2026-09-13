@@ -28,12 +28,12 @@ test "$(sha256sum "$CLEAN/source/archive/pc/mod/NCTCDisplayPrototype.archive" | 
 
 mapfile -t CHANGED < <(git -C "$CLEAN" diff --name-only)
 for f in "${CHANGED[@]}"; do echo "changed: $f"; done
+test "${#CHANGED[@]}" -eq 1
 printf '%s\n' "${CHANGED[@]}" | grep -Fxq 'source/redscript/NCTC/NCTCTransitSystem.reds'
-printf '%s\n' "${CHANGED[@]}" | grep -Fxq 'source/cet/nctc_survey/init.lua'
 
 git -C "$CLEAN" config user.name "github-actions[bot]"
 git -C "$CLEAN" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-git -C "$CLEAN" add source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_survey/init.lua
+git -C "$CLEAN" add source/redscript/NCTC/NCTCTransitSystem.reds
 git -C "$CLEAN" commit -m "test: r381b gate direct JoinTraffic on adjacent vehicles"
 CLEAN_SHA="$(git -C "$CLEAN" rev-parse HEAD)"
 git -C "$CLEAN" push --force origin "HEAD:refs/heads/$CLEAN_BRANCH"
