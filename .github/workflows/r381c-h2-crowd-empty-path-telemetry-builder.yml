@@ -1,0 +1,25 @@
+name: r381c crowd empty-path telemetry builder
+
+on:
+  push:
+    branches:
+      - experiment/r381c-h2-crowd-empty-path-telemetry
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package r381c
+        shell: bash
+        run: bash tools/r381c/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r381c-crowd-empty-path-telemetry
+          path: |
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r381c-crowd-empty-path-telemetry-development.zip
+            ${{ runner.temp }}/r381c.sha256
+          compression-level: 0
