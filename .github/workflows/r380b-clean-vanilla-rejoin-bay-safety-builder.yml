@@ -1,0 +1,26 @@
+name: r380b clean vanilla rejoin bay safety builder
+
+on:
+  push:
+    branches:
+      - automation/r380b-clean-vanilla-rejoin-bay-safety-builder
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build r380b
+        run: python3 tools/r380b/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r380b-clean-vanilla-rejoin-bay-safety
+          path: |
+            /tmp/NightCityTransitCorporation-0.3.0-devkit-r380b-clean-vanilla-rejoin-bay-safety-development.zip
+            /tmp/SHA256-r380b.txt
+            /tmp/METADATA-r380b.txt
