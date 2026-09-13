@@ -1,0 +1,27 @@
+name: r381d crowd empty-path telemetry typefix builder
+
+on:
+  push:
+    branches:
+      - experiment/r381d-h2-crowd-empty-path-telemetry-typefix
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build r381d
+        shell: bash
+        run: bash tools/r381d/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r381d-crowd-empty-path-telemetry-typefix
+          path: |
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r381d-crowd-empty-path-telemetry-typefix-development.zip
+            ${{ runner.temp }}/r381d.sha256
+          compression-level: 0
