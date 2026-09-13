@@ -31,8 +31,9 @@ jobs:
             "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_physical_stop"
 
           # Keep the validated development baseline intact. The physical-stop
-          # experiment itself is pure CET/Lua, so it introduces no new
-          # REDscript source and cannot break script compilation.
+          # experiment itself is pure CET/Lua. The tiny REDscript file at the
+          # old prototype path is only a compatibility placeholder so installing
+          # this build over the failed one overwrites the stale bad script.
           cp source/archive/pc/mod/NCTCTrafficRuntime.archive "$PKG/archive/pc/mod/"
           cp source/archive/pc/mod/NCTCDisplayPrototype.archive "$PKG/archive/pc/mod/"
           cp source/redscript/NCTC/*.reds "$PKG/r6/scripts/NCTC/"
@@ -42,11 +43,9 @@ jobs:
           cp source/cet/nctc_physical_stop/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_physical_stop/"
           cp README.md THIRD_PARTY_NOTICES.md "$PKG/"
 
-          # Runtime survey data belongs to the player's CET folder and must not
-          # be baked into a test package.
           test ! -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
           test -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_physical_stop/init.lua"
-          test ! -e "$PKG/r6/scripts/NCTC/NCTCPhysicalStopPrototype.reds"
+          test -e "$PKG/r6/scripts/NCTC/NCTCPhysicalStopPrototype.reds"
 
           (cd "$PKG" && zip -qr "$WORK/NightCityTransitCorporation-0.3.0-devkit-physical-stop-prototype-cet.zip" .)
           unzip -t "$WORK/NightCityTransitCorporation-0.3.0-devkit-physical-stop-prototype-cet.zip"
