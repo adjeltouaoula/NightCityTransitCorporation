@@ -3,8 +3,9 @@ module NCTC
 // r383b: generic authored-bay controller.
 //
 // Architecture kept from the validated H2 prototype:
-// traffic AI -> generated native arrival spline -> stop/dwell -> native
-// AIVehicleJoinTrafficCommand -> immediate rolling continuation to next NCTC target.
+// traffic AI -> generated native arrival spline -> stop/dwell -> validated
+// r382h departure guard -> native AIVehicleJoinTrafficCommand -> immediate
+// rolling continuation to the next NCTC target.
 //
 // No custom departure spline is used. Arrival splines are generated from the
 // same H2 bay-local recipe and addressed uniformly by stop id.
@@ -61,6 +62,18 @@ public func DriveToTrafficAfterJoin(target: Vector4, minimumDistance: Float, sta
   return true;
 }
 
+// Keep the forward half of the validated r382h departure guard: the game's own
+// CrowdMember path query must also report ten metres clear. If the Mahir has no
+// crowd component, fail open to the lateral road probe rather than deadlocking.
+@addMethod(NCTCServiceBusController)
+public func IsVanillaDeparturePathClear(distance: Float) -> Bool {
+  let crowd: ref<CrowdMemberBaseComponent>;
+  if !this.IsReady() { return false; };
+  crowd = this.bus.GetCrowdMemberComponent();
+  if !IsDefined(crowd) { return true; };
+  return crowd.CheckEmptyPath(distance);
+}
+
 @addMethod(NCTCTransitSystem)
 private func NCTCBayArrivalSplinePath() -> String {
   return "$/nctc/bays/stop_" + ToString(this.requestedStopId) + "/arrival_spline";
@@ -79,11 +92,12 @@ private func NCTCBayRoadSideSign() -> Float {
   return 1.00;
 }
 
-// r382h geometry: inspect only the adjacent road lane, from 15 m behind the
-// bus to 10 m ahead. Overlap() uses half extents, hence 12.5 m longitudinal
-// half-length with a centre shifted 2.5 m rearward.
+// Full r382h departure gate, generalized from authored P1/P2 geometry:
+// - vanilla CheckEmptyPath(10m) in front of the Mahir;
+// - adjacent traffic lane from 15m behind to 10m ahead.
+// Both must be clear for two consecutive samples before JoinTraffic starts.
 @addMethod(NCTCTransitSystem)
-private func NCTCDepartureRoadsideBlocked() -> Bool {
+private func NCTCDepartureBlocked() -> Bool {
   let spatial: ref<SpatialQueriesSystem>;
   let result: TraceResult;
   let dimensions: Vector4;
@@ -93,29 +107,38 @@ private func NCTCDepartureRoadsideBlocked() -> Bool {
   let center: Vector4;
   let sideSign: Float;
   let sideOffset: Float;
+  let lateralBlocked: Bool;
+  let forwardClear: Bool;
   let blocked: Bool;
   let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
 
   if !this.HasServiceBay() || !IsDefined(this.controller) { return false; };
+
+  forwardClear = this.controller.IsVanillaDeparturePathClear(10.00);
+  lateralBlocked = false;
   spatial = GameInstance.GetSpatialQueriesSystem(this.GetGameInstance());
-  if !IsDefined(spatial) { return false; };
+  if IsDefined(spatial) {
+    forward = this.GetBayForward();
+    if AbsF(forward.X) > 0.01 || AbsF(forward.Y) > 0.01 {
+      right = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
+      sideSign = this.NCTCBayRoadSideSign();
 
-  forward = this.GetBayForward();
-  if AbsF(forward.X) <= 0.01 && AbsF(forward.Y) <= 0.01 { return false; };
-  right = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
-  sideSign = this.NCTCBayRoadSideSign();
+      // Bay centreline -> adjacent traffic-lane centre. Keep enough lateral
+      // offset that the stopped Mahir cannot detect its own body.
+      sideOffset = MaxF(this.GetBayWidth() * 0.50 + 2.75, 4.10);
+      center = this.controller.GetWorldPosition() - forward * 2.50 + right * sideOffset * sideSign;
+      center.Z += 1.25;
+      dimensions = new Vector4(1.65, 12.50, 1.75, 0.00);
+      rotation = Quaternion.ToEulerAngles(Quaternion.BuildFromDirectionVector(forward));
+      lateralBlocked = spatial.Overlap(dimensions, center, rotation, n"Vehicle", result);
+    };
+  };
 
-  // Bay centreline -> adjacent traffic-lane centre. Keep enough lateral offset
-  // that the stopped Mahir cannot detect its own body.
-  sideOffset = MaxF(this.GetBayWidth() * 0.50 + 2.75, 4.10);
-  center = this.controller.GetWorldPosition() - forward * 2.50 + right * sideOffset * sideSign;
-  center.Z += 1.25;
-  dimensions = new Vector4(1.65, 12.50, 1.75, 0.00);
-  rotation = Quaternion.ToEulerAngles(Quaternion.BuildFromDirectionVector(forward));
-  blocked = spatial.Overlap(dimensions, center, rotation, n"Vehicle", result);
-
+  blocked = !forwardClear || lateralBlocked;
   if IsDefined(quests) {
     quests.SetFact(n"nctc_dev_generic_bay_road_side", sideSign > 0.00 ? 1 : -1);
+    quests.SetFact(n"nctc_dev_generic_bay_forward_clear", forwardClear ? 1 : 0);
+    quests.SetFact(n"nctc_dev_generic_bay_lateral_blocked", lateralBlocked ? 1 : 0);
     quests.SetFact(n"nctc_dev_generic_bay_departure_blocked", blocked ? 1 : 0);
     quests.SetFact(n"nctc_dev_generic_bay_guard_revision", 38302);
   };
@@ -165,9 +188,9 @@ public func UpdateRequestedService() -> Void {
       || Equals(quests.GetFact(n"nctc_passenger_departure_requested"), 1);
 
     if this.dwellPolls >= 8 && (boarded || this.dwellPolls >= 40) {
-      // Require two consecutive clear samples before releasing the bus. A
-      // transient single clear frame must not launch it into passing traffic.
-      if this.NCTCDepartureRoadsideBlocked() {
+      // Require two consecutive fully-clear samples. A transient single clear
+      // frame must not launch the bus into passing or crossing traffic.
+      if this.NCTCDepartureBlocked() {
         this.bayParkingRetryCount = 0;
         quests.SetFact(n"nctc_dev_generic_bay_clear_polls", 0);
         this.controller.ClosePassengerDoor();
