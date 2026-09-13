@@ -57,7 +57,7 @@ jobs:
 
           cet = root / 'source/cet/nctc_survey/init.lua'
           c = cet.read_text()
-          old = 'if revision == 37902 then\n    log("NCTC runtime build=37902 r379b H2 yield vanilla query")'
+          old = 'if revision == 37902 then\n    log("NCTC runtime build=37902 r379b H2 vanilla traffic yield POC")'
           new = 'if revision == 37903 then\n    log("NCTC runtime build=37903 r379c H2 yield Uint32 fix")'
           if c.count(old) != 1: raise SystemExit('CET runtime match failed')
           c = c.replace(old, new, 1)
