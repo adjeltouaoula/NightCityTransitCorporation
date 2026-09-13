@@ -1,23 +1,14 @@
 module NCTC
 
-// r383b: generic authored-bay controller.
+// r383c: conservative REDscript hotfix for generic authored bays.
 //
-// Architecture kept from the validated H2 prototype:
-// traffic AI -> generated native arrival spline -> stop/dwell -> validated
-// r382h departure guard -> native AIVehicleJoinTrafficCommand -> immediate
-// rolling continuation to the next NCTC target.
+// Keep the validated H2 architecture but remove two unnecessary sources of
+// compiler/runtime ambiguity from r383b:
+// - no diagnostic Bind() wrapper;
+// - no dynamically constructed spline NodeRef string.
 //
-// No custom departure spline is used. Arrival splines are generated from the
-// same H2 bay-local recipe and addressed uniformly by stop id.
-
-@wrapMethod(NCTCServiceBusController)
-public func Bind(bus: ref<VehicleObject>) -> Bool {
-  let ok: Bool = wrappedMethod(bus);
-  if ok && IsDefined(bus) {
-    GameInstance.GetQuestsSystem(bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38302);
-  };
-  return ok;
-}
+// The three currently generated bay assets are addressed explicitly. Future
+// bays can be added to this mapping once the generic geometry is validated.
 
 // r382f-style rolling handoff after native JoinTraffic: do not send NoDriver
 // after the traffic system has just acquired a lane. Keep only DriverReady and
@@ -75,15 +66,24 @@ public func IsVanillaDeparturePathClear(distance: Float) -> Bool {
 }
 
 @addMethod(NCTCTransitSystem)
-private func NCTCBayArrivalSplinePath() -> String {
-  return "$/nctc/bays/stop_" + ToString(this.requestedStopId) + "/arrival_spline";
+private final func NCTCBayArrivalSplinePath() -> String {
+  if Equals(this.requestedStopId, 20) {
+    return "$/nctc/bays/stop_20/arrival_spline";
+  };
+  if Equals(this.requestedStopId, 69) {
+    return "$/nctc/bays/stop_69/arrival_spline";
+  };
+  if Equals(this.requestedStopId, 70) {
+    return "$/nctc/bays/stop_70/arrival_spline";
+  };
+  return "";
 }
 
 // Determine which side of the authored bay contains the road from the surveyed
 // spawn position. This avoids assuming that every future bay is on the same
 // world-space side of its road.
 @addMethod(NCTCTransitSystem)
-private func NCTCBayRoadSideSign() -> Float {
+private final func NCTCBayRoadSideSign() -> Float {
   let forward: Vector4 = this.GetBayForward();
   let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
   let fromEntryToSpawn: Vector4 = this.surveySpawn - this.GetBayEntryPoint();
@@ -97,7 +97,7 @@ private func NCTCBayRoadSideSign() -> Float {
 // - adjacent traffic lane from 15m behind to 10m ahead.
 // Both must be clear for two consecutive samples before JoinTraffic starts.
 @addMethod(NCTCTransitSystem)
-private func NCTCDepartureBlocked() -> Bool {
+private final func NCTCDepartureBlocked() -> Bool {
   let spatial: ref<SpatialQueriesSystem>;
   let result: TraceResult;
   let dimensions: Vector4;
@@ -105,9 +105,9 @@ private func NCTCDepartureBlocked() -> Bool {
   let forward: Vector4;
   let right: Vector4;
   let center: Vector4;
-  let sideSign: Float;
+  let sideSign: Float = 1.00;
   let sideOffset: Float;
-  let lateralBlocked: Bool;
+  let lateralBlocked: Bool = false;
   let forwardClear: Bool;
   let blocked: Bool;
   let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
@@ -115,16 +115,12 @@ private func NCTCDepartureBlocked() -> Bool {
   if !this.HasServiceBay() || !IsDefined(this.controller) { return false; };
 
   forwardClear = this.controller.IsVanillaDeparturePathClear(10.00);
-  lateralBlocked = false;
+  sideSign = this.NCTCBayRoadSideSign();
   spatial = GameInstance.GetSpatialQueriesSystem(this.GetGameInstance());
   if IsDefined(spatial) {
     forward = this.GetBayForward();
     if AbsF(forward.X) > 0.01 || AbsF(forward.Y) > 0.01 {
       right = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
-      sideSign = this.NCTCBayRoadSideSign();
-
-      // Bay centreline -> adjacent traffic-lane centre. Keep enough lateral
-      // offset that the stopped Mahir cannot detect its own body.
       sideOffset = MaxF(this.GetBayWidth() * 0.50 + 2.75, 4.10);
       center = this.controller.GetWorldPosition() - forward * 2.50 + right * sideOffset * sideSign;
       center.Z += 1.25;
@@ -140,7 +136,7 @@ private func NCTCDepartureBlocked() -> Bool {
     quests.SetFact(n"nctc_dev_generic_bay_forward_clear", forwardClear ? 1 : 0);
     quests.SetFact(n"nctc_dev_generic_bay_lateral_blocked", lateralBlocked ? 1 : 0);
     quests.SetFact(n"nctc_dev_generic_bay_departure_blocked", blocked ? 1 : 0);
-    quests.SetFact(n"nctc_dev_generic_bay_guard_revision", 38302);
+    quests.SetFact(n"nctc_dev_generic_bay_guard_revision", 38303);
   };
   return blocked;
 }
@@ -151,31 +147,33 @@ public func UpdateRequestedService() -> Void {
   let boarded: Bool;
   let joinedSpeed: Float;
   let inTrafficLane: Bool;
+  let splinePath: String;
 
   quests = GameInstance.GetQuestsSystem(this.GetGameInstance());
 
   // Generic replacement for the old stopId==70 arrival POC. Generated assets
-  // all share the same path convention and the same validated H2-local shape.
-  // The stock stage-10 completion handler remains in charge after this command
-  // is armed, so stop recognition/dwell behavior is unchanged.
+  // use explicit paths here so REDscript never has to build a NodeRef string.
   if !this.followingPassage && this.HasServiceBay() && !this.bayParkingActive
     && !this.bayParkingBypass && Equals(this.requestedStopId, this.serviceStopId)
     && IsDefined(this.controller) && this.controller.IsReady() {
-    let entryLateral: Float;
-    let entryLongitudinal: Float = this.GetBayEntryProgress(entryLateral);
-    if entryLongitudinal > 0.50 && entryLongitudinal <= 24.00 && entryLateral <= 12.00 {
-      let entrySpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 6.00), 2.00);
-      let splinePath: String = this.NCTCBayArrivalSplinePath();
-      this.bayParkingActive = true;
-      this.bayParkingStage = 10;
-      this.bayParkingWasEntered = true;
-      this.bayParkingRetryCount = 0;
-      quests.SetFact(n"nctc_dev_generic_bay_arrival_stop_id", this.requestedStopId);
-      quests.SetFact(n"nctc_dev_generic_bay_arrival_revision", 38302);
-      this.driveCommandSent = this.controller.DriveOnBaySpline(splinePath, entrySpeed, true);
-      this.PublishLoopDiagnostic(this.driveCommandSent ? 92 : 33, this.requestedStopId);
-      this.ScheduleDispatch(0.10);
-      return;
+    splinePath = this.NCTCBayArrivalSplinePath();
+    if NotEquals(splinePath, "") {
+      let entryLateral: Float;
+      let entryLongitudinal: Float = this.GetBayEntryProgress(entryLateral);
+      if entryLongitudinal > 0.50 && entryLongitudinal <= 24.00 && entryLateral <= 12.00 {
+        let entrySpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 6.00), 2.00);
+        this.bayParkingActive = true;
+        this.bayParkingStage = 10;
+        this.bayParkingWasEntered = true;
+        this.bayParkingRetryCount = 0;
+        quests.SetFact(n"nctc_dev_build_revision", 38303);
+        quests.SetFact(n"nctc_dev_generic_bay_arrival_stop_id", this.requestedStopId);
+        quests.SetFact(n"nctc_dev_generic_bay_arrival_revision", 38303);
+        this.driveCommandSent = this.controller.DriveOnBaySpline(splinePath, entrySpeed, true);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 92 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.10);
+        return;
+      };
     };
   };
 
