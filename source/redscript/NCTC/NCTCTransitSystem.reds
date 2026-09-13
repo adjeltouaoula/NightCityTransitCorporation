@@ -49,9 +49,8 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
       command.speedInTraffic = this.trafficSpeedLimit;
     };
     command.forceGreenLights = false;
-    // These must remain false for the service bus. Enabling either one lets
-    // the traffic controller snap the long Mahir to a neighboring lane when
-    // a route command starts or ends, which can eject standing passengers.
+    // Keep neighbor snapping disabled for the service bus: it can visibly
+    // teleport the long Mahir sideways, which is not acceptable RP.
     command.trafficTryNeighborsForStart = false;
     command.trafficTryNeighborsForEnd = false;
     // r372n: standard service commands still use zero completion radius, but
@@ -170,6 +169,7 @@ public class NCTCServiceBusController extends IScriptable {
   // alive alongside the command for the next stop.
   private let previousRouteCommand: ref<AIVehicleDriveToPointCommand>;
   private let activeSplineCommand: ref<AIVehicleOnSplineCommand>;
+  private let activeJoinTrafficCommand: ref<AIVehicleJoinTrafficCommand>;
   private let driveGeneration: Int32;
 
   public func Bind(bus: ref<VehicleObject>) -> Bool {
@@ -178,7 +178,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37606);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38001);
     return true;
   }
 
@@ -304,35 +304,66 @@ public class NCTCServiceBusController extends IScriptable {
     return true;
   }
 
-  // r376b: the departure spline has already completed successfully here,
-  // so do not interrupt it again. Hand the measured rolling speed to the
-  // normal traffic navigator through the established generation-safe pulse.
-  public func DriveToTrafficAfterSpline(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {
+  // r380a: use the exact vanilla Delamain free-roam rejoin command first.
+  // Delamain uses needDriver=false + useKinematic=true. Route navigation only
+  // starts after the Mahir is registered on a traffic lane.
+  public func JoinTrafficVanillaAfterSpline() -> Bool {
+    let command: ref<AIVehicleJoinTrafficCommand>;
+    if !this.IsReady() { return false; };
+    this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.activeRouteCommand = null;
+    this.activeSplineCommand = null;
+    this.activeJoinTrafficCommand = null;
+    command = new AIVehicleJoinTrafficCommand();
+    command.needDriver = false;
+    command.useKinematic = true;
+    this.bus.GetAIComponent().SendCommand(command);
+    this.activeJoinTrafficCommand = command;
+    return true;
+  }
+
+  public func IsInTrafficLane() -> Bool {
+    return this.IsReady() && this.bus.IsInTrafficLane();
+  }
+
+  public func IsJoinTrafficCommandSuccessful() -> Bool {
+    return IsDefined(this.activeJoinTrafficCommand) && Equals(this.activeJoinTrafficCommand.state, AICommandState.Success);
+  }
+
+  public func IsJoinTrafficCommandFailed() -> Bool {
+    if !IsDefined(this.activeJoinTrafficCommand) { return false; };
+    return Equals(this.activeJoinTrafficCommand.state, AICommandState.Failure)
+      || Equals(this.activeJoinTrafficCommand.state, AICommandState.Cancelled)
+      || Equals(this.activeJoinTrafficCommand.state, AICommandState.Interrupted);
+  }
+
+  public func GetJoinTrafficCommandStatusCode() -> Int32 {
+    if !IsDefined(this.activeJoinTrafficCommand) { return 0; };
+    if this.IsJoinTrafficCommandSuccessful() { return 2; };
+    if this.IsJoinTrafficCommandFailed() { return 3; };
+    return 1;
+  }
+
+  // The vehicle is already lane-attached here. Do not pulse NoDriver/DriverReady:
+  // that lifecycle reset is useful for a fresh route command, but would throw
+  // away the traffic state we just asked vanilla JoinTraffic to establish.
+  public func DriveToTrafficFromJoinedLane(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {
     let callback: ref<NCTCDeferredDriveCommand>;
-    let noDriver: ref<AIEvent>;
-    let driverReady: ref<AIEvent>;
     let speedProfile: Int32;
     let speedLimit: Float;
     let generation: Int32;
     if !this.IsReady() { return false; };
-
     generation = this.NextDriveGeneration();
     this.previousRouteCommand = this.activeRouteCommand;
     this.activeRouteCommand = null;
     this.activeSplineCommand = null;
-
-    noDriver = new AIEvent();
-    driverReady = new AIEvent();
-    noDriver.name = n"NoDriver";
-    driverReady.name = n"DriverReady";
-    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);
-    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.030);
+    this.activeJoinTrafficCommand = null;
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_forced_start_speed_mm", Cast<Int32>(MaxF(startSpeed, 0.00) * 1000.00));
-
     callback = new NCTCDeferredDriveCommand();
     speedLimit = this.ResolveTrafficSpeed(target, speedProfile);
     callback.Configure(this.bus, this, target, minimumDistance, speedLimit, speedProfile, MaxF(startSpeed, 0.00), generation);
-    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.030, false);
     return true;
   }
 
@@ -1603,17 +1634,58 @@ public class NCTCTransitSystem extends ScriptableSystem {
           return;
         };
         this.legPolls = 0;
-        this.bayParkingActive = false;
-        this.bayParkingStage = 0;
-        this.driveCommandSent = this.controller.DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, rollingSpeed);
-        this.PublishLoopDiagnostic(this.driveCommandSent ? 74 : 33, this.requestedStopId);
-        this.ScheduleDispatch(0.05);
+        this.bayParkingRetryCount = 0;
+        if this.controller.IsInTrafficLane() {
+          this.bayParkingActive = false;
+          this.bayParkingStage = 0;
+          this.driveCommandSent = this.controller.DriveToTrafficFromJoinedLane(this.GetTrafficTarget(), 0.00, rollingSpeed);
+          this.PublishLoopDiagnostic(this.driveCommandSent ? 79 : 33, this.requestedStopId);
+        } else {
+          this.bayParkingStage = 14;
+          this.driveCommandSent = this.controller.JoinTrafficVanillaAfterSpline();
+          quests.SetFact(n"nctc_dev_join_traffic_state", this.controller.GetJoinTrafficCommandStatusCode());
+          quests.SetFact(n"nctc_dev_bus_in_traffic_lane", 0);
+          this.PublishLoopDiagnostic(this.driveCommandSent ? 76 : 33, this.requestedStopId);
+        };
+        this.ScheduleDispatch(0.10);
         return;
       };
       if this.controller.IsSplineCommandFailed() {
         this.bayParkingStage = 13;
         this.PublishLoopDiagnostic(75, this.requestedStopId);
         this.ScheduleDispatch(0.25);
+        return;
+      };
+      this.ScheduleDispatch(0.10);
+      return;
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 14) {
+      let inTrafficLane: Bool = this.controller.IsInTrafficLane();
+      this.legPolls += 1;
+      quests.SetFact(n"nctc_dev_join_traffic_state", this.controller.GetJoinTrafficCommandStatusCode());
+      quests.SetFact(n"nctc_dev_bus_in_traffic_lane", inTrafficLane ? 1 : 0);
+      if inTrafficLane {
+        this.bayParkingRetryCount += 1;
+      } else {
+        this.bayParkingRetryCount = 0;
+      };
+      if this.controller.IsJoinTrafficCommandSuccessful() || this.bayParkingRetryCount >= 2 {
+        let rollingSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
+        this.bayParkingActive = false;
+        this.bayParkingStage = 0;
+        this.legPolls = 0;
+        this.driveCommandSent = this.controller.DriveToTrafficFromJoinedLane(this.GetTrafficTarget(), 0.00, rollingSpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 77 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.05);
+        return;
+      };
+      if this.controller.IsJoinTrafficCommandFailed() || this.legPolls >= 50 {
+        this.legPolls = 0;
+        this.bayParkingRetryCount = 0;
+        this.driveCommandSent = this.controller.JoinTrafficVanillaAfterSpline();
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 78 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.10);
         return;
       };
       this.ScheduleDispatch(0.10);
