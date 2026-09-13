@@ -1,0 +1,56 @@
+name: physical stop prototype builder
+
+on:
+  push:
+    branches:
+      - experiment-physical-stop-prototype
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble physical stop prototype devkit
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/nctc-physical-stop"
+          PKG="$WORK/package"
+          mkdir -p \
+            "$PKG/archive/pc/mod" \
+            "$PKG/r6/scripts/NCTC" \
+            "$PKG/r6/tweaks/NCTC" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+
+          # Keep the same validated runtime/display resources used by the
+          # development baseline. This experiment changes only REDscript.
+          cp source/archive/pc/mod/NCTCTrafficRuntime.archive "$PKG/archive/pc/mod/"
+          cp source/archive/pc/mod/NCTCDisplayPrototype.archive "$PKG/archive/pc/mod/"
+          cp source/redscript/NCTC/*.reds "$PKG/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/*.yaml "$PKG/r6/tweaks/NCTC/"
+          cp source/cet/nctc_passenger/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp source/cet/nctc_survey/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp README.md THIRD_PARTY_NOTICES.md "$PKG/"
+
+          # Runtime survey data belongs to the player's CET folder and must not
+          # be baked into a test package.
+          test ! -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+
+          (cd "$PKG" && zip -qr "$WORK/NightCityTransitCorporation-0.3.0-devkit-physical-stop-prototype.zip" .)
+          unzip -t "$WORK/NightCityTransitCorporation-0.3.0-devkit-physical-stop-prototype.zip"
+          sha256sum "$WORK/NightCityTransitCorporation-0.3.0-devkit-physical-stop-prototype.zip" | tee "$WORK/PACKAGE_SHA256.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-physical-stop-prototype-package
+          path: |
+            ${{ runner.temp }}/nctc-physical-stop/NightCityTransitCorporation-0.3.0-devkit-physical-stop-prototype.zip
+            ${{ runner.temp }}/nctc-physical-stop/PACKAGE_SHA256.txt
+          compression-level: 0
