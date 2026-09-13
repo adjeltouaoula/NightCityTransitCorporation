@@ -1,9 +1,9 @@
-name: r383b generic bay arrival builder
+name: r383c generic bay REDscript hotfix builder
 
 on:
   push:
     branches:
-      - experiment/r383b-generic-bay-arrival
+      - experiment/r383c-redscript-hotfix
   workflow_dispatch:
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          WORK="$RUNNER_TEMP/r383b"
+          WORK="$RUNNER_TEMP/r383c"
           mkdir -p "$WORK/tools"
           dotnet tool install WolvenKit.CLI --version 9.0.1 --tool-path "$WORK/tools"
 
@@ -33,7 +33,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          WORK="$RUNNER_TEMP/r383b"
+          WORK="$RUNNER_TEMP/r383c"
           TOOL="$WORK/tools/cp77tools"
           RAW="$WORK/unpacked"
           TEMPLATE="$WORK/template-json"
@@ -41,7 +41,6 @@ jobs:
           OUT="$WORK/out"
           mkdir -p "$RAW" "$TEMPLATE" "$GENERATED" "$OUT"
 
-          # r376a/r382h arrival asset is the immutable geometry template.
           test "$(git hash-object source/archive/pc/mod/NCTCH2Spline.archive)" = "ff0be26fb781cf5f2aaf9dd75ce5b668f777a0f6"
           test "$(git hash-object source/archive/pc/mod/NCTCH2Spline.archive.xl)" = "6e934a5637bfe3300832eea2fef179386576c5e1"
 
@@ -64,9 +63,6 @@ jobs:
             --manifest tools/bays/r383b_test_bays.json \
             --out "$GENERATED"
 
-          # The generated stop-70 curve must reproduce the validated H2 local
-          # geometry, not merely look similar. One millimetre tolerance covers
-          # the rounded survey coordinates in the sanitized manifest.
           ORIGINAL="$SECTOR_JSON" GENERATED_H2="$GENERATED/stop_70/h2_arrival.streamingsector.json" python3 - <<'PY'
           import json, math, os
           def find_spline(x):
@@ -116,11 +112,11 @@ jobs:
           cp "$GENERATED/stop_70/report.json" "$OUT/stop_70_report.json"
           sha256sum "$OUT"/*.archive "$OUT"/*.archive.xl | tee "$OUT/SHA256SUMS.txt"
 
-      - name: Assemble r383b devkit package
+      - name: Assemble r383c devkit package
         shell: bash
         run: |
           set -euo pipefail
-          WORK="$RUNNER_TEMP/r383b"
+          WORK="$RUNNER_TEMP/r383c"
           OUT="$WORK/out"
           PKG="$WORK/package"
           mkdir -p \
@@ -138,23 +134,21 @@ jobs:
           cp source/cet/nctc_passenger/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
           cp source/cet/nctc_survey/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
 
-          # Never ship a player's persistent network. Only the repository's
-          # nctc_network.default.json is present in this package.
           test ! -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
 
           cp "$OUT/SHA256SUMS.txt" "$WORK/GENERIC_BAY_ASSET_SHA256SUMS.txt"
-          (cd "$PKG" && zip -qr "$WORK/NightCityTransitCorporation-0.3.0-devkit-r383b-generic-bay-arrival.zip" .)
-          unzip -t "$WORK/NightCityTransitCorporation-0.3.0-devkit-r383b-generic-bay-arrival.zip"
-          sha256sum "$WORK/NightCityTransitCorporation-0.3.0-devkit-r383b-generic-bay-arrival.zip" | tee "$WORK/PACKAGE_SHA256.txt"
+          (cd "$PKG" && zip -qr "$WORK/NightCityTransitCorporation-0.3.0-devkit-r383c-redscript-hotfix.zip" .)
+          unzip -t "$WORK/NightCityTransitCorporation-0.3.0-devkit-r383c-redscript-hotfix.zip"
+          sha256sum "$WORK/NightCityTransitCorporation-0.3.0-devkit-r383c-redscript-hotfix.zip" | tee "$WORK/PACKAGE_SHA256.txt"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nctc-r383b-generic-bay-arrival-package
+          name: nctc-r383c-redscript-hotfix-package
           path: |
-            ${{ runner.temp }}/r383b/NightCityTransitCorporation-0.3.0-devkit-r383b-generic-bay-arrival.zip
-            ${{ runner.temp }}/r383b/PACKAGE_SHA256.txt
-            ${{ runner.temp }}/r383b/GENERIC_BAY_ASSET_SHA256SUMS.txt
-            ${{ runner.temp }}/r383b/out/stop_20_report.json
-            ${{ runner.temp }}/r383b/out/stop_69_report.json
-            ${{ runner.temp }}/r383b/out/stop_70_report.json
+            ${{ runner.temp }}/r383c/NightCityTransitCorporation-0.3.0-devkit-r383c-redscript-hotfix.zip
+            ${{ runner.temp }}/r383c/PACKAGE_SHA256.txt
+            ${{ runner.temp }}/r383c/GENERIC_BAY_ASSET_SHA256SUMS.txt
+            ${{ runner.temp }}/r383c/out/stop_20_report.json
+            ${{ runner.temp }}/r383c/out/stop_69_report.json
+            ${{ runner.temp }}/r383c/out/stop_70_report.json
           compression-level: 0
