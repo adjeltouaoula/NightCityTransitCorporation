@@ -1,21 +1,19 @@
 module NCTC
 
-// r383a: generic bay departure layer.
+// r383b: generic authored-bay controller.
 //
-// The validated H2 architecture is now the departure policy for every authored
-// two-point bay: wait for a safe roadside gap, hand the stopped Mahir to the
-// native AIVehicleJoinTrafficCommand, then immediately continue toward the next
-// NCTC route target once the vehicle is back in a traffic lane.
+// Architecture kept from the validated H2 prototype:
+// traffic AI -> generated native arrival spline -> stop/dwell -> native
+// AIVehicleJoinTrafficCommand -> immediate rolling continuation to next NCTC target.
 //
-// This file deliberately does NOT change bay arrival yet. H2 therefore keeps
-// the byte-identical r376a/r382h arrival spline while we isolate departure
-// generalisation from spline generation.
+// No custom departure spline is used. Arrival splines are generated from the
+// same H2 bay-local recipe and addressed uniformly by stop id.
 
 @wrapMethod(NCTCServiceBusController)
 public func Bind(bus: ref<VehicleObject>) -> Bool {
   let ok: Bool = wrappedMethod(bus);
   if ok && IsDefined(bus) {
-    GameInstance.GetQuestsSystem(bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38301);
+    GameInstance.GetQuestsSystem(bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38302);
   };
   return ok;
 }
@@ -61,6 +59,11 @@ public func DriveToTrafficAfterJoin(target: Vector4, minimumDistance: Float, sta
   );
   GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.030, false);
   return true;
+}
+
+@addMethod(NCTCTransitSystem)
+private func NCTCBayArrivalSplinePath() -> String {
+  return "$/nctc/bays/stop_" + ToString(this.requestedStopId) + "/arrival_spline";
 }
 
 // Determine which side of the authored bay contains the road from the surveyed
@@ -114,7 +117,7 @@ private func NCTCDepartureRoadsideBlocked() -> Bool {
   if IsDefined(quests) {
     quests.SetFact(n"nctc_dev_generic_bay_road_side", sideSign > 0.00 ? 1 : -1);
     quests.SetFact(n"nctc_dev_generic_bay_departure_blocked", blocked ? 1 : 0);
-    quests.SetFact(n"nctc_dev_generic_bay_guard_revision", 38301);
+    quests.SetFact(n"nctc_dev_generic_bay_guard_revision", 38302);
   };
   return blocked;
 }
@@ -127,6 +130,31 @@ public func UpdateRequestedService() -> Void {
   let inTrafficLane: Bool;
 
   quests = GameInstance.GetQuestsSystem(this.GetGameInstance());
+
+  // Generic replacement for the old stopId==70 arrival POC. Generated assets
+  // all share the same path convention and the same validated H2-local shape.
+  // The stock stage-10 completion handler remains in charge after this command
+  // is armed, so stop recognition/dwell behavior is unchanged.
+  if !this.followingPassage && this.HasServiceBay() && !this.bayParkingActive
+    && !this.bayParkingBypass && Equals(this.requestedStopId, this.serviceStopId)
+    && IsDefined(this.controller) && this.controller.IsReady() {
+    let entryLateral: Float;
+    let entryLongitudinal: Float = this.GetBayEntryProgress(entryLateral);
+    if entryLongitudinal > 0.50 && entryLongitudinal <= 24.00 && entryLateral <= 12.00 {
+      let entrySpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 6.00), 2.00);
+      let splinePath: String = this.NCTCBayArrivalSplinePath();
+      this.bayParkingActive = true;
+      this.bayParkingStage = 10;
+      this.bayParkingWasEntered = true;
+      this.bayParkingRetryCount = 0;
+      quests.SetFact(n"nctc_dev_generic_bay_arrival_stop_id", this.requestedStopId);
+      quests.SetFact(n"nctc_dev_generic_bay_arrival_revision", 38302);
+      this.driveCommandSent = this.controller.DriveOnBaySpline(splinePath, entrySpeed, true);
+      this.PublishLoopDiagnostic(this.driveCommandSent ? 92 : 33, this.requestedStopId);
+      this.ScheduleDispatch(0.10);
+      return;
+    };
+  };
 
   // Intercept the exact frame on which the stock loop would leave an authored
   // bay. Until dwell is complete, the original service loop remains fully in
