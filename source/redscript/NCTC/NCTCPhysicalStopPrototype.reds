@@ -4,13 +4,18 @@ module NCTC
 //
 // The important part of this experiment is not the final art asset: it proves
 // that the same external network used by NCTC map markers and service calls can
-// also drive a real world entity.  The prototype deliberately targets one
+// also drive a real world entity. The prototype deliberately targets one
 // authored roadside stop (line 17, stop id 22) and uses a vanilla data terminal
-// as a visible placeholder.  Once placement is validated in-game, the template
+// as a visible placeholder. Once placement is validated in-game, the template
 // can be replaced by the final NCTC stop entity without changing the data path.
-public abstract class NCTCPhysicalStopPrototype {
-  private static let PrototypeStopId: Int32 = 22;
-  private static let PrototypeTag: CName = n"NCTC.PhysicalStopPrototype";
+public class NCTCPhysicalStopPrototype {
+  private static func PrototypeStopId() -> Int32 {
+    return 22;
+  }
+
+  private static func PrototypeTag() -> CName {
+    return n"NCTC.PhysicalStopPrototype";
+  }
 
   private static func ReadStopPosition(game: GameInstance, stopId: Int32, out position: Vector4) -> Bool {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
@@ -47,17 +52,19 @@ public abstract class NCTCPhysicalStopPrototype {
     let position: Vector4;
     let spec: ref<DynamicEntitySpec>;
     let facing: Vector4;
+    let tag: CName = NCTCPhysicalStopPrototype.PrototypeTag();
 
     if !IsDefined(entities) || !entities.IsReady() {
       return false;
     };
 
-    // Re-attachments during the same play session must not duplicate the prop.
-    if ArraySize(entities.GetTaggedIDs(NCTCPhysicalStopPrototype.PrototypeTag)) > 0 {
+    // Player attachment can happen more than once in a session. Dynamic entity
+    // tags give us a stable group key and prevent duplicate props.
+    if entities.IsPopulated(tag) {
       return true;
     };
 
-    if !NCTCPhysicalStopPrototype.ReadStopPosition(game, NCTCPhysicalStopPrototype.PrototypeStopId, position) {
+    if !NCTCPhysicalStopPrototype.ReadStopPosition(game, NCTCPhysicalStopPrototype.PrototypeStopId(), position) {
       return false;
     };
 
@@ -66,7 +73,7 @@ public abstract class NCTCPhysicalStopPrototype {
     spec.position = position;
 
     // Stop 22's surveyed berth lies roughly east/north-east of the passenger
-    // stop point.  Face the temporary terminal toward the road for the first
+    // stop point. Face the temporary terminal toward the road for the first
     // visual test; final per-stop orientation will come from capture geometry.
     facing = new Vector4(5.830, 1.548, 0.000, 0.000);
     spec.orientation = EulerAngles.ToQuat(Vector4.ToRotation(facing));
@@ -76,7 +83,7 @@ public abstract class NCTCPhysicalStopPrototype {
     spec.alwaysSpawned = false;
     spec.spawnInView = true;
     spec.active = true;
-    spec.tags = [NCTCPhysicalStopPrototype.PrototypeTag];
+    spec.tags = [tag];
 
     entities.CreateEntity(spec);
     return true;
