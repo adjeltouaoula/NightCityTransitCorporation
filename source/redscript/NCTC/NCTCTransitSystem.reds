@@ -178,7 +178,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38001);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38002);
     return true;
   }
 
@@ -247,6 +247,58 @@ public class NCTCServiceBusController extends IScriptable {
     if !this.IsReady() { return 0.00; };
     player = GetPlayer(this.bus.GetGame());
     return IsDefined(player) ? Vector4.Distance(player.GetWorldPosition(), this.bus.GetWorldPosition()) : 0.00;
+  }
+
+  // r380b: local vanilla-style safety probe for spline motion. The vehicle's
+  // CrowdMember component owns the normal moving-path clearance test. A short
+  // Dynamic physics overlap supplements it for loose/physics objects that are
+  // not traffic members. This probe only covers the Mahir's immediate path.
+  public func IsBayPathClear() -> Bool {
+    let spatial: ref<SpatialQueriesSystem>;
+    let result: TraceResult;
+    let dimensions: Vector4;
+    let rotation: EulerAngles;
+    let forward: Vector4;
+    let center: Vector4;
+    let lookAhead: Float;
+    let dynamicDepth: Float;
+    let crowdClear: Bool = true;
+    let dynamicBlocked: Bool = false;
+    if !this.IsReady() { return true; };
+
+    lookAhead = ClampF(8.00 + AbsF(this.bus.GetCurrentSpeed()) * 1.10, 8.00, 18.00);
+    if IsDefined(this.bus.GetCrowdMemberComponent()) {
+      crowdClear = this.bus.GetCrowdMemberComponent().CheckEmptyPath(lookAhead);
+    };
+
+    spatial = GameInstance.GetSpatialQueriesSystem(this.bus.GetGame());
+    if IsDefined(spatial) {
+      forward = Vector4.Normalize2D(this.bus.GetWorldForward());
+      if AbsF(forward.X) > 0.01 || AbsF(forward.Y) > 0.01 {
+        // Begin beyond the bus pivot/body centre so the Mahir cannot detect
+        // itself. The box stays narrow and follows the current spline heading.
+        dynamicDepth = MaxF(lookAhead - 5.50, 3.00);
+        center = this.bus.GetWorldPosition() + forward * (5.50 + dynamicDepth * 0.50);
+        center.Z += 1.25;
+        dimensions = new Vector4(1.70, dynamicDepth * 0.50, 1.40, 0.00);
+        rotation = Quaternion.ToEulerAngles(Quaternion.BuildFromDirectionVector(forward));
+        dynamicBlocked = spatial.Overlap(dimensions, center, rotation, n"Dynamic", result);
+      };
+    };
+
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_bay_lookahead_mm", Cast<Int32>(lookAhead * 1000.00));
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_bay_crowd_clear", crowdClear ? 1 : 0);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_bay_dynamic_blocked", dynamicBlocked ? 1 : 0);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_bay_path_clear", crowdClear && !dynamicBlocked ? 1 : 0);
+    return crowdClear && !dynamicBlocked;
+  }
+
+  public func PauseBayMovementForObstacle() -> Void {
+    if !this.IsReady() { return; };
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleOnSplineCommand", false, true);
+    this.activeRouteCommand = null;
+    this.activeSplineCommand = null;
   }
 
   public func DriveToTraffic(target: Vector4, minimumDistance: Float) -> Bool {
@@ -358,6 +410,9 @@ public class NCTCServiceBusController extends IScriptable {
     this.previousRouteCommand = this.activeRouteCommand;
     this.activeRouteCommand = null;
     this.activeSplineCommand = null;
+    // End the rejoin command without resetting the driver lifecycle. The lane
+    // attachment is already established; only the command object is replaced.
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleJoinTrafficCommand", false, true);
     this.activeJoinTrafficCommand = null;
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_forced_start_speed_mm", Cast<Int32>(MaxF(startSpeed, 0.00) * 1000.00));
     callback = new NCTCDeferredDriveCommand();
@@ -1451,9 +1506,15 @@ public class NCTCTransitSystem extends ScriptableSystem {
         this.bayParkingActive = true;
         this.bayParkingRetryCount = 0;
         if Equals(this.requestedStopId, 70) {
-          this.bayParkingStage = 12;
-          this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/departure_spline", exitSpeed, false);
-          this.PublishLoopDiagnostic(this.driveCommandSent ? 72 : 33, this.requestedStopId);
+          if !this.controller.IsBayPathClear() {
+            this.bayParkingStage = 16;
+            this.driveCommandSent = true;
+            this.PublishLoopDiagnostic(83, this.requestedStopId);
+          } else {
+            this.bayParkingStage = 12;
+            this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/departure_spline", exitSpeed, false);
+            this.PublishLoopDiagnostic(this.driveCommandSent ? 72 : 33, this.requestedStopId);
+          };
           this.ScheduleDispatch(0.10);
           return;
         };
@@ -1587,17 +1648,33 @@ public class NCTCTransitSystem extends ScriptableSystem {
       if entryLongitudinal > 0.50 && entryLongitudinal <= 24.00 && entryLateral <= 12.00 {
         let entrySpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 6.00), 2.00);
         this.bayParkingActive = true;
-        this.bayParkingStage = 10;
         this.bayParkingWasEntered = true;
         this.bayParkingRetryCount = 0;
-        this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/arrival_spline", entrySpeed, true);
-        this.PublishLoopDiagnostic(this.driveCommandSent ? 68 : 33, this.requestedStopId);
+        if !this.controller.IsBayPathClear() {
+          this.controller.PauseBayMovementForObstacle();
+          this.bayParkingStage = 15;
+          this.driveCommandSent = true;
+          this.PublishLoopDiagnostic(80, this.requestedStopId);
+        } else {
+          this.bayParkingStage = 10;
+          this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/arrival_spline", entrySpeed, true);
+          this.PublishLoopDiagnostic(this.driveCommandSent ? 68 : 33, this.requestedStopId);
+        };
         this.ScheduleDispatch(0.10);
         return;
       };
     };
 
     if this.bayParkingActive && Equals(this.bayParkingStage, 10) {
+      if !this.controller.IsBayPathClear() {
+        this.controller.PauseBayMovementForObstacle();
+        this.bayParkingRetryCount = 0;
+        this.bayParkingStage = 15;
+        this.driveCommandSent = true;
+        this.PublishLoopDiagnostic(81, this.requestedStopId);
+        this.ScheduleDispatch(0.10);
+        return;
+      };
       if this.controller.IsSplineCommandSuccessful() {
         this.controller.ArriveAtStop();
         this.arrived = true;
@@ -1625,7 +1702,35 @@ public class NCTCTransitSystem extends ScriptableSystem {
       return;
     };
 
+    if this.bayParkingActive && Equals(this.bayParkingStage, 15) {
+      if this.controller.IsBayPathClear() {
+        this.bayParkingRetryCount += 1;
+      } else {
+        this.bayParkingRetryCount = 0;
+      };
+      if this.bayParkingRetryCount >= 2 {
+        let restartSpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 3.00), 1.25);
+        this.bayParkingRetryCount = 0;
+        this.bayParkingStage = 10;
+        this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/arrival_spline", restartSpeed, true);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 82 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.10);
+        return;
+      };
+      this.ScheduleDispatch(0.10);
+      return;
+    };
+
     if this.bayParkingActive && Equals(this.bayParkingStage, 12) {
+      if !this.controller.IsBayPathClear() {
+        this.controller.PauseBayMovementForObstacle();
+        this.bayParkingRetryCount = 0;
+        this.bayParkingStage = 16;
+        this.driveCommandSent = true;
+        this.PublishLoopDiagnostic(84, this.requestedStopId);
+        this.ScheduleDispatch(0.10);
+        return;
+      };
       if this.controller.IsSplineCommandSuccessful() {
         let rollingSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
         if !this.AdvanceToNextStop() {
@@ -1660,6 +1765,25 @@ public class NCTCTransitSystem extends ScriptableSystem {
       return;
     };
 
+    if this.bayParkingActive && Equals(this.bayParkingStage, 16) {
+      if this.controller.IsBayPathClear() {
+        this.bayParkingRetryCount += 1;
+      } else {
+        this.bayParkingRetryCount = 0;
+      };
+      if this.bayParkingRetryCount >= 2 {
+        let restartSpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 3.00), 1.25);
+        this.bayParkingRetryCount = 0;
+        this.bayParkingStage = 12;
+        this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/departure_spline", restartSpeed, false);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 85 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.10);
+        return;
+      };
+      this.ScheduleDispatch(0.10);
+      return;
+    };
+
     if this.bayParkingActive && Equals(this.bayParkingStage, 14) {
       let inTrafficLane: Bool = this.controller.IsInTrafficLane();
       this.legPolls += 1;
@@ -1670,7 +1794,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       } else {
         this.bayParkingRetryCount = 0;
       };
-      if this.controller.IsJoinTrafficCommandSuccessful() || this.bayParkingRetryCount >= 2 {
+      if inTrafficLane && (this.controller.IsJoinTrafficCommandSuccessful() || this.bayParkingRetryCount >= 2) {
         let rollingSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
         this.bayParkingActive = false;
         this.bayParkingStage = 0;
