@@ -1216,7 +1216,12 @@ local function log_service_loop(quests)
     [75] = "route loop: r376b H2 native departure spline FAILED",
     [76] = "route loop: r380a vanilla JoinTraffic active",
     [77] = "route loop: r380a traffic lane acquired -> normal route",
-    [78] = "route loop: r380a JoinTraffic fallback -> r376f route handoff"
+    [78] = "route loop: r380a JoinTraffic fallback -> r376f route handoff",
+    [79] = "route loop: r380b departure held by bay obstacle",
+    [80] = "route loop: r380b departure spline paused by bay obstacle",
+    [81] = "route loop: r380b departure path clear -> spline resumed",
+    [82] = "route loop: r380b arrival held/paused by bay obstacle",
+    [83] = "route loop: r380b arrival path clear -> spline resumed"
   }
   local command_extra = ""
   if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then
@@ -1253,6 +1258,13 @@ local function log_service_loop(quests)
       .. " generation=" .. tostring(fact(quests, "nctc_dev_drive_generation"))
       .. string.format(" aiTarget=(%.3f, %.3f, %.3f)", ai_target_x, ai_target_y, ai_target_z)
   end
+  if code == 79 or code == 80 or code == 81 or code == 82 or code == 83 then
+    command_extra = command_extra
+      .. " obstacle=" .. tostring(fact(quests, "nctc_dev_bay_obstacle_blocked"))
+      .. " vehicle=" .. tostring(fact(quests, "nctc_dev_bay_obstacle_vehicle"))
+      .. " dynamic=" .. tostring(fact(quests, "nctc_dev_bay_obstacle_dynamic"))
+      .. " clearPolls=" .. tostring(fact(quests, "nctc_dev_bay_obstacle_clear_polls"))
+  end
   if code == 74 or code == 76 or code == 77 or code == 78 then
     local join_states = { [0] = "missing", [1] = "active", [2] = "success", [3] = "failed/cancelled" }
     command_extra = command_extra
@@ -1272,7 +1284,7 @@ local function log_service_loop(quests)
       .. " departureSpeed=" .. string.format("%.2f", fact(quests, "nctc_dev_departure_speed_mm") / 1000.0)
   end
   if code == 29 or code == 30 or code == 36 or code == 43 or code == 47 or code == 48 or code == 49 or code == 50 or code == 51 or code == 52 or code == 53 or code == 54
-    or code == 60 or code == 61 or code == 62 or code == 63 or code == 64 or code == 65 or code == 66 or code == 67 or code == 68 or code == 69 or code == 70 or code == 71 or code == 72 or code == 73 or code == 74 or code == 75 or code == 76 or code == 77 or code == 78 then
+    or code == 60 or code == 61 or code == 62 or code == 63 or code == 64 or code == 65 or code == 66 or code == 67 or code == 68 or code == 69 or code == 70 or code == 71 or code == 72 or code == 73 or code == 74 or code == 75 or code == 76 or code == 77 or code == 78 or code == 79 or code == 80 or code == 81 or code == 82 or code == 83 then
     command_extra = command_extra
       .. " hasBay=" .. tostring(has_bay)
       .. " bayLen=" .. string.format("%.2fm", bay_length)
@@ -1366,7 +1378,9 @@ local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 38001 then
+  if revision == 38002 then
+    log("NCTC runtime build=38002 r380b vanilla join + bay Vehicle/Dynamic obstacle guard")
+  elseif revision == 38001 then
     log("NCTC runtime build=38001 r380a exact vanilla JoinTraffic rejoin")
   elseif revision == 37606 then
     log("NCTC runtime build=37606 r376f H2 final nose clearance")
