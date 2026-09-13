@@ -27,7 +27,8 @@ jobs:
             "$PKG/r6/scripts/NCTC" \
             "$PKG/r6/tweaks/NCTC" \
             "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" \
-            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_physical_stop"
 
           cp source/archive/pc/mod/NCTCTrafficRuntime.archive "$PKG/archive/pc/mod/"
           cp source/archive/pc/mod/NCTCDisplayPrototype.archive "$PKG/archive/pc/mod/"
@@ -36,16 +37,22 @@ jobs:
           cp source/cet/nctc_passenger/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
           cp source/cet/nctc_survey/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
 
-          # The user's existing nctc_survey CET module is already known to load
-          # correctly. Append the physical-stop diagnostic directly to that
-          # module instead of relying on a second standalone CET mod folder.
+          # The existing nctc_survey module is already proven on the target
+          # installation. Append the diagnostic directly to its Lua chunk.
           printf '\n\n' >> "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/init.lua"
           cat source/cet/nctc_physical_stop/init.lua >> "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/init.lua"
+
+          # V2/V3 installed a separate nctc_physical_stop module. A normal ZIP
+          # overlay cannot delete it, so overwrite its old init.lua with a safe
+          # no-op to prevent stale prototype code from surviving this build.
+          printf '%s\n' '-- NCTC compatibility placeholder; physical-stop diagnostic now lives in nctc_survey.' \
+            > "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_physical_stop/init.lua"
 
           cp README.md THIRD_PARTY_NOTICES.md "$PKG/"
 
           test ! -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
           grep -q "nctc_physical_stop_test" "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/init.lua"
+          grep -q "compatibility placeholder" "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_physical_stop/init.lua"
           test -e "$PKG/r6/scripts/NCTC/NCTCPhysicalStopPrototype.reds"
 
           (cd "$PKG" && zip -qr "$WORK/NightCityTransitCorporation-0.3.0-devkit-physical-stop-prototype-cet.zip" .)
