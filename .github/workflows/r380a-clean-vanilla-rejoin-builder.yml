@@ -21,6 +21,6 @@ jobs:
         with:
           name: nctc-r380a-clean-vanilla-rejoin
           path: |
-            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r380a-clean-vanilla-rejoin-development.zip
-            ${{ runner.temp }}/SHA256.txt
-            ${{ runner.temp }}/METADATA.txt
+            /tmp/NightCityTransitCorporation-0.3.0-devkit-r380a-clean-vanilla-rejoin-development.zip
+            /tmp/SHA256.txt
+            /tmp/METADATA.txt
