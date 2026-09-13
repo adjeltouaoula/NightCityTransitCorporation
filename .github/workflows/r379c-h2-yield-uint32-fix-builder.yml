@@ -1,0 +1,114 @@
+name: r379c H2 yield uint32 fix builder
+
+on:
+  push:
+    branches:
+      - automation/r379c-h2-yield-uint32-fix-builder
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build clean r379c from r376f plus corrected r379b patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA="411eadf5628fcbc4199feaa63fd0deaa122faf51"
+          SOURCE_BRANCH="experiment/r379b-h2-yield-vanilla-query"
+          CLEAN_BRANCH="experiment/r379c-h2-yield-uint32-fix"
+          CLEAN="$RUNNER_TEMP/r379c-clean"
+          rm -rf "$CLEAN"
+          git fetch origin "$SOURCE_BRANCH" "$CLEAN_BRANCH"
+          git worktree prune
+          git worktree add -B "$CLEAN_BRANCH" "$CLEAN" "origin/$CLEAN_BRANCH"
+          test "$(git -C "$CLEAN" rev-parse HEAD)" = "$BASE_SHA"
+
+          ARRIVAL_BEFORE="$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Spline.archive)"
+          DEPARTURE_BEFORE="$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Departure.archive)"
+          DISPLAY_BEFORE="$(sha256sum "$CLEAN/source/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')"
+
+          git show "origin/$SOURCE_BRANCH:source/redscript/NCTC/NCTCTransitSystem.reds" > "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+          git show "origin/$SOURCE_BRANCH:source/cet/nctc_survey/init.lua" > "$CLEAN/source/cet/nctc_survey/init.lua"
+
+          python3 - "$CLEAN" <<'PY'
+          from pathlib import Path
+          import sys
+          root = Path(sys.argv[1])
+
+          transit = root / 'source/redscript/NCTC/NCTCTransitSystem.reds'
+          s = transit.read_text()
+          old = 'GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37902);'
+          new = 'GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37903);'
+          if s.count(old) != 1: raise SystemExit('runtime revision match failed')
+          s = s.replace(old, new, 1)
+          old_call = 'MaxF(corridorWidth * 0.50, 1.00), 32, trafficEntities));'
+          new_call = 'MaxF(corridorWidth * 0.50, 1.00), Cast<Uint32>(32), trafficEntities));'
+          if s.count(old_call) != 1: raise SystemExit('FindEntitiesNearPlane Uint32 match failed')
+          s = s.replace(old_call, new_call, 1)
+          s = s.replace('// r379b: use the same native TrafficSystem primitive used by vanilla scripts.', '// r379c: same vanilla TrafficSystem primitive; maxEntityCount is explicitly Uint32.', 1)
+          transit.write_text(s)
+
+          cet = root / 'source/cet/nctc_survey/init.lua'
+          c = cet.read_text()
+          old = 'if revision == 37902 then\n    log("NCTC runtime build=37902 r379b H2 yield vanilla query")'
+          new = 'if revision == 37903 then\n    log("NCTC runtime build=37903 r379c H2 yield Uint32 fix")'
+          if c.count(old) != 1: raise SystemExit('CET runtime match failed')
+          c = c.replace(old, new, 1)
+          cet.write_text(c)
+          PY
+
+          grep -Fq 'Cast<Uint32>(32), trafficEntities' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+          grep -Fq 'nctc_dev_build_revision", 37903' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
+          test "$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Spline.archive)" = "$ARRIVAL_BEFORE"
+          test "$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Departure.archive)" = "$DEPARTURE_BEFORE"
+          test "$(sha256sum "$CLEAN/source/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')" = "$DISPLAY_BEFORE"
+
+          mapfile -t CHANGED < <(git -C "$CLEAN" diff --name-only)
+          test "${#CHANGED[@]}" -eq 2
+          printf '%s\n' "${CHANGED[@]}" | grep -Fxq 'source/redscript/NCTC/NCTCTransitSystem.reds'
+          printf '%s\n' "${CHANGED[@]}" | grep -Fxq 'source/cet/nctc_survey/init.lua'
+
+          git -C "$CLEAN" config user.name "github-actions[bot]"
+          git -C "$CLEAN" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$CLEAN" add source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_survey/init.lua
+          git -C "$CLEAN" commit -m "fix: r379c use Uint32 traffic query count"
+          CLEAN_SHA="$(git -C "$CLEAN" rev-parse HEAD)"
+          git -C "$CLEAN" push origin "HEAD:refs/heads/$CLEAN_BRANCH"
+          test "$(git -C "$CLEAN" rev-list --count "$BASE_SHA..$CLEAN_SHA")" -eq 1
+
+          ROOT="$RUNNER_TEMP/nctc-r379c"
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/archive/pc/mod" "$ROOT/r6/scripts/NCTC" "$ROOT/r6/tweaks/NCTC"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+          mkdir -p "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger"
+          cp "$CLEAN"/source/archive/pc/mod/*.archive "$ROOT/archive/pc/mod/"
+          cp "$CLEAN"/source/archive/pc/mod/*.archive.xl "$ROOT/archive/pc/mod/"
+          cp "$CLEAN"/source/redscript/NCTC/*.reds "$ROOT/r6/scripts/NCTC/"
+          cp "$CLEAN"/source/tweaks/NCTC/* "$ROOT/r6/tweaks/NCTC/"
+          cp "$CLEAN/source/cet/nctc_survey/init.lua" "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp "$CLEAN/source/cet/nctc_survey/nctc_network.default.json" "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp "$CLEAN/source/cet/nctc_survey/nctc_survey_settings.json" "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          cp "$CLEAN"/source/cet/nctc_passenger/* "$ROOT/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp "$CLEAN/README.md" "$CLEAN/THIRD_PARTY_NOTICES.md" "$ROOT/"
+
+          ZIP="$RUNNER_TEMP/NightCityTransitCorporation-0.3.0-devkit-r379c-h2-yield-uint32-fix-development.zip"
+          (cd "$ROOT" && zip -qr "$ZIP" .)
+          unzip -t "$ZIP" >/dev/null
+          sha256sum "$ZIP" | tee "$RUNNER_TEMP/SHA256.txt"
+          printf 'CLEAN_SHA=%s\nARRIVAL_BLOB=%s\nDEPARTURE_BLOB=%s\nDISPLAY_SHA=%s\n' \
+            "$CLEAN_SHA" "$ARRIVAL_BEFORE" "$DEPARTURE_BEFORE" "$DISPLAY_BEFORE" > "$RUNNER_TEMP/METADATA.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r379c-h2-yield-uint32-fix
+          path: |
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r379c-h2-yield-uint32-fix-development.zip
+            ${{ runner.temp }}/SHA256.txt
+            ${{ runner.temp }}/METADATA.txt
