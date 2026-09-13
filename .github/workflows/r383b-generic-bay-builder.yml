@@ -1,0 +1,160 @@
+name: r383b generic bay arrival builder
+
+on:
+  push:
+    branches:
+      - experiment/r383b-generic-bay-arrival
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install WolvenKit CLI 9.0.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r383b"
+          mkdir -p "$WORK/tools"
+          dotnet tool install WolvenKit.CLI --version 9.0.1 --tool-path "$WORK/tools"
+
+      - name: Generate generic bay arrival assets from validated H2 template
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r383b"
+          TOOL="$WORK/tools/cp77tools"
+          RAW="$WORK/unpacked"
+          TEMPLATE="$WORK/template-json"
+          GENERATED="$WORK/generated"
+          OUT="$WORK/out"
+          mkdir -p "$RAW" "$TEMPLATE" "$GENERATED" "$OUT"
+
+          # r376a/r382h arrival asset is the immutable geometry template.
+          test "$(git hash-object source/archive/pc/mod/NCTCH2Spline.archive)" = "ff0be26fb781cf5f2aaf9dd75ce5b668f777a0f6"
+          test "$(git hash-object source/archive/pc/mod/NCTCH2Spline.archive.xl)" = "6e934a5637bfe3300832eea2fef179386576c5e1"
+
+          "$TOOL" unbundle source/archive/pc/mod/NCTCH2Spline.archive -o "$RAW"
+          SECTOR="$(find "$RAW" -type f -name 'h2_arrival.streamingsector' | head -n1)"
+          BLOCK="$(find "$RAW" -type f -name 'all.streamingblock' | head -n1)"
+          test -n "$SECTOR"
+          test -n "$BLOCK"
+
+          "$TOOL" convert serialize "$SECTOR" -o "$TEMPLATE"
+          "$TOOL" convert serialize "$BLOCK" -o "$TEMPLATE"
+          SECTOR_JSON="$(find "$TEMPLATE" -type f -name 'h2_arrival.streamingsector.json' | head -n1)"
+          BLOCK_JSON="$(find "$TEMPLATE" -type f -name 'all.streamingblock.json' | head -n1)"
+          test -n "$SECTOR_JSON"
+          test -n "$BLOCK_JSON"
+
+          python3 tools/bays/generate_arrival_splines.py \
+            --sector-template "$SECTOR_JSON" \
+            --block-template "$BLOCK_JSON" \
+            --manifest tools/bays/r383b_test_bays.json \
+            --out "$GENERATED"
+
+          # The generated stop-70 curve must reproduce the validated H2 local
+          # geometry, not merely look similar. One millimetre tolerance covers
+          # the rounded survey coordinates in the sanitized manifest.
+          ORIGINAL="$SECTOR_JSON" GENERATED_H2="$GENERATED/stop_70/h2_arrival.streamingsector.json" python3 - <<'PY'
+          import json, math, os
+          def find_spline(x):
+              if isinstance(x, dict):
+                  if x.get('$type') == 'Spline' and isinstance(x.get('points'), list): return x
+                  for v in x.values():
+                      f=find_spline(v)
+                      if f is not None: return f
+              elif isinstance(x, list):
+                  for v in x:
+                      f=find_spline(v)
+                      if f is not None: return f
+          a=find_spline(json.load(open(os.environ['ORIGINAL'], encoding='utf-8')))['points']
+          b=find_spline(json.load(open(os.environ['GENERATED_H2'], encoding='utf-8')))['points']
+          worst=0.0
+          for pa,pb in zip(a,b):
+              aa=pa['position']; bb=pb['position']
+              d=math.hypot(float(aa['X'])-float(bb['X']), float(aa['Y'])-float(bb['Y']))
+              worst=max(worst,d)
+          print(f'H2 generic reproduction max XY delta = {worst:.6f} m')
+          if worst > 0.001:
+              raise SystemExit('generic spline recipe no longer reproduces validated H2')
+          PY
+
+          for STOP in 20 69 70; do
+            D="$GENERATED/stop_${STOP}"
+            "$TOOL" convert deserialize "$D/h2_arrival.streamingsector.json"
+            "$TOOL" convert deserialize "$D/all.streamingblock.json"
+            test -s "$D/h2_arrival.streamingsector"
+            test -s "$D/all.streamingblock"
+
+            PACKROOT="$WORK/NCTCBay${STOP}Spline"
+            mkdir -p "$PACKROOT/nctc/bays/stop_${STOP}/sectors"
+            cp "$D/h2_arrival.streamingsector" "$PACKROOT/nctc/bays/stop_${STOP}/sectors/h2_arrival.streamingsector"
+            cp "$D/all.streamingblock" "$PACKROOT/nctc/bays/stop_${STOP}/all.streamingblock"
+            "$TOOL" pack "$PACKROOT" -o "$OUT"
+            test -s "$OUT/NCTCBay${STOP}Spline.archive"
+            cat > "$OUT/NCTCBay${STOP}Spline.archive.xl" <<EOF
+          streaming:
+            blocks:
+              - nctc\\bays\\stop_${STOP}\\all.streamingblock
+          EOF
+          done
+
+          cp "$GENERATED/stop_20/report.json" "$OUT/stop_20_report.json"
+          cp "$GENERATED/stop_69/report.json" "$OUT/stop_69_report.json"
+          cp "$GENERATED/stop_70/report.json" "$OUT/stop_70_report.json"
+          sha256sum "$OUT"/*.archive "$OUT"/*.archive.xl | tee "$OUT/SHA256SUMS.txt"
+
+      - name: Assemble r383b devkit package
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r383b"
+          OUT="$WORK/out"
+          PKG="$WORK/package"
+          mkdir -p \
+            "$PKG/archive/pc/mod" \
+            "$PKG/r6/scripts/NCTC" \
+            "$PKG/r6/tweaks/NCTC" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+
+          cp source/archive/pc/mod/* "$PKG/archive/pc/mod/"
+          cp "$OUT"/*.archive "$PKG/archive/pc/mod/"
+          cp "$OUT"/*.archive.xl "$PKG/archive/pc/mod/"
+          cp source/redscript/NCTC/*.reds "$PKG/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$PKG/r6/tweaks/NCTC/"
+          cp source/cet/nctc_passenger/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp source/cet/nctc_survey/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+
+          # Never ship a player's persistent network. Only the repository's
+          # nctc_network.default.json is present in this package.
+          test ! -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+
+          cp "$OUT/SHA256SUMS.txt" "$WORK/GENERIC_BAY_ASSET_SHA256SUMS.txt"
+          (cd "$PKG" && zip -qr "$WORK/NightCityTransitCorporation-0.3.0-devkit-r383b-generic-bay-arrival.zip" .)
+          unzip -t "$WORK/NightCityTransitCorporation-0.3.0-devkit-r383b-generic-bay-arrival.zip"
+          sha256sum "$WORK/NightCityTransitCorporation-0.3.0-devkit-r383b-generic-bay-arrival.zip" | tee "$WORK/PACKAGE_SHA256.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r383b-generic-bay-arrival-package
+          path: |
+            ${{ runner.temp }}/r383b/NightCityTransitCorporation-0.3.0-devkit-r383b-generic-bay-arrival.zip
+            ${{ runner.temp }}/r383b/PACKAGE_SHA256.txt
+            ${{ runner.temp }}/r383b/GENERIC_BAY_ASSET_SHA256SUMS.txt
+            ${{ runner.temp }}/r383b/out/stop_20_report.json
+            ${{ runner.temp }}/r383b/out/stop_69_report.json
+            ${{ runner.temp }}/r383b/out/stop_70_report.json
+          compression-level: 0
