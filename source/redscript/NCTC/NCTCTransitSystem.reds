@@ -179,7 +179,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38101);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38102);
     return true;
   }
 
@@ -1027,6 +1027,46 @@ public class NCTCTransitSystem extends ScriptableSystem {
     return this.GetBayExitPoint() + forward * lead + right * this.bayParkingRoadLateral;
   }
 
+  // r381b: short vehicle-only merge-gap probe around the lane(s) immediately
+  // beside the stopped Mahir. Boxes are offset laterally so the service bus
+  // cannot detect itself. This gate only decides when JoinTraffic may START;
+  // it never changes the validated r381a trajectory.
+  private func IsDepartureMergeVehicleBlocked() -> Bool {
+    let spatial: ref<SpatialQueriesSystem>;
+    let leftResult: TraceResult;
+    let rightResult: TraceResult;
+    let dimensions: Vector4;
+    let rotation: EulerAngles;
+    let forward: Vector4;
+    let right: Vector4;
+    let center: Vector4;
+    let sideOffset: Float;
+    let leftBlocked: Bool;
+    let rightBlocked: Bool;
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    if !IsDefined(this.controller) { return false; };
+    spatial = GameInstance.GetSpatialQueriesSystem(this.GetGameInstance());
+    if !IsDefined(spatial) { return false; };
+    forward = this.GetBayForward();
+    if AbsF(forward.X) <= 0.01 && AbsF(forward.Y) <= 0.01 { return false; };
+    right = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
+    sideOffset = MaxF(this.GetBayWidth() * 0.50 + 2.25, 3.60);
+    // Half extents: ~3.0 m lane width x 20 m longitudinal gap.
+    // Center 2 m behind the bus: covers roughly 12 m behind / 8 m ahead.
+    dimensions = new Vector4(1.50, 10.00, 1.75, 0.00);
+    center = this.controller.GetWorldPosition() - forward * 2.00;
+    center.Z += 1.25;
+    rotation = Quaternion.ToEulerAngles(Quaternion.BuildFromDirectionVector(forward));
+    leftBlocked = spatial.Overlap(dimensions, center - right * sideOffset, rotation, n"Vehicle", leftResult);
+    rightBlocked = spatial.Overlap(dimensions, center + right * sideOffset, rotation, n"Vehicle", rightResult);
+    if IsDefined(quests) {
+      quests.SetFact(n"nctc_dev_merge_left_vehicle", leftBlocked ? 1 : 0);
+      quests.SetFact(n"nctc_dev_merge_right_vehicle", rightBlocked ? 1 : 0);
+      quests.SetFact(n"nctc_dev_merge_vehicle_blocked", leftBlocked || rightBlocked ? 1 : 0);
+    };
+    return leftBlocked || rightBlocked;
+  }
+
   // Native physics overlap is authoritative for bay occupancy. TargetingSystem
   // does not reliably enumerate parked traffic vehicles.
   private func IsBayOccupiedByVehicle() -> Bool {
@@ -1461,6 +1501,13 @@ public class NCTCTransitSystem extends ScriptableSystem {
         this.bayParkingActive = true;
         this.bayParkingRetryCount = 0;
         if Equals(this.requestedStopId, 70) {
+          if this.IsDepartureMergeVehicleBlocked() {
+            this.bayParkingStage = 15;
+            this.driveCommandSent = true;
+            this.PublishLoopDiagnostic(88, this.requestedStopId);
+            this.ScheduleDispatch(0.10);
+            return;
+          };
           this.bayParkingStage = 14;
           quests.SetFact(n"nctc_dev_join_pre_speed_mm", Cast<Int32>(AbsF(this.controller.GetCurrentSpeed()) * 1000.00));
           this.driveCommandSent = this.controller.JoinTrafficDirectFromBerth();
@@ -1661,6 +1708,31 @@ public class NCTCTransitSystem extends ScriptableSystem {
         return;
       };
       this.ScheduleDispatch(0.10);
+      return;
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 15) {
+      if this.IsDepartureMergeVehicleBlocked() {
+        this.bayParkingRetryCount = 0;
+        quests.SetFact(n"nctc_dev_merge_clear_polls", 0);
+        this.PublishLoopDiagnostic(88, this.requestedStopId);
+        this.ScheduleDispatch(0.10);
+        return;
+      };
+      this.bayParkingRetryCount += 1;
+      quests.SetFact(n"nctc_dev_merge_clear_polls", this.bayParkingRetryCount);
+      if this.bayParkingRetryCount < 3 {
+        this.ScheduleDispatch(0.10);
+        return;
+      };
+      this.bayParkingRetryCount = 0;
+      this.bayParkingStage = 14;
+      quests.SetFact(n"nctc_dev_join_pre_speed_mm", Cast<Int32>(AbsF(this.controller.GetCurrentSpeed()) * 1000.00));
+      this.driveCommandSent = this.controller.JoinTrafficDirectFromBerth();
+      quests.SetFact(n"nctc_dev_join_traffic_state", this.controller.GetJoinTrafficCommandStatusCode());
+      quests.SetFact(n"nctc_dev_bus_in_traffic_lane", this.controller.IsInTrafficLane() ? 1 : 0);
+      this.PublishLoopDiagnostic(this.driveCommandSent ? 89 : 33, this.requestedStopId);
+      this.ScheduleDispatch(0.05);
       return;
     };
 
