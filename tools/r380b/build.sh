@@ -15,6 +15,20 @@ ARRIVAL_BEFORE="$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Spline
 DEPARTURE_BEFORE="$(git -C "$CLEAN" hash-object source/archive/pc/mod/NCTCH2Departure.archive)"
 DISPLAY_BEFORE="$(sha256sum "$CLEAN/source/archive/pc/mod/NCTCDisplayPrototype.archive" | awk '{print $1}')"
 
+# Make the stage-10 insertion anchor unique: stage 10 also appears in the
+# telemetry branch, but only the real state handler is immediately followed by
+# IsSplineCommandSuccessful().
+python3 - <<'PY'
+from pathlib import Path
+p = Path("tools/r380b/patch.py")
+s = p.read_text()
+old = "anchor = '''    if this.bayParkingActive && Equals(this.bayParkingStage, 10) {'''"
+new = "anchor = '''    if this.bayParkingActive && Equals(this.bayParkingStage, 10) {\n      if this.controller.IsSplineCommandSuccessful() {'''"
+if s.count(old) != 1:
+    raise SystemExit(f"builder patch anchor edit failed: {s.count(old)}")
+p.write_text(s.replace(old, new, 1))
+PY
+
 python3 tools/r380b/patch.py "$CLEAN"
 
 grep -Fq 'nctc_dev_build_revision", 38002' "$CLEAN/source/redscript/NCTC/NCTCTransitSystem.reds"
