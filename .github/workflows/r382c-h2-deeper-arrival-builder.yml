@@ -1,0 +1,168 @@
+name: r382c H2 deeper arrival spline builder
+
+on:
+  push:
+    branches:
+      - automation/r382c-h2-deeper-arrival-builder
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install WolvenKit CLI 9.0.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r382c"
+          mkdir -p "$WORK/tools"
+          dotnet tool install WolvenKit.CLI --version 9.0.1 --tool-path "$WORK/tools"
+
+      - name: Extend only the validated H2 arrival spline endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r382c"
+          TOOL="$WORK/tools/cp77tools"
+          RAW="$WORK/unpacked"
+          JSONOUT="$WORK/json"
+          PACKROOT="$WORK/NCTCH2Spline"
+          OUT="$WORK/out"
+          mkdir -p "$RAW" "$JSONOUT" "$PACKROOT" "$OUT"
+
+          test "$(git hash-object source/archive/pc/mod/NCTCH2Spline.archive)" = "ff0be26fb781cf5f2aaf9dd75ce5b668f777a0f6"
+          test "$(git hash-object source/archive/pc/mod/NCTCH2Spline.archive.xl)" = "6e934a5637bfe3300832eea2fef179386576c5e1"
+
+          "$TOOL" unbundle source/archive/pc/mod/NCTCH2Spline.archive -o "$RAW"
+          SECTOR="$(find "$RAW" -type f -name 'h2_arrival.streamingsector' | head -n1)"
+          BLOCK="$(find "$RAW" -type f -name 'all.streamingblock' | head -n1)"
+          test -n "$SECTOR"
+          test -n "$BLOCK"
+
+          "$TOOL" convert serialize "$SECTOR" -o "$JSONOUT"
+          JSON="$(find "$JSONOUT" -type f -name 'h2_arrival.streamingsector.json' | head -n1)"
+          test -n "$JSON"
+
+          JSON="$JSON" python3 - <<'PY'
+          import copy, json, math, os
+          from pathlib import Path
+
+          path = Path(os.environ['JSON'])
+          data = json.loads(path.read_text(encoding='utf-8'))
+
+          def find_spline(obj):
+              if isinstance(obj, dict):
+                  if obj.get('$type') == 'Spline' and isinstance(obj.get('points'), list):
+                      return obj
+                  for value in obj.values():
+                      found = find_spline(value)
+                      if found is not None:
+                          return found
+              elif isinstance(obj, list):
+                  for value in obj:
+                      found = find_spline(value)
+                      if found is not None:
+                          return found
+              return None
+
+          spline = find_spline(data)
+          if spline is None:
+              raise SystemExit('Spline object not found in validated arrival sector JSON')
+          points = spline['points']
+          if len(points) < 3:
+              raise SystemExit(f'Unexpected spline point count: {len(points)}')
+
+          def pos(point):
+              p = point['position']
+              return [float(p['X']), float(p['Y']), float(p['Z'])]
+
+          def set_pos(point, xyz):
+              p = point['position']
+              p['X'], p['Y'], p['Z'] = xyz
+
+          def set_vec(vec, xyz):
+              vec['X'], vec['Y'], vec['Z'] = xyz
+
+          old_positions = [pos(p) for p in points]
+          old_last = old_positions[-1]
+
+          # H2 surveyed bay P1 -> P2. The node transform uses the same world axes,
+          # so this direction is valid in the spline's local coordinate frame.
+          dx, dy = -1.245, -31.190
+          length = math.hypot(dx, dy)
+          fx, fy = dx / length, dy / length
+
+          # r382c: add 3.50 m of straight settling distance deeper into the bay.
+          # Only the final endpoint moves; all validated earlier control points stay put.
+          extension = 3.50
+          new_last = [old_last[0] + fx * extension,
+                      old_last[1] + fy * extension,
+                      old_last[2]]
+          set_pos(points[-1], new_last)
+
+          # If the validated resource carries explicit Hermite tangents, refresh
+          # only the final two points using the same tangent rule that generated
+          # the original r376a curve. Earlier geometry is byte-for-byte semantic
+          # equivalent and remains untouched.
+          def tangent_elements(point):
+              t = point.get('tangents')
+              if isinstance(t, dict):
+                  e = t.get('Elements')
+                  if isinstance(e, list) and len(e) >= 2:
+                      return e
+              return None
+
+          prev_t = tangent_elements(points[-2])
+          last_t = tangent_elements(points[-1])
+          if prev_t is not None and last_t is not None:
+              p_before = old_positions[-3]
+              p_prev = old_positions[-2]
+              v_prev = [(new_last[i] - p_before[i]) / 6.0 for i in range(3)]
+              v_last = [(new_last[i] - p_prev[i]) / 3.0 for i in range(3)]
+              set_vec(prev_t[0], [-x for x in v_prev])
+              set_vec(prev_t[1], v_prev)
+              set_vec(last_t[0], [-x for x in v_last])
+              set_vec(last_t[1], v_last)
+
+          path.write_text(json.dumps(data, indent=2), encoding='utf-8', newline='\n')
+          report = Path(path.parent.parent / 'POINTS.txt')
+          with report.open('w', encoding='utf-8') as f:
+              f.write(f'point_count={len(points)}\n')
+              for i, p in enumerate(old_positions):
+                  f.write(f'old[{i}]={p[0]:.6f},{p[1]:.6f},{p[2]:.6f}\n')
+              f.write(f'new_last={new_last[0]:.6f},{new_last[1]:.6f},{new_last[2]:.6f}\n')
+              f.write(f'extension_m={extension:.2f}\n')
+          print(report.read_text())
+          PY
+
+          "$TOOL" convert deserialize "$JSON"
+          MOD_SECTOR="${JSON%.json}"
+          test -s "$MOD_SECTOR"
+
+          mkdir -p "$PACKROOT/nctc/bays/h2/sectors"
+          cp "$MOD_SECTOR" "$PACKROOT/nctc/bays/h2/sectors/h2_arrival.streamingsector"
+          cp "$BLOCK" "$PACKROOT/nctc/bays/h2/all.streamingblock"
+          "$TOOL" pack "$PACKROOT" -o "$OUT"
+          test -s "$OUT/NCTCH2Spline.archive"
+
+          cp source/archive/pc/mod/NCTCH2Spline.archive.xl "$OUT/NCTCH2Spline.archive.xl"
+          cp "$WORK/POINTS.txt" "$OUT/POINTS.txt"
+          cp "$JSON" "$OUT/h2_arrival.streamingsector.json"
+          sha256sum source/archive/pc/mod/NCTCH2Spline.archive "$OUT/NCTCH2Spline.archive" "$OUT/NCTCH2Spline.archive.xl" | tee "$OUT/SHA256SUMS.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r382c-h2-deeper-arrival-spline
+          path: |
+            ${{ runner.temp }}/r382c/out/NCTCH2Spline.archive
+            ${{ runner.temp }}/r382c/out/NCTCH2Spline.archive.xl
+            ${{ runner.temp }}/r382c/out/POINTS.txt
+            ${{ runner.temp }}/r382c/out/SHA256SUMS.txt
+            ${{ runner.temp }}/r382c/out/h2_arrival.streamingsector.json
+          compression-level: 0
