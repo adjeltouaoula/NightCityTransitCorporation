@@ -1,0 +1,28 @@
+name: r380b bay obstacle guard builder
+
+on:
+  push:
+    branches:
+      - automation/r380b-bay-obstacle-guard-builder
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build r380b
+        shell: bash
+        run: bash tools/r380b/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r380b-bay-obstacle-guard
+          path: |
+            ${{ runner.temp }}/NightCityTransitCorporation-0.3.0-devkit-r380b-bay-obstacle-guard-development.zip
+            ${{ runner.temp }}/r380b.sha256
+            ${{ runner.temp }}/r380b-metadata.txt
+          compression-level: 0
