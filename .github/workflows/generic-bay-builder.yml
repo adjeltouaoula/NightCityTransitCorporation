@@ -175,8 +175,7 @@ jobs:
             "$PKG/r6/scripts/NCTC" \
             "$PKG/r6/tweaks/NCTC" \
             "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" \
-            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey" \
-            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_pocket_guide"
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
 
           cp source/archive/pc/mod/* "$PKG/archive/pc/mod/"
           cp "$OUT"/*.archive "$PKG/archive/pc/mod/"
@@ -185,9 +184,8 @@ jobs:
           cp source/tweaks/NCTC/* "$PKG/r6/tweaks/NCTC/"
           cp source/cet/nctc_passenger/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
           cp source/cet/nctc_survey/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
-          cp source/cet/nctc_pocket_guide/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_pocket_guide/"
 
-          test -f "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_pocket_guide/init.lua"
+          test ! -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_pocket_guide"
           test ! -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
           test ! -e "$PKG/archive/pc/mod/NCTCH2Spline.archive"
           test ! -e "$PKG/archive/pc/mod/NCTCH2Departure.archive"
