@@ -402,29 +402,22 @@ registerForEvent("onInit", function()
     end)
     Override("InteractionUIBase", "OnDialogsSelectIndex", function(_, index, wrapped)
         if NCBN.hubChoiceVisible then return wrapped(NCBN.selectedHubLine) end
-        if NCBN.choiceVisible then return wrapped(NCBN.selectedSeat) end
-        wrapped(index)
+        wrapped(NCBN.choiceVisible and NCBN.selectedSeat or index)
     end)
     Override("dialogWidgetGameController", "OnDialogsActivateHub", function(_, id, wrapped)
         if NCBN.hubChoiceVisible and NCBN.hubChoiceHub then return wrapped(NCBN.hubChoiceHub.id) end
-        if NCBN.choiceVisible and NCBN.choiceHub then return wrapped(NCBN.choiceHub.id) end
-        return wrapped(id)
+        return wrapped(NCBN.choiceVisible and NCBN.choiceHub and NCBN.choiceHub.id or id)
     end)
     Observe("PlayerPuppet", "OnAction", function(_, action, consumer)
-        local actionType = action:GetType(action).value
+        if action:GetName(action).value ~= "NCTC_RequestNextStop" then return end
+        if action:GetType(action).value ~= "BUTTON_PRESSED" or action:GetValue(action) <= 0 then return end
+        if getFact("nctc_player_in_service_bus") ~= 1 then return end
+        consumer:Consume()
+        if requestNextStop() then hideStopRequestHint() end
+    end)
+    Observe("PlayerPuppet", "OnAction", function(_, action, consumer)
+        if NCBN.inputLocked or action:GetType(action).value ~= "BUTTON_PRESSED" or action:GetValue(action) <= 0 then return end
         local name = action:GetName(action).value
-        -- Native Input Loader action. Priority -99 makes it reach NCTC before
-        -- the vanilla D-pad-down phone/notification mappings. Consuming the
-        -- physical input here keeps those vanilla actions untouched outside
-        -- the NCTC cabin but prevents the same press leaking through inside.
-        if name == "NCTC_RequestNextStop" and actionType == "BUTTON_PRESSED" and action:GetValue(action) > 0
-            and getFact("nctc_player_in_service_bus") == 1 then
-            NCBN.inputLocked = true
-            consumer:Consume()
-            if requestNextStop() then hideStopRequestHint() end
-            return
-        end
-        if NCBN.inputLocked or actionType ~= "BUTTON_PRESSED" or action:GetValue(action) <= 0 then return end
         if NCBN.hubChoiceVisible and name == "ChoiceApply" then
             NCBN.inputLocked = true; consumer:Consume()
             requestHubService(NCBN.hubChoices[NCBN.selectedHubLine + 1])
@@ -545,14 +538,12 @@ registerForEvent("onUpdate", function()
         print("[NCBN] Seat choices: " .. (#names > 0 and table.concat(names, ", ") or "none"))
     end
     if #seats > 0 and not NCBN.choiceVisible then
-    NCBN.choiceVisible = true
-    showChoice()
-elseif #seats == 0 then
-    hideChoice()
-end
-if inside and getFact("nctc_display_stop_requested") == 0 then
-    showStopRequestHint()
-else
-    hideStopRequestHint()
-end
+        NCBN.choiceVisible = true
+        showChoice()
+    elseif #seats == 0 then hideChoice() end
+    if inside and getFact("nctc_display_stop_requested") == 0 then
+        showStopRequestHint()
+    else
+        hideStopRequestHint()
+    end
 end)
