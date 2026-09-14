@@ -21,6 +21,7 @@
 
 Validated as completed by the user. Historical descriptions are retained below.
 
+- ~~**Generic bus-bay handling v1:** service buses use the player-validated native spline entry, aligned handoff, stop/dwell, guarded vanilla JoinTraffic departure and rolling route handoff at H2, Cannery Plaza and Delamain HQ. The validated r383f behavior is frozen on `validated-r383f-generic-bays-v1`; runtime H2-only prototype assets are retired, and future complete P1/P2/spawn/width bay captures are generated automatically without adding stop IDs to REDscript.~~
 - ~~**Uninterrupted pass-through:** passage points and unrequested intermediate stops must never visibly dwell, even for a fraction of a second. Hand the traffic command to the next route target early enough that the Mahir crosses the point continuously; this must not alter the separate service-stop behaviour.~~
 - ~~Remove the AutoDrive interaction from the service bus; NCTC must never expose player AutoDrive controls.~~
 - ~~Investigate ejection when V boards the bus after stop 1. This is separate from the standing-passenger knockdown fix: mounting must not launch V out of the moving or stopped service bus.~~
