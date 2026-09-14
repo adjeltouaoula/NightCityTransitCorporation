@@ -1,0 +1,45 @@
+name: r387b patched REDscript CI
+
+on:
+  push:
+    branches:
+      - fix/r387b-native-hint-bay-wait-deadlock
+    paths:
+      - .github/workflows/r387b-patched-redscript-ci.yml
+      - tools/ci/apply_r387b_test_patch.py
+      - source/redscript/**
+      - source/cet/nctc_passenger/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  redscript-compile:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Apply r387b test patch
+        shell: pwsh
+        run: |
+          python tools/ci/apply_r387b_test_patch.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Select-String -Path source/redscript/NCTC/NCTCTransitSystem.reds -Pattern 'nctc_dev_bay_wait_self_possible' -Quiet | Out-Null
+          if (-not $?) { throw 'r387b bay-wait patch missing' }
+
+      - name: Compile NCTC with real REDscript compiler
+        shell: pwsh
+        run: ./tools/ci/redscript-compile.ps1
+
+      - name: Upload REDscript CI log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redscript-ci-r387b-patched-${{ github.run_id }}
+          path: ${{ env.NCTC_REDSCRIPT_CI_LOG }}
+          if-no-files-found: ignore
+          retention-days: 14
