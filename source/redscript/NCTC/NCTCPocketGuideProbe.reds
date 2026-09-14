@@ -3,8 +3,7 @@ module NCTC
 import Codeware.UI.*
 
 // Diagnostic/native bootstrap button copied from Metro Pocket Guide's proven
-// HubLinkButton setup. This intentionally stays tiny so we can prove that the
-// NCTC world-map hook reaches the live Ink tree before rebuilding the final UI.
+// HubLinkButton setup. This button is now our validated primary map entry.
 public class NCTCGuideProbeButton extends HubLinkButton {
   public static func Create() -> ref<NCTCGuideProbeButton> {
     let self = new NCTCGuideProbeButton();
@@ -52,7 +51,7 @@ private final func NCTCCreatePocketGuideProbe() -> Void {
     return;
   };
 
-  // Same layout recipe as Metro Pocket Guide, only one row higher.
+  // Same layout recipe as Metro Pocket Guide, one row higher.
   buttonsContainer = new inkCanvas();
   buttonsContainer.SetName(n"NCTCProbeButtonsContainer");
   buttonsContainer.SetAnchor(inkEAnchor.BottomCenter);
@@ -81,8 +80,10 @@ protected cb func OnNCTCGuideProbeClick(evt: ref<inkPointerEvent>) -> Bool {
   LogChannel(n"DEBUG", "[NCTC] PocketGuide probe: click");
   this.PlaySound(n"Button", n"OnPress");
 
+  // The Metro-style button above is already validated in-game. Do not create
+  // a second custom button before the panel; build the panel directly.
   if !IsDefined(this.nctcGuidePanel) {
-    this.NCTCCreatePocketGuide();
+    this.NCTCCreatePocketGuidePanelOnly();
   };
 
   if IsDefined(this.nctcGuidePanel) {
@@ -90,13 +91,15 @@ protected cb func OnNCTCGuideProbeClick(evt: ref<inkPointerEvent>) -> Bool {
     this.nctcGuidePanel.SetVisible(this.nctcGuideVisible);
     if this.nctcGuideVisible {
       this.nctcGuideProbeButton.SetText("CLOSE NCTC NETWORK");
+      LogChannel(n"DEBUG", "[NCTC] PocketGuide probe: panel visible, loading network");
       this.NCTCGuideReload();
     } else {
       this.nctcGuideProbeButton.SetText("NCTC BUS NETWORK");
+      LogChannel(n"DEBUG", "[NCTC] PocketGuide probe: panel hidden");
     };
   } else {
-    this.nctcGuideProbeButton.SetText("NCTC UI ERROR");
-    LogChannel(n"DEBUG", "[NCTC] PocketGuide probe: guide panel missing after create");
+    this.nctcGuideProbeButton.SetText("NCTC PANEL ERROR");
+    LogChannel(n"DEBUG", "[NCTC] PocketGuide probe: panel missing after panel-only create");
   };
 
   evt.Handle();
