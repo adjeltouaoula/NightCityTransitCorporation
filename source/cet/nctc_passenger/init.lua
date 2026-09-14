@@ -73,29 +73,6 @@ end
 
 NCBN.tag = "NCTC.ServiceBus"
 
--- Passenger stop request. CET owns only the bindable input; Redscript owns
--- which stop is next and whether that request can still be accepted.
-local function requestNextStop()
-    if getFact("nctc_player_in_service_bus") ~= 1 then return false end
-    local container = Game.GetScriptableSystemsContainer()
-    if not container then return false end
-    local ok, system = pcall(function() return container:Get("NCTC.NCTCTransitSystem") end)
-    if not ok or not system then
-        ok, system = pcall(function() return container:Get(CName.new("NCTC.NCTCTransitSystem")) end)
-    end
-    if not ok or not system then return false end
-    local requestOk, accepted = pcall(function() return system:RequestNextStop() end)
-    if requestOk and accepted then
-        print("[NCTC] Passenger requested next stop id=" .. tostring(getFact("nctc_passenger_requested_stop_id")))
-    end
-    return requestOk and accepted
-end
-
-registerInput("nctc_request_next_stop", "NCTC — Request next stop", function(keypress)
-    if not keypress then return end
-    requestNextStop()
-end)
-
 local function findServiceBus()
     local dynamic = Game.GetDynamicEntitySystem()
     if not dynamic then return nil end
