@@ -179,7 +179,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38401);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38501);
     return true;
   }
 
@@ -949,6 +949,11 @@ public class NCTCTransitSystem extends ScriptableSystem {
   // whether that visit becomes a passenger service stop (doors + dwell) or a
   // pass-through point. Calling a bus reserves its current stop initially.
   private let serviceStopId: Int32;
+  // The stop selected by the player when summoning the service is a stronger
+  // reservation than the mutable serviceStopId used by later onboard requests.
+  // It stays pending until that exact stop has completed its boarding dwell.
+  private let calledStopId: Int32;
+  private let calledStopPending: Bool;
   private let requestedStop: Vector4;
   private let requestPending: Bool;
   private let controller: ref<NCTCServiceBusController>;
@@ -992,6 +997,24 @@ public class NCTCTransitSystem extends ScriptableSystem {
 
   private func HasServiceBay() -> Bool {
     return this.hasSurveyProfile && this.hasSurveyBerth2 && Vector4.Distance(this.surveyBerth, this.surveyBerth2) > 1.00;
+  }
+
+  // Called-stop v1 invariant: the stop where V summoned the bus cannot become
+  // a pass-through even if another code path clears or changes serviceStopId.
+  private func IsCurrentStopReservedForService() -> Bool {
+    return Equals(this.requestedStopId, this.serviceStopId)
+      || (this.calledStopPending && Equals(this.requestedStopId, this.calledStopId));
+  }
+
+  private func CompleteCalledStopService() -> Void {
+    let quests: ref<QuestsSystem>;
+    if !this.calledStopPending || !Equals(this.requestedStopId, this.calledStopId) { return; };
+    this.calledStopPending = false;
+    quests = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    if IsDefined(quests) {
+      quests.SetFact(n"nctc_dev_called_stop_served_id", this.calledStopId);
+      quests.SetFact(n"nctc_dev_called_stop_pending", 0);
+    };
   }
 
   private func GetBayForward() -> Vector4 {
@@ -1168,7 +1191,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       quests.SetFact(n"nctc_dev_generic_bay_forward_clear", forwardClear ? 1 : 0);
       quests.SetFact(n"nctc_dev_generic_bay_lateral_blocked", lateralBlocked ? 1 : 0);
       quests.SetFact(n"nctc_dev_generic_bay_departure_blocked", blocked ? 1 : 0);
-      quests.SetFact(n"nctc_dev_generic_bay_guard_revision", 38401);
+      quests.SetFact(n"nctc_dev_generic_bay_guard_revision", 38501);
     };
     return blocked;
   }
@@ -1307,6 +1330,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
     // route's current stop. Publish both so a pass-through can be diagnosed
     // without guessing which ID was lost.
     quests.SetFact(n"nctc_dev_loop_service_stop_id", this.serviceStopId);
+    quests.SetFact(n"nctc_dev_loop_called_stop_id", this.calledStopId);
+    quests.SetFact(n"nctc_dev_loop_called_stop_pending", this.calledStopPending ? 1 : 0);
+    quests.SetFact(n"nctc_dev_loop_current_stop_reserved", this.IsCurrentStopReservedForService() ? 1 : 0);
     quests.SetFact(n"nctc_dev_loop_next_stop_id", nextStopId);
     quests.SetFact(n"nctc_dev_loop_target_x_mm", Cast<Int32>(targetPosition.X * 1000.00));
     quests.SetFact(n"nctc_dev_loop_target_y_mm", Cast<Int32>(targetPosition.Y * 1000.00));
@@ -1418,6 +1444,8 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.requestedLine = line;
     this.requestedStopId = stopId;
     this.serviceStopId = stopId;
+    this.calledStopId = stopId;
+    this.calledStopPending = true;
     this.requestedStop = stop;
     // A newly summoned bus must begin with the stop that was explicitly
     // requested. Passage state belongs only to a leg already in progress;
@@ -1455,6 +1483,8 @@ public class NCTCTransitSystem extends ScriptableSystem {
       spawnDistance = this.hasSurveyProfile && IsDefined(player) ? Vector4.Distance(this.surveySpawn, player.GetWorldPosition()) : -1.00;
       quests.SetFact(n"nctc_dev_dispatch_line", StringToInt(line, -1));
       quests.SetFact(n"nctc_dev_dispatch_stop_id", stopId);
+      quests.SetFact(n"nctc_dev_called_stop_id", stopId);
+      quests.SetFact(n"nctc_dev_called_stop_pending", 1);
       quests.SetFact(n"nctc_dev_dispatch_has_profile", this.hasSurveyProfile ? 1 : 0);
       quests.SetFact(n"nctc_dev_dispatch_spawn_distance_mm", Cast<Int32>(spawnDistance * 1000.00));
       quests.SetFact(n"nctc_dev_dispatch_id", quests.GetFact(n"nctc_dev_dispatch_id") + 1);
@@ -1480,6 +1510,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.busEntityID = new EntityID();
     this.controller = null;
     this.requestPending = false;
+    this.calledStopId = 0;
+    this.calledStopPending = false;
+    this.serviceStopId = 0;
     this.driveCommandSent = false;
     this.approachCommandSent = false;
     this.routeStarted = false;
@@ -1587,6 +1620,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
       quests.SetFact(n"nctc_passenger_departure_requested", 0);
       quests.SetFact(n"nctc_service_bus_at_stop", 0);
       this.controller.ClosePassengerDoor();
+      // The called stop is considered fulfilled only after the actual dwell
+      // completed. Until this exact point every pass-through path is blocked.
+      this.CompleteCalledStopService();
       this.serviceStopId = 0;
       this.arrived = false;
       this.dwellPolls = 0;
@@ -1595,7 +1631,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
         this.bayParkingActive = true;
         this.bayParkingStage = 14;
         this.bayParkingRetryCount = 0;
-        quests.SetFact(n"nctc_dev_build_revision", 38401);
+        quests.SetFact(n"nctc_dev_build_revision", 38501);
         quests.SetFact(n"nctc_dev_join_pre_speed_mm", Cast<Int32>(AbsF(this.controller.GetCurrentSpeed()) * 1000.00));
         this.driveCommandSent = this.controller.JoinTrafficDirectFromBerth();
         quests.SetFact(n"nctc_dev_join_traffic_state", this.controller.GetJoinTrafficCommandStatusCode());
@@ -1682,7 +1718,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     // r375a BAY RESET. Occupancy remains the validated native overlap probe,
     // but all trajectory logic below is new and intentionally minimal.
     if !this.followingPassage && this.HasServiceBay() && !this.bayParkingActive && !this.bayParkingBypass
-      && Equals(this.requestedStopId, this.serviceStopId) {
+      && this.IsCurrentStopReservedForService() {
       let bayEntryDistance: Float = Vector4.Distance(this.controller.GetWorldPosition(), this.GetBayEntryPoint());
       if bayEntryDistance <= 85.00 && bayEntryDistance >= 18.00 {
         let bayOccupied: Bool = this.IsBayOccupiedByVehicle();
@@ -1699,7 +1735,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
 
     // Intermediate bay stops are deliberately NOT driven into during r375a.
     // They remain route points, but this reset build isolates actual parking.
-    if !this.followingPassage && this.HasServiceBay() && !Equals(this.requestedStopId, this.serviceStopId) {
+    if !this.followingPassage && this.HasServiceBay() && !this.IsCurrentStopReservedForService() {
       let skipLateral: Float;
       let skipLongitudinal: Float = this.GetBayEntryProgress(skipLateral);
       if skipLongitudinal <= 20.00 && skipLongitudinal >= -4.00 && skipLateral <= 12.00 {
@@ -1719,7 +1755,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     // Generic native-spline arrival. Every authored bay uses the same validated
     // bay-local curve transformed to its own entry/exit geometry.
     if !this.followingPassage && this.HasServiceBay() && !this.bayParkingActive
-      && !this.bayParkingBypass && Equals(this.requestedStopId, this.serviceStopId) {
+      && !this.bayParkingBypass && this.IsCurrentStopReservedForService() {
       let splinePath: String = this.NCTCBayArrivalSplinePath();
       if NotEquals(splinePath, "") {
         let entryLateral: Float;
@@ -1744,7 +1780,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
           this.bayParkingStage = 10;
           this.bayParkingWasEntered = true;
           this.bayParkingRetryCount = 0;
-          quests.SetFact(n"nctc_dev_build_revision", 38401);
+          quests.SetFact(n"nctc_dev_build_revision", 38501);
           quests.SetFact(n"nctc_dev_generic_bay_arrival_stop_id", this.requestedStopId);
           quests.SetFact(n"nctc_dev_generic_bay_heading_dot_x1000", Cast<Int32>(headingDot * 1000.00));
           this.driveCommandSent = this.controller.DriveOnBaySpline(splinePath, entrySpeed, true);
@@ -1879,7 +1915,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     // The AI target is offset beyond the berth. Service remains tied to the
     // real berth, where the Mahir pivot settles in one continuous approach.
     if this.controller.IsStoppedNear(this.GetServiceBerth(), this.bayParkingBypass ? 12.00 : 7.00) {
-      if Equals(this.requestedStopId, this.serviceStopId) {
+      if this.IsCurrentStopReservedForService() {
         this.controller.ArriveAtStop();
         this.arrived = true;
         this.bayParkingActive = false;
@@ -1927,6 +1963,12 @@ public class NCTCTransitSystem extends ScriptableSystem {
     let nextBerth: Vector4;
     let nextYaw: Float;
     let previousStopId: Int32 = this.requestedStopId;
+    // Final safety net: no route transition is allowed to move away from the
+    // player-called stop until its dwell has actually completed.
+    if this.calledStopPending && Equals(previousStopId, this.calledStopId) {
+      this.PublishLoopDiagnostic(93, previousStopId);
+      return false;
+    };
     if !NCTCServiceProfiles.TryGetNextStop(this.GetGameInstance(), this.requestedLine, previousStopId, nextStopId, nextStop) {
       this.PublishLoopDiagnostic(4, 0);
       return false;
