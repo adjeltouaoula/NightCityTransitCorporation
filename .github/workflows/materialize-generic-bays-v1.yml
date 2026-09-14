@@ -1,0 +1,141 @@
+name: materialize generic bays v1 source
+
+on:
+  push:
+    branches:
+      - integration/generic-bays-v1
+    paths:
+      - .github/workflows/materialize-generic-bays-v1.yml
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integration/generic-bays-v1
+
+      - name: Materialize validated r383f runtime into source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTIFACT_ID=10327828381
+          WORK="$RUNNER_TEMP/materialize-r383f"
+          mkdir -p "$WORK/artifact" "$WORK/pkg"
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID/zip" \
+            -o "$WORK/artifact.zip"
+          unzip -q "$WORK/artifact.zip" -d "$WORK/artifact"
+          INNER="$(find "$WORK/artifact" -maxdepth 1 -type f -name 'NightCityTransitCorporation-0.3.0-devkit-r383f-generic-bay-streaming-fix.zip' | head -n1)"
+          test -n "$INNER"
+          unzip -q "$INNER" -d "$WORK/pkg"
+
+          cp "$WORK/pkg/r6/scripts/NCTC/NCTCTransitSystem.reds" source/redscript/NCTC/NCTCTransitSystem.reds
+          cp "$WORK/pkg/r6/scripts/NCTC/NCTCSettings.reds" source/redscript/NCTC/NCTCSettings.reds
+          cp "$WORK/pkg/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/init.lua" source/cet/nctc_survey/init.lua
+          cp "$WORK/pkg/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.default.json" source/cet/nctc_survey/nctc_network.default.json
+
+          mkdir -p tools/bays/template docs/validated
+          cp "$WORK/pkg/archive/pc/mod/NCTCH2Spline.archive" tools/bays/template/validated_arrival_template.archive
+          echo '83a70f4b30788b210093b2939ba3954923e26372b4f98443f407736e22ec9860  tools/bays/template/validated_arrival_template.archive' | sha256sum -c -
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('source/redscript/NCTC/NCTCTransitSystem.reds')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('nctc_dev_build_revision\", 38306', 'nctc_dev_build_revision\", 38401')
+          s=s.replace('nctc_dev_generic_bay_guard_revision\", 38306', 'nctc_dev_generic_bay_guard_revision\", 38401')
+          old='''  // r383e generic bay assets use the same validated H2-local spline shape but\n  // are addressed per authored stop.\n  private func NCTCBayArrivalSplinePath() -> String {\n    if Equals(this.requestedStopId, 20) { return "$/nctc/bays/stop_20/arrival_spline"; };\n    if Equals(this.requestedStopId, 69) { return "$/nctc/bays/stop_69/arrival_spline"; };\n    if Equals(this.requestedStopId, 70) { return "$/nctc/bays/stop_70/arrival_spline"; };\n    return "";\n  }\n'''
+          new='''  // Generic bay asset path: every authored P1 + P2 + width capture is built\n  // to the same deterministic NodeRef, so adding a bay no longer requires a\n  // REDscript stop-ID case.\n  private func NCTCBayArrivalSplinePath() -> String {\n    if this.requestedStopId < 1 { return ""; };\n    return "$/nctc/bays/stop_" + ToString(this.requestedStopId) + "/arrival_spline";\n  }\n'''
+          if old not in s:
+              raise SystemExit('validated explicit bay path block not found')
+          s=s.replace(old,new,1)
+          s=s.replace('''  // r376a: H2 bay motion is a native continuous spline. Unlike\n  // DriveToPoint, the intermediate curve points are geometry, not destinations.''','''  // Generic bay motion is a native continuous spline. Unlike DriveToPoint,\n  // the intermediate curve points are geometry, not destinations.''')
+          s=s.replace('''    // r383e generic native-spline arrival. H2, Cannery and Delamain all use\n    // the same validated H2-local curve transformed to their authored P1/P2.''','''    // Generic native-spline arrival. Every authored bay uses the same validated\n    // bay-local curve transformed to its own entry/exit geometry.''')
+          s=s.replace('''        // H2 and Cannery approach almost parallel to the bay. Delamain exits a\n        // junction immediately before the bay; switching at headingDot ~0.80\n        // cuts the corner and sends the Mahir toward the pole. Let vanilla\n        // traffic finish the turn and only hand off once the bus is aligned.''','''        // Do not hand off while the bus is still finishing an upstream turn.\n        // Vanilla traffic remains authoritative until the Mahir is aligned with\n        // the authored bay axis, preventing corner-cutting into street furniture.''')
+          p.write_text(s,encoding='utf-8',newline='\n')
+          PY
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, math
+          p=Path('source/cet/nctc_survey/nctc_network.default.json')
+          data=json.loads(p.read_text(encoding='utf-8'))
+          bays={
+            20:{'p1':(-905.679,-78.399,7.061),'p2':(-928.813,-61.993,7.209),'spawn':(-927.955,-165.280,7.145),'width':2.870},
+            69:{'p1':(-2392.823,-520.017,12.674),'p2':(-2394.282,-554.666,12.674),'spawn':(-2384.807,-393.260,12.765),'width':3.156},
+            70:{'p1':(-2161.015,-1012.713,7.851),'p2':(-2162.260,-1043.903,7.846),'spawn':(-2154.087,-924.186,7.694),'width':2.723},
+          }
+          seen=set()
+          for cap in data.get('captures',[]):
+              sid=cap.get('stopId')
+              if sid not in bays: continue
+              b=bays[sid]; p1=b['p1']; p2=b['p2']; spawn=b['spawn']; width=b['width']
+              dx=p2[0]-p1[0]; dy=p2[1]-p1[1]; length=math.hypot(dx,dy)
+              fx,fy=dx/length,dy/length
+              yaw=math.degrees(math.atan2(-fx,fy))
+              rx,ry=-fy,fx; half=width/2.0
+              a=(p1[0]+rx*half,p1[1]+ry*half,p1[2])
+              c=(p1[0]-rx*half,p1[1]-ry*half,p1[2])
+              cap['spawn']={'x':round(spawn[0],3),'y':round(spawn[1],3),'z':round(spawn[2],3),'yaw':round(cap.get('spawn',{}).get('yaw',yaw),3)}
+              cap['berth']={'x':round(p1[0],3),'y':round(p1[1],3),'z':round(p1[2],3),'yaw':round(yaw,3)}
+              cap['berth2']={'x':round(p2[0],3),'y':round(p2[1],3),'z':round(p2[2],3),'yaw':round(yaw,3)}
+              cap['bayWidth']=round(width,3)
+              cap['bayWidthA']={'x':round(a[0],3),'y':round(a[1],3),'z':round(a[2],3)}
+              cap['bayWidthB']={'x':round(c[0],3),'y':round(c[1],3),'z':round(c[2],3)}
+              seen.add(sid)
+          if seen != set(bays):
+              raise SystemExit(f'missing canonical captures: {set(bays)-seen}')
+          data['revision']='generic-bays-v1'
+          data['generatedBy']='NCTC canonical default network / generic bay builder'
+          p.write_text(json.dumps(data,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
+          PY
+
+          # Retire build-time patching and H2-only runtime artifacts.
+          rm -f source/redscript/NCTC/NCTCGenericBayDeparture.reds source/redscript/NCTC/NCTCZZGenericBayDeparture.reds
+          rm -f source/archive/pc/mod/NCTCH2Spline.archive source/archive/pc/mod/NCTCH2Spline.archive.xl
+          rm -f source/archive/pc/mod/NCTCH2Departure.archive source/archive/pc/mod/NCTCH2Departure.archive.xl
+          rm -f tools/bays/r383f_runtime.patch tools/bays/r383b_test_bays.json
+
+          cat > tools/bays/template/README.md <<'EOF'
+          # Validated generic bay arrival template
+
+          `validated_arrival_template.archive` is the immutable native spline template used only by the build pipeline. It is derived from the player-validated r382h H2 arrival geometry; it is not packaged into the mod.
+
+          SHA-256: `83a70f4b30788b210093b2939ba3954923e26372b4f98443f407736e22ec9860`
+          Git blob SHA: `ff0be26fb781cf5f2aaf9dd75ce5b668f777a0f6`
+          EOF
+
+          cat > docs/validated/r383f-generic-bays-v1.md <<'EOF'
+          # Validated r383f generic-bay baseline
+
+          Player validation: 2026-09-14.
+
+          Frozen reference branch: `validated-r383f-generic-bays-v1`
+          Frozen source/build commit: `a7509636d06dd25f79cd22cb9d5efa93f98588d2`
+          Validated package SHA-256: `9db4cc5cf0ee308c096cfb0823799592bf8e4fc47fc46b03936d0d1e46887030`
+
+          Validated in game at stop 20 (Delamain HQ), stop 69 (Cannery Plaza), and stop 70 (Megabuilding H2). The validated behavior is native spline entry, aligned handoff, stop/dwell, r382h-style departure guard, vanilla JoinTraffic exit, and rolling handoff to the next traffic leg.
+          EOF
+
+          # This bootstrap workflow is one-shot; remove it in the materialized commit.
+          rm -f .github/workflows/materialize-generic-bays-v1.yml
+
+          grep -q 'return "$/nctc/bays/stop_" + ToString(this.requestedStopId) + "/arrival_spline"' source/redscript/NCTC/NCTCTransitSystem.reds
+          test ! -e source/archive/pc/mod/NCTCH2Spline.archive
+          test ! -e source/archive/pc/mod/NCTCH2Departure.archive
+
+          git config user.name "NCTC Build Integration"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: materialize validated generic bay v1 source"
+          git push origin HEAD:integration/generic-bays-v1
