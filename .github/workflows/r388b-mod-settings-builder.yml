@@ -1,0 +1,176 @@
+name: r388b Mod Settings binding builder
+
+on:
+  push:
+    branches:
+      - feature/native-stop-request-input-v2
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  redscript-compile:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Compile NCTC with real REDscript compiler
+        shell: pwsh
+        run: ./tools/ci/redscript-compile.ps1
+      - name: Upload REDscript CI log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r388b-redscript-ci-log-${{ github.run_id }}
+          path: ${{ env.NCTC_REDSCRIPT_CI_LOG }}
+          if-no-files-found: ignore
+          retention-days: 14
+
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Verify binding isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f source/input/nctc_stop_request.xml
+          test -f source/redscript/NCTC/NCTCStopRequestSettings.reds
+          test -f source/cet/nctc_stop_request/init.lua
+          ! grep -q 'registerInput("nctc_request_next_stop"' source/cet/nctc_passenger/init.lua
+          ! grep -q 'NCTC_RequestNextStop' source/cet/nctc_passenger/init.lua
+          ! grep -q 'registerInput(' source/cet/nctc_stop_request/init.lua
+          grep -q 'NCTC_RequestNextStop' source/cet/nctc_stop_request/init.lua
+          grep -q 'overridableUI="NCTC_RequestNextStop_Keyboard"' source/input/nctc_stop_request.xml
+          grep -q 'overridableUI="NCTC_RequestNextStop_Gamepad"' source/input/nctc_stop_request.xml
+          grep -q 'ModSettings.mod' source/redscript/NCTC/NCTCStopRequestSettings.reds
+          grep -q 'IK_U' source/input/nctc_stop_request.xml
+          grep -q 'IK_Pad_DigitDown' source/input/nctc_stop_request.xml
+          grep -q 'new HDRColor(1.00, 0.55, 0.10, 1.00)' source/redscript/NCTC/NCTCBusDisplay.reds
+          grep -q 'this.bayParkingBypass = true;' source/redscript/NCTC/NCTCTransitSystem.reds
+          ! grep -q 'this.bayParkingStage = 15;' source/redscript/NCTC/NCTCTransitSystem.reds
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install WolvenKit CLI 9.0.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r388b"
+          mkdir -p "$WORK/tools"
+          dotnet tool install WolvenKit.CLI --version 9.0.1 --tool-path "$WORK/tools"
+
+      - name: Generate authored bay assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r388b"
+          TOOL="$WORK/tools/cp77tools"
+          RAW="$WORK/template-raw"
+          TEMPLATE="$WORK/template-json"
+          GENERATED="$WORK/generated"
+          OUT="$WORK/out"
+          MANIFEST="$WORK/bays.json"
+          mkdir -p "$RAW" "$TEMPLATE" "$GENERATED" "$OUT"
+
+          python3 tools/bays/extract_bays_from_network.py \
+            --network source/cet/nctc_survey/nctc_network.default.json \
+            --out "$MANIFEST"
+
+          "$TOOL" unbundle tools/bays/template/validated_arrival_template.archive -o "$RAW"
+          SECTOR="$(find "$RAW" -type f -name 'h2_arrival.streamingsector' | head -n1)"
+          BLOCK="$(find "$RAW" -type f -name 'all.streamingblock' | head -n1)"
+          test -n "$SECTOR"
+          test -n "$BLOCK"
+          "$TOOL" convert serialize "$SECTOR" -o "$TEMPLATE"
+          "$TOOL" convert serialize "$BLOCK" -o "$TEMPLATE"
+          SECTOR_JSON="$(find "$TEMPLATE" -type f -name 'h2_arrival.streamingsector.json' | head -n1)"
+          BLOCK_JSON="$(find "$TEMPLATE" -type f -name 'all.streamingblock.json' | head -n1)"
+          test -n "$SECTOR_JSON"
+          test -n "$BLOCK_JSON"
+
+          python3 tools/bays/generate_arrival_splines.py \
+            --sector-template "$SECTOR_JSON" \
+            --block-template "$BLOCK_JSON" \
+            --manifest "$MANIFEST" \
+            --out "$GENERATED"
+
+          mapfile -t STOPS < <(python3 - "$MANIFEST" <<'PY'
+          import json, sys
+          data=json.load(open(sys.argv[1],encoding='utf-8'))
+          for bay in data['bays']:
+              print(int(bay['stopId']))
+          PY
+          )
+          test "${#STOPS[@]}" -gt 0
+
+          for STOP in "${STOPS[@]}"; do
+            D="$GENERATED/stop_${STOP}"
+            "$TOOL" convert deserialize "$D/arrival.streamingsector.json"
+            "$TOOL" convert deserialize "$D/all.streamingblock.json"
+            PACKROOT="$WORK/NCTCBay${STOP}Spline"
+            mkdir -p "$PACKROOT/nctc/bays/stop_${STOP}/sectors"
+            cp "$D/arrival.streamingsector" "$PACKROOT/nctc/bays/stop_${STOP}/sectors/arrival.streamingsector"
+            cp "$D/all.streamingblock" "$PACKROOT/nctc/bays/stop_${STOP}/all.streamingblock"
+            "$TOOL" pack "$PACKROOT" -o "$OUT"
+            test -s "$OUT/NCTCBay${STOP}Spline.archive"
+            cat > "$OUT/NCTCBay${STOP}Spline.archive.xl" <<EOF
+          streaming:
+            blocks:
+              - nctc\\bays\\stop_${STOP}\\all.streamingblock
+          EOF
+          done
+
+      - name: Assemble exact branch package
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r388b"
+          OUT="$WORK/out"
+          PKG="$WORK/package"
+          mkdir -p \
+            "$PKG/archive/pc/mod" \
+            "$PKG/r6/scripts/NCTC" \
+            "$PKG/r6/tweaks/NCTC" \
+            "$PKG/r6/input" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_stop_request" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+
+          cp source/archive/pc/mod/* "$PKG/archive/pc/mod/"
+          cp "$OUT"/*.archive "$PKG/archive/pc/mod/"
+          cp "$OUT"/*.archive.xl "$PKG/archive/pc/mod/"
+          cp source/redscript/NCTC/*.reds "$PKG/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$PKG/r6/tweaks/NCTC/"
+          cp source/input/nctc_stop_request.xml "$PKG/r6/input/"
+          cp source/cet/nctc_passenger/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp source/cet/nctc_stop_request/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_stop_request/"
+          cp source/cet/nctc_survey/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+
+          test ! -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+          ! grep -q 'registerInput("nctc_request_next_stop"' "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/init.lua"
+          grep -q 'ModSettings.mod' "$PKG/r6/scripts/NCTC/NCTCStopRequestSettings.reds"
+
+          (cd "$PKG" && zip -qr "$WORK/NightCityTransitCorporation-0.3.0-devkit-r388b-mod-settings-binding.zip" .)
+          unzip -t "$WORK/NightCityTransitCorporation-0.3.0-devkit-r388b-mod-settings-binding.zip"
+          sha256sum "$WORK/NightCityTransitCorporation-0.3.0-devkit-r388b-mod-settings-binding.zip" | tee "$WORK/PACKAGE_SHA256.txt"
+          git rev-parse HEAD | tee "$WORK/SOURCE_COMMIT.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r388b-mod-settings-binding
+          path: |
+            ${{ runner.temp }}/r388b/NightCityTransitCorporation-0.3.0-devkit-r388b-mod-settings-binding.zip
+            ${{ runner.temp }}/r388b/PACKAGE_SHA256.txt
+            ${{ runner.temp }}/r388b/SOURCE_COMMIT.txt
+          compression-level: 0
