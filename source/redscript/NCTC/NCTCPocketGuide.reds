@@ -23,6 +23,9 @@ public class NCTCGuideButton extends HubLinkButton {
 
 public class NCTCGuideLineButton extends HubLinkButton {
   private let m_line: Int32;
+  private let m_nctcBackground: wref<inkRectangle>;
+  private let m_nctcAccent: wref<inkRectangle>;
+  private let m_nctcLabel: wref<inkText>;
 
   public static func Create(line: Int32) -> ref<NCTCGuideLineButton> {
     let self = new NCTCGuideLineButton();
@@ -36,8 +39,45 @@ public class NCTCGuideLineButton extends HubLinkButton {
     this.SetIcon(n"");
     this.m_root.SetAnchorPoint(Vector2(0.00, 0.00));
     this.m_root.SetScale(Vector2(0.42, 0.42));
-    this.m_label.SetFontSize(44);
-    this.m_label.SetMargin(inkMargin(22.00, -5.00, 0.00, 0.00));
+    this.m_root.SetVisible(true);
+    this.m_root.SetOpacity(1.00);
+
+    // Keep Codeware's proven interactive root/callback handling, but draw our
+    // own visuals instead of depending on HubMenu style bindings in this panel.
+    this.m_label.SetVisible(false);
+
+    this.m_nctcBackground = new inkRectangle();
+    this.m_nctcBackground.SetName(n"NCTCLineButtonBackground");
+    this.m_nctcBackground.SetSize(Vector2(485.00, 108.00));
+    this.m_nctcBackground.SetMargin(inkMargin(8.00, 6.00, 0.00, 0.00));
+    this.m_nctcBackground.SetTintColor(new HDRColor(0.025, 0.055, 0.070, 0.96));
+    this.m_nctcBackground.SetInteractive(false);
+    this.m_nctcBackground.Reparent(this.m_root);
+
+    this.m_nctcAccent = new inkRectangle();
+    this.m_nctcAccent.SetName(n"NCTCLineButtonAccent");
+    this.m_nctcAccent.SetSize(Vector2(10.00, 108.00));
+    this.m_nctcAccent.SetMargin(inkMargin(8.00, 6.00, 0.00, 0.00));
+    this.m_nctcAccent.SetTintColor(new HDRColor(0.18, 0.92, 1.22, 1.00));
+    this.m_nctcAccent.SetInteractive(false);
+    this.m_nctcAccent.Reparent(this.m_root);
+
+    this.m_nctcLabel = new inkText();
+    this.m_nctcLabel.SetName(n"NCTCLineButtonLabel");
+    this.m_nctcLabel.SetFontFamily("base\\gameplay\\gui\\fonts\\raj\\raj.inkfontfamily");
+    this.m_nctcLabel.SetFontStyle(n"Semi-Bold");
+    this.m_nctcLabel.SetFontSize(46);
+    this.m_nctcLabel.SetLetterCase(textLetterCase.UpperCase);
+    this.m_nctcLabel.SetText("LINE " + ToString(this.m_line));
+    this.m_nctcLabel.SetMargin(inkMargin(42.00, 3.00, 0.00, 0.00));
+    this.m_nctcLabel.SetSize(Vector2(420.00, 112.00));
+    this.m_nctcLabel.SetHorizontalAlignment(textHorizontalAlignment.Left);
+    this.m_nctcLabel.SetVerticalAlignment(textVerticalAlignment.Center);
+    this.m_nctcLabel.SetContentHAlign(inkEHorizontalAlign.Left);
+    this.m_nctcLabel.SetContentVAlign(inkEVerticalAlign.Center);
+    this.m_nctcLabel.SetTintColor(new HDRColor(0.72, 0.95, 1.05, 1.00));
+    this.m_nctcLabel.SetInteractive(false);
+    this.m_nctcLabel.Reparent(this.m_root);
   }
 
   public func GetLine() -> Int32 {
@@ -51,8 +91,14 @@ public class NCTCGuideLineButton extends HubLinkButton {
   public func SetSelected(selected: Bool) -> Void {
     if selected {
       this.m_root.SetOpacity(1.00);
+      this.m_nctcBackground.SetTintColor(new HDRColor(0.045, 0.115, 0.140, 0.98));
+      this.m_nctcAccent.SetTintColor(new HDRColor(0.20, 1.12, 1.45, 1.00));
+      this.m_nctcLabel.SetTintColor(new HDRColor(0.76, 1.08, 1.22, 1.00));
     } else {
-      this.m_root.SetOpacity(0.55);
+      this.m_root.SetOpacity(0.72);
+      this.m_nctcBackground.SetTintColor(new HDRColor(0.020, 0.040, 0.052, 0.92));
+      this.m_nctcAccent.SetTintColor(new HDRColor(0.38, 0.52, 0.58, 0.85));
+      this.m_nctcLabel.SetTintColor(new HDRColor(0.62, 0.74, 0.79, 1.00));
     };
   }
 }
