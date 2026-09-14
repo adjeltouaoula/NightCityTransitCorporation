@@ -26,6 +26,12 @@ let nctcGuideProbeContainer: wref<inkWidget>;
 @addField(WorldMapMenuGameController)
 let nctcGuideProbeButton: wref<NCTCGuideProbeButton>;
 
+// Keep the exact Content widget that successfully hosts the visible map button.
+// The panel reuses this validated host instead of resolving the Ink path again
+// later from the click callback.
+@addField(WorldMapMenuGameController)
+let nctcGuideHost: wref<inkCompoundWidget>;
+
 @addMethod(WorldMapMenuGameController)
 private final func NCTCCreatePocketGuideProbe() -> Void {
   let root: ref<inkCompoundWidget>;
@@ -50,6 +56,9 @@ private final func NCTCCreatePocketGuideProbe() -> Void {
     LogChannel(n"DEBUG", "[NCTC] PocketGuide probe: Content missing");
     return;
   };
+
+  this.nctcGuideHost = parent;
+  LogChannel(n"DEBUG", "[NCTC] PocketGuide probe: Content host retained");
 
   // Same layout recipe as Metro Pocket Guide, one row higher.
   buttonsContainer = new inkCanvas();
@@ -80,8 +89,6 @@ protected cb func OnNCTCGuideProbeClick(evt: ref<inkPointerEvent>) -> Bool {
   LogChannel(n"DEBUG", "[NCTC] PocketGuide probe: click");
   this.PlaySound(n"Button", n"OnPress");
 
-  // The Metro-style button above is already validated in-game. Do not create
-  // a second custom button before the panel; build the panel directly.
   if !IsDefined(this.nctcGuidePanel) {
     this.NCTCCreatePocketGuidePanelOnly();
   };
@@ -98,8 +105,13 @@ protected cb func OnNCTCGuideProbeClick(evt: ref<inkPointerEvent>) -> Bool {
       LogChannel(n"DEBUG", "[NCTC] PocketGuide probe: panel hidden");
     };
   } else {
-    this.nctcGuideProbeButton.SetText("NCTC PANEL ERROR");
-    LogChannel(n"DEBUG", "[NCTC] PocketGuide probe: panel missing after panel-only create");
+    if !IsDefined(this.nctcGuideHost) {
+      this.nctcGuideProbeButton.SetText("NCTC HOST ERROR");
+      LogChannel(n"DEBUG", "[NCTC] PocketGuide probe: retained host missing");
+    } else {
+      this.nctcGuideProbeButton.SetText("NCTC PANEL ERROR");
+      LogChannel(n"DEBUG", "[NCTC] PocketGuide probe: panel missing after panel-only create");
+    };
   };
 
   evt.Handle();
