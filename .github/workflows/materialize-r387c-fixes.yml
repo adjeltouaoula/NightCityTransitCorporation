@@ -39,7 +39,6 @@ jobs:
               b = text.index(end, a)
               return text[a:b]
 
-          # Restore InteractionUI hooks used by the seat selector byte-for-byte.
           ui_start = '    Override("InteractionUIBase", "OnDialogsData", function(_, value, wrapped)\n'
           ui_end = '    Observe("PlayerPuppet", "OnAction", function(_, action, consumer)\n'
           current = current.replace(
@@ -48,9 +47,6 @@ jobs:
               1,
           )
 
-          # Restore the complete r386e seat/action observer byte-for-byte.
-          # The new stop request gets its own observer so it cannot alter the
-          # validated seat input state machine.
           action_start = '    Observe("PlayerPuppet", "OnAction", function(_, action, consumer)\n'
           action_end = '    print("[NCBN] Interior passenger-seat interaction initialized.")\n'
           old_action = block(current, action_start, action_end)
@@ -58,9 +54,7 @@ jobs:
           stop_action = '''    Observe("PlayerPuppet", "OnAction", function(_, action, consumer)\n        if action:GetName(action).value ~= "NCTC_RequestNextStop" then return end\n        if action:GetType(action).value ~= "BUTTON_PRESSED" or action:GetValue(action) <= 0 then return end\n        if getFact("nctc_player_in_service_bus") ~= 1 then return end\n        consumer:Consume()\n        if requestNextStop() then hideStopRequestHint() end\n    end)\n'''
           current = current.replace(old_action, stop_action + seat_action, 1)
 
-          # Restore the exact r386e seat-choice state machine. The stop-request
-          # hint remains a separate operation after the seat block.
-          current_tail = '''    if #seats > 0 and not NCBN.choiceVisible then\n        NCBN.choiceVisible = true\n        showChoice()\n    elseif #seats == 0 then\n        hideChoice()\n    end\n    if inside and getFact("nctc_display_stop_requested") == 0 then\n        showStopRequestHint()\n    else\n        hideStopRequestHint()\n    end\nend)'''
+          current_tail = '''    if #seats > 0 and not NCBN.choiceVisible then\n    NCBN.choiceVisible = true\n    showChoice()\nelseif #seats == 0 then\n    hideChoice()\nend\nif inside and getFact("nctc_display_stop_requested") == 0 then\n    showStopRequestHint()\nelse\n    hideStopRequestHint()\nend\nend)'''
           seat_tail = '''    if #seats > 0 and not NCBN.choiceVisible then\n        NCBN.choiceVisible = true\n        showChoice()\n    elseif #seats == 0 then hideChoice() end\n'''
           replacement_tail = seat_tail + '''    if inside and getFact("nctc_display_stop_requested") == 0 then\n        showStopRequestHint()\n    else\n        hideStopRequestHint()\n    end\nend)'''
           if current_tail not in current:
