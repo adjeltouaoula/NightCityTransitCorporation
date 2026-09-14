@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<bindings>
+  <!-- NCTC handles the action only while V is actually aboard the active
+       service bus. Adding it to both contexts covers seated passengers and
+       V standing/walking inside the Mahir cabin. Outside the NCTC bus the
+       action is ignored and the underlying vanilla controls remain untouched. -->
+  <context name="VehiclePassenger" append="true">
+    <action name="NCTC_RequestNextStop" map="NCTC_RequestNextStop_Button" priority="-99" />
+  </context>
+  <context name="Locomotion" append="true">
+    <action name="NCTC_RequestNextStop" map="NCTC_RequestNextStop_Button" priority="-99" />
+  </context>
+
+  <mapping name="NCTC_RequestNextStop_Button" type="Button">
+    <button id="IK_U" overridableUI="NCTC_RequestNextStop_Keyboard" />
+    <button id="IK_Pad_DigitDown" overridableUI="NCTC_RequestNextStop_Gamepad" />
+  </mapping>
+</bindings>
