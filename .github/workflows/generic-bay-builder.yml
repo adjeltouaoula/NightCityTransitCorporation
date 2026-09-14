@@ -5,6 +5,7 @@ on:
     branches:
       - development
       - integration/generic-bays-v1
+      - feature/nctc-pocket-guide
   workflow_dispatch:
 
 permissions:
