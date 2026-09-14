@@ -179,7 +179,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38401);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38703);
     return true;
   }
 
@@ -333,7 +333,7 @@ public class NCTCServiceBusController extends IScriptable {
     driverReady.name = n"DriverReady";
     GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);
     GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.030);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38602);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38703);
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(
       n"nctc_dev_command_forced_start_speed_mm",
       Cast<Int32>(MaxF(startSpeed, 0.00) * 1000.00)
@@ -1677,7 +1677,7 @@ private func GetTrafficTarget() -> Vector4 {
         this.bayParkingActive = true;
         this.bayParkingStage = 14;
         this.bayParkingRetryCount = 0;
-        quests.SetFact(n"nctc_dev_build_revision", 38401);
+        quests.SetFact(n"nctc_dev_build_revision", 38703);
         quests.SetFact(n"nctc_dev_join_pre_speed_mm", Cast<Int32>(AbsF(this.controller.GetCurrentSpeed()) * 1000.00));
         this.driveCommandSent = this.controller.JoinTrafficDirectFromBerth();
         quests.SetFact(n"nctc_dev_join_traffic_state", this.controller.GetJoinTrafficCommandStatusCode());
@@ -1771,10 +1771,14 @@ private func GetTrafficTarget() -> Vector4 {
         quests.SetFact(n"nctc_dev_berth_occupancy_stop_id", this.requestedStopId);
         quests.SetFact(n"nctc_dev_berth_occupied", bayOccupied ? 1 : 0);
         if bayOccupied {
-          // r383f: occupancy is no longer a permanent bay bypass. Keep the
-          // request alive; the aligned handoff gate below will stop and wait
-          // near the bay entrance until the overlap becomes clear.
-          this.PublishLoopDiagnostic(50, this.requestedStopId);
+          // r387c: an occupied bay is never waited on. Stay under the
+          // native traffic command and service this stop from the normal
+          // road lane beside the bay.
+          this.bayParkingBypass = true;
+          this.bayParkingActive = false;
+          this.bayParkingStage = 0;
+          this.bayParkingWasEntered = false;
+          this.PublishLoopDiagnostic(96, this.requestedStopId);
         };
       };
     };
@@ -1812,13 +1816,16 @@ private func GetTrafficTarget() -> Vector4 {
         // the authored bay axis, preventing corner-cutting into street furniture.
         if entryLongitudinal > 0.50 && entryLongitudinal <= 26.00 && entryLateral <= 12.00 && headingDot >= 0.94 {
           if this.IsBayOccupiedByVehicle() {
-            this.controller.ArriveAtStop();
-            this.bayParkingActive = true;
-            this.bayParkingStage = 15;
+            // Late occupancy race: same rule as the early probe. Do not
+            // brake and wait for the bay; simply disable spline entry for
+            // this stop and let the current traffic command carry the bus
+            // to the normal-lane service position.
+            this.bayParkingBypass = true;
+            this.bayParkingActive = false;
+            this.bayParkingStage = 0;
             this.bayParkingWasEntered = false;
-            this.driveCommandSent = false;
-            this.PublishLoopDiagnostic(50, this.requestedStopId);
-            this.ScheduleDispatch(0.25);
+            this.PublishLoopDiagnostic(96, this.requestedStopId);
+            this.ScheduleDispatch(0.10);
             return;
           };
           let entrySpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 6.00), 2.00);
@@ -1826,7 +1833,7 @@ private func GetTrafficTarget() -> Vector4 {
           this.bayParkingStage = 10;
           this.bayParkingWasEntered = true;
           this.bayParkingRetryCount = 0;
-          quests.SetFact(n"nctc_dev_build_revision", 38401);
+          quests.SetFact(n"nctc_dev_build_revision", 38703);
           quests.SetFact(n"nctc_dev_generic_bay_arrival_stop_id", this.requestedStopId);
           quests.SetFact(n"nctc_dev_generic_bay_heading_dot_x1000", Cast<Int32>(headingDot * 1000.00));
           this.driveCommandSent = this.controller.DriveOnBaySpline(splinePath, entrySpeed, true);
@@ -1838,29 +1845,21 @@ private func GetTrafficTarget() -> Vector4 {
     };
 
     if this.bayParkingActive && Equals(this.bayParkingStage, 15) {
-      // Bay occupied at the aligned handoff gate: stay stopped on the road and
-      // enter once clear instead of permanently bypassing the bay.
-      if this.IsBayOccupiedByVehicle() {
-        this.ScheduleDispatch(0.25);
-        return;
-      };
-      let waitSplinePath: String = this.NCTCBayArrivalSplinePath();
-      if Equals(waitSplinePath, "") {
-        this.bayParkingActive = false;
-        this.bayParkingStage = 0;
-        this.ScheduleDispatch(0.25);
-        return;
-      };
-      this.bayParkingStage = 10;
-      this.bayParkingWasEntered = true;
-      this.bayParkingRetryCount = 0;
-      this.driveCommandSent = this.controller.DriveOnBaySpline(waitSplinePath, 2.00, true);
-      this.PublishLoopDiagnostic(this.driveCommandSent ? 92 : 33, this.requestedStopId);
-      this.ScheduleDispatch(0.10);
-      return;
-    };
+    // Compatibility recovery only for a save/session created by an older
+    // build that was already waiting in stage 15. Current r387c never
+    // enters this state: occupied bays are bypassed immediately.
+    this.bayParkingActive = false;
+    this.bayParkingStage = 0;
+    this.bayParkingBypass = true;
+    this.bayParkingWasEntered = false;
+    this.bayParkingRetryCount = 0;
+    this.driveCommandSent = this.controller.DriveToTraffic(this.GetTrafficTarget(), 0.00);
+    this.PublishLoopDiagnostic(this.driveCommandSent ? 96 : 33, this.requestedStopId);
+    this.ScheduleDispatch(0.25);
+    return;
+  };
 
-    if this.bayParkingActive && Equals(this.bayParkingStage, 10) {
+  if this.bayParkingActive && Equals(this.bayParkingStage, 10) {
       if this.controller.IsSplineCommandSuccessful() {
         this.controller.ArriveAtStop();
         this.arrived = true;
