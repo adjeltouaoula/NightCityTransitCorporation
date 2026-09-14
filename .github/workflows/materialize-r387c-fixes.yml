@@ -1,0 +1,188 @@
+name: materialize r387c occupied-bay bypass + native hint
+
+on:
+  push:
+    branches:
+      - fix/r387c-occupied-bay-bypass-native-hint-v3
+    paths:
+      - .github/workflows/materialize-r387c-fixes.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Patch runtime source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          # --- Passenger HUD: replace the generic interaction ChoiceHub (F/X)
+          # with a real GameplayInputHelper hint bound to NCTC_RequestNextStop.
+          p = Path('source/cet/nctc_passenger/init.lua')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace(', stopRequestVisible = false, stopRequestHub = nil }', ', stopRequestVisible = false }')
+          pat = re.compile(r'local function makeStopRequestHub\(\).*?\nlocal function hideChoice\(\)', re.S)
+          repl = '''local STOP_REQUEST_HINT_SOURCE = "NCTCStopRequest"
+          local STOP_REQUEST_HINT_CONTAINER = "GameplayInputHelper"
+          local STOP_REQUEST_ACTION = CName.new("NCTC_RequestNextStop")
+
+          local function hideStopRequestHint()
+              if not NCBN.stopRequestVisible then return end
+              NCBN.stopRequestVisible = false
+              local evt = DeleteInputHintBySourceEvent.new()
+              evt.source = STOP_REQUEST_HINT_SOURCE
+              evt.targetHintContainer = STOP_REQUEST_HINT_CONTAINER
+              Game.GetUISystem():QueueEvent(evt)
+          end
+
+          local function showStopRequestHint()
+              if NCBN.stopRequestVisible then return end
+              if getFact("nctc_player_in_service_bus") ~= 1 or getFact("nctc_display_stop_requested") == 1 then return end
+              local evt = UpdateInputHintEvent.new()
+              local data = InputHintData.new()
+              data.action = STOP_REQUEST_ACTION
+              data.source = STOP_REQUEST_HINT_SOURCE
+              data.localizedLabel = "Demander le prochain arrêt"
+              data.enableHoldAnimation = false
+              data.sortingPriority = 1
+              evt.data = data
+              evt.show = true
+              evt.targetHintContainer = STOP_REQUEST_HINT_CONTAINER
+              Game.GetUISystem():QueueEvent(evt)
+              NCBN.stopRequestVisible = true
+          end
+
+          local function hideChoice()'''
+          s, n = pat.subn(repl, s, count=1)
+          assert n == 1, f'hint replacement count={n}'
+          s = s.replace(' or (NCBN.stopRequestVisible and NCBN.stopRequestHub)', '')
+          s = s.replace('            if NCBN.stopRequestVisible and NCBN.stopRequestHub then table.insert(hubs, NCBN.stopRequestHub) end\n', '')
+          s = s.replace('        if NCBN.stopRequestVisible then return wrapped(0) end\n', '')
+          s = s.replace('        if NCBN.stopRequestVisible and NCBN.stopRequestHub then return wrapped(NCBN.stopRequestHub.id) end\n', '')
+          tail = s.rfind('    if #seats > 0 and not NCBN.choiceVisible then')
+          assert tail >= 0, 'final seat/hint block not found'
+          s = s[:tail] + '''    if #seats > 0 and not NCBN.choiceVisible then
+              NCBN.choiceVisible = true
+              showChoice()
+          elseif #seats == 0 then
+              hideChoice()
+          end
+          if inside and getFact("nctc_display_stop_requested") == 0 then
+              showStopRequestHint()
+          else
+              hideStopRequestHint()
+          end
+          end)
+          '''
+          assert '77903' not in s
+          assert 'makeStopRequestHub' not in s
+          assert 'stopRequestHub' not in s
+          assert 'UpdateInputHintEvent.new()' in s
+          assert 'data.action = STOP_REQUEST_ACTION' in s
+          p.write_text(s, encoding='utf-8')
+
+          # --- Bay occupancy semantics.
+          # Occupied BEFORE entry => bypass bay immediately and service from
+          # the normal traffic lane. Never wait for the bay to clear.
+          p = Path('source/redscript/NCTC/NCTCTransitSystem.reds')
+          s = p.read_text(encoding='utf-8')
+
+          old_probe = '''        if bayOccupied {
+                    // r383f: occupancy is no longer a permanent bay bypass. Keep the
+                    // request alive; the aligned handoff gate below will stop and wait
+                    // near the bay entrance until the overlap becomes clear.
+                    this.PublishLoopDiagnostic(50, this.requestedStopId);
+                  };'''
+          new_probe = '''        if bayOccupied {
+                    // r387c: an occupied bay is never waited on. Stay under the
+                    // native traffic command and service this stop from the normal
+                    // road lane beside the bay.
+                    this.bayParkingBypass = true;
+                    this.bayParkingActive = false;
+                    this.bayParkingStage = 0;
+                    this.bayParkingWasEntered = false;
+                    this.PublishLoopDiagnostic(96, this.requestedStopId);
+                  };'''
+          assert old_probe in s, 'early occupancy probe block not found'
+          s = s.replace(old_probe, new_probe, 1)
+
+          old_gate = '''          if this.IsBayOccupiedByVehicle() {
+                      this.controller.ArriveAtStop();
+                      this.bayParkingActive = true;
+                      this.bayParkingStage = 15;
+                      this.bayParkingWasEntered = false;
+                      this.driveCommandSent = false;
+                      this.PublishLoopDiagnostic(50, this.requestedStopId);
+                      this.ScheduleDispatch(0.25);
+                      return;
+                    };'''
+          new_gate = '''          if this.IsBayOccupiedByVehicle() {
+                      // Late occupancy race: same rule as the early probe. Do not
+                      // brake and wait for the bay; simply disable spline entry for
+                      // this stop and let the current traffic command carry the bus
+                      // to the normal-lane service position.
+                      this.bayParkingBypass = true;
+                      this.bayParkingActive = false;
+                      this.bayParkingStage = 0;
+                      this.bayParkingWasEntered = false;
+                      this.PublishLoopDiagnostic(96, this.requestedStopId);
+                      this.ScheduleDispatch(0.10);
+                      return;
+                    };'''
+          assert old_gate in s, 'aligned occupancy gate block not found'
+          s = s.replace(old_gate, new_gate, 1)
+
+          stage_pat = re.compile(r'    if this\.bayParkingActive && Equals\(this\.bayParkingStage, 15\) \{.*?\n    if this\.bayParkingActive && Equals\(this\.bayParkingStage, 10\) \{', re.S)
+          stage_repl = '''    if this.bayParkingActive && Equals(this.bayParkingStage, 15) {
+              // Compatibility recovery only for a save/session created by an older
+              // build that was already waiting in stage 15. Current r387c never
+              // enters this state: occupied bays are bypassed immediately.
+              this.bayParkingActive = false;
+              this.bayParkingStage = 0;
+              this.bayParkingBypass = true;
+              this.bayParkingWasEntered = false;
+              this.bayParkingRetryCount = 0;
+              this.driveCommandSent = this.controller.DriveToTraffic(this.GetTrafficTarget(), 0.00);
+              this.PublishLoopDiagnostic(this.driveCommandSent ? 96 : 33, this.requestedStopId);
+              this.ScheduleDispatch(0.25);
+              return;
+            };
+
+            if this.bayParkingActive && Equals(this.bayParkingStage, 10) {'''
+          s, n = stage_pat.subn(stage_repl, s, count=1)
+          assert n == 1, f'stage15 replacement count={n}'
+
+          # Dev revision only; departure guard itself is intentionally untouched.
+          s = s.replace('nctc_dev_build_revision", 38401', 'nctc_dev_build_revision", 38703')
+          s = s.replace('nctc_dev_build_revision", 38602', 'nctc_dev_build_revision", 38703')
+          assert 'this.bayParkingBypass = true;' in s
+          assert 'bayParkingStage = 15;' not in s
+          assert 'NCTCDepartureBlocked()' in s
+          assert 'nctc_dev_build_revision", 38703' in s
+          p.write_text(s, encoding='utf-8')
+          PY
+
+          git diff --check
+          grep -n 'bayParkingBypass = true\|bayParkingStage, 15\|UpdateInputHintEvent\|NCTCDepartureBlocked' \
+            source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_passenger/init.lua
+
+      - name: Commit runtime source only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source/redscript/NCTC/NCTCTransitSystem.reds source/cet/nctc_passenger/init.lua
+          git commit -m "fix: bypass occupied bays and use native stop-request hint"
+          git push origin HEAD:fix/r387c-occupied-bay-bypass-native-hint-v3
