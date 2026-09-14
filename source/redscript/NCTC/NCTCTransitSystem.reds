@@ -306,12 +306,15 @@ public class NCTCServiceBusController extends IScriptable {
   }
 
 
-  // r383e: rolling handoff after native JoinTraffic. Unlike the older
-  // DriveToTrafficAfterSpline path, do not pulse NoDriver after vanilla has
-  // just reacquired a traffic lane; keep DriverReady and submit the successor
-  // command with the measured rolling speed.
+  // r386b: after vanilla JoinTraffic reports a lane, explicitly pulse the
+  // native driver lifecycle before the successor DriveToPoint command. The
+  // r383e shortcut (DriverReady only) can leave the command Active while the
+  // Mahir remains physically idle at 0 m/s. Preserve the measured join speed
+  // and use the same short cross-frame NoDriver -> DriverReady sequence as the
+  // validated rolling-passage handoff.
   public func DriveToTrafficAfterJoin(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {
     let callback: ref<NCTCDeferredDriveCommand>;
+    let noDriver: ref<AIEvent>;
     let driverReady: ref<AIEvent>;
     let speedProfile: Int32;
     let speedLimit: Float;
@@ -324,9 +327,13 @@ public class NCTCServiceBusController extends IScriptable {
     this.activeSplineCommand = null;
     this.activeJoinTrafficCommand = null;
 
+    noDriver = new AIEvent();
     driverReady = new AIEvent();
+    noDriver.name = n"NoDriver";
     driverReady.name = n"DriverReady";
-    this.bus.QueueEvent(driverReady);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.030);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38602);
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(
       n"nctc_dev_command_forced_start_speed_mm",
       Cast<Int32>(MaxF(startSpeed, 0.00) * 1000.00)
@@ -344,7 +351,7 @@ public class NCTCServiceBusController extends IScriptable {
       MaxF(startSpeed, 0.00),
       generation
     );
-    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.030, false);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);
     return true;
   }
 
@@ -949,6 +956,9 @@ public class NCTCTransitSystem extends ScriptableSystem {
   // whether that visit becomes a passenger service stop (doors + dwell) or a
   // pass-through point. Calling a bus reserves its current stop initially.
   private let serviceStopId: Int32;
+  // True only for an in-cabin passenger request. The initial boarding stop is
+  // still a service stop, but is not a passenger "next stop" request.
+  private let passengerStopRequested: Bool;
   private let requestedStop: Vector4;
   private let requestPending: Bool;
   private let controller: ref<NCTCServiceBusController>;
@@ -1193,20 +1203,43 @@ public class NCTCTransitSystem extends ScriptableSystem {
   // The native Mahir controller settles the pivot before the target. Aim the
   // traffic command beyond the real berth, using its surveyed travel vector,
   // so that this native stop lands at the passenger-service point in one pass.
-  private func GetTrafficTarget() -> Vector4 {
-    let target: Vector4 = this.GetServiceBerth();
-    if this.followingPassage {
-      // r372n: a passage is not an endpoint. Aim a full 100 m down the
-      // surveyed outgoing road so the native controller has no reason to
-      // brake while the bus crosses the waypoint and the handoff zone.
-      if AbsF(this.passageForward.X) > 0.01 || AbsF(this.passageForward.Y) > 0.01 { return this.passageTarget + this.passageForward * 100.00; };
-      return this.passageTarget;
+  // r386d: for service bays, keep the vanilla traffic command on the
+// adjacent road corridor instead of targeting the off-lane berth. The arrival
+// spline takes over only once the bus is aligned and within the existing gate.
+private func GetTrafficTarget() -> Vector4 {
+  let target: Vector4 = this.GetServiceBerth();
+  let forward: Vector4;
+  let right: Vector4;
+  let sideOffset: Float;
+  let sideSign: Float;
+  let lead: Float;
+
+  if this.followingPassage {
+    if AbsF(this.passageForward.X) > 0.01 || AbsF(this.passageForward.Y) > 0.01 {
+      return this.passageTarget + this.passageForward * 100.00;
     };
-    if AbsF(this.surveyBerthForward.X) > 0.01 || AbsF(this.surveyBerthForward.Y) > 0.01 {
-      return target + this.surveyBerthForward * 13.70;
+    return this.passageTarget;
+  };
+
+  if this.HasServiceBay() {
+    forward = this.GetBayForward();
+    if AbsF(forward.X) > 0.01 || AbsF(forward.Y) > 0.01 {
+      right = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
+      sideOffset = MaxF(this.GetBayWidth() * 0.50 + 2.75, 4.20);
+      sideSign = this.NCTCBayRoadSideSign();
+      lead = Equals(this.requestedStopId, this.serviceStopId) ? 18.00 : 100.00;
+      return this.GetBayEntryPoint() + forward * lead + right * sideOffset * sideSign;
     };
-    return target;
-  }
+  };
+
+  if AbsF(this.surveyBerthForward.X) > 0.01 || AbsF(this.surveyBerthForward.Y) > 0.01 {
+    if !this.HasServiceBay() && !Equals(this.requestedStopId, this.serviceStopId) {
+      return target + this.surveyBerthForward * 100.00;
+    };
+    return target + this.surveyBerthForward * 13.70;
+  };
+  return target;
+}
 
   // A passage yaw is authored as the direction of the ROAD AFTER the
   // waypoint. r371 discarded that information and rebuilt a vector toward the
@@ -1284,9 +1317,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if !IsDefined(quests) { return; };
     quests.SetFact(n"nctc_display_line", lineNumber);
     quests.SetFact(n"nctc_display_next_stop_id", nextStopId);
-    // Reserved for the passenger-request visual state. The display remains
-    // focused on route information: line number and next stop only.
-    quests.SetFact(n"nctc_display_stop_requested", 0);
+    quests.SetFact(
+      n"nctc_display_stop_requested",
+      this.passengerStopRequested && Equals(nextStopId, this.serviceStopId) ? 1 : 0
+    );
     quests.SetFact(n"nctc_display_revision", quests.GetFact(n"nctc_display_revision") + 1);
   }
 
@@ -1417,7 +1451,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
     };
     this.requestedLine = line;
     this.requestedStopId = stopId;
+    // The call stop behaves exactly as before: the summoned bus services it so
+    // V can board. Passenger stop requests only begin after that first service.
     this.serviceStopId = stopId;
+    this.passengerStopRequested = false;
     this.requestedStop = stop;
     // A newly summoned bus must begin with the stop that was explicitly
     // requested. Passage state belongs only to a leg already in progress;
@@ -1486,6 +1523,8 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.dwellPolls = 0;
     this.boardingDoorWasOpen = false;
     this.departureRequested = false;
+    this.passengerStopRequested = false;
+    this.serviceStopId = 0;
     this.bayParkingActive = false;
     this.bayParkingStage = 0;
     this.bayParkingWasEntered = false;
@@ -1521,6 +1560,36 @@ public class NCTCTransitSystem extends ScriptableSystem {
     };
   }
 
+  // Called by the CET cabin input. It always means "the stop currently shown
+  // as next". One press reserves exactly one stop; the request is consumed
+  // when that stop completes its normal service dwell.
+  public func RequestNextStop() -> Bool {
+    let quests: ref<QuestsSystem>;
+    if this.requestPending || this.arrived || this.bayParkingActive { return false; };
+    if this.requestedStopId < 1 || this.serviceStopId > 0 || this.passengerStopRequested { return false; };
+    if !IsDefined(this.controller) || !this.controller.IsReady() || !this.controller.IsPlayerAboard() { return false; };
+
+    this.serviceStopId = this.requestedStopId;
+    this.passengerStopRequested = true;
+    quests = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    if IsDefined(quests) {
+      quests.SetFact(n"nctc_display_stop_requested", 1);
+      quests.SetFact(n"nctc_passenger_requested_stop_id", this.requestedStopId);
+      quests.SetFact(n"nctc_display_revision", quests.GetFact(n"nctc_display_revision") + 1);
+      quests.SetFact(n"nctc_dev_build_revision", 38601);
+    };
+
+    // The unrequested roadside command may currently point 100 m beyond this
+    // stop. Replace it immediately so the current next stop becomes the real
+    // service target. Passage routing remains authoritative if one is active.
+    this.controller.CancelTrafficRoute();
+    this.driveCommandSent = false;
+    this.legPolls = 0;
+    this.PublishLoopDiagnostic(93, this.requestedStopId);
+    this.ScheduleDispatch(0.05);
+    return true;
+  }
+
   private func ClearRouteWaypoint() -> Void {
     let mappins: ref<MappinSystem> = GameInstance.GetMappinSystem(this.GetGameInstance());
     if IsDefined(mappins) && IsDefined(mappins.GetMappin(this.routeWaypoint)) {
@@ -1554,13 +1623,22 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.controller.KeepPassengerDoorOpen();
       boarded = this.controller.IsPlayerAboard()
         || Equals(quests.GetFact(n"nctc_passenger_departure_requested"), 1);
-      // Always leave enough time for the door animation to be visible.
-      if this.dwellPolls < 8 {
+      // Passenger-requested stops are deliberate alighting stops. Give V a
+      // full 15 seconds from the moment service dwell begins, regardless of
+      // the fact that V is already detected aboard. The initial call/boarding
+      // stop keeps the previous shorter/conditional dwell semantics.
+      if this.passengerStopRequested && this.dwellPolls < 60 {
         this.dwellPolls += 1;
         this.ScheduleDispatch(0.25);
         return;
       };
-      if !boarded && this.dwellPolls < 40 {
+      // Always leave enough time for the door animation to be visible.
+      if !this.passengerStopRequested && this.dwellPolls < 8 {
+        this.dwellPolls += 1;
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      if !this.passengerStopRequested && !boarded && this.dwellPolls < 40 {
         this.dwellPolls += 1;
         this.ScheduleDispatch(0.25);
         return;
@@ -1588,6 +1666,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
       quests.SetFact(n"nctc_service_bus_at_stop", 0);
       this.controller.ClosePassengerDoor();
       this.serviceStopId = 0;
+      this.passengerStopRequested = false;
+      quests.SetFact(n"nctc_display_stop_requested", 0);
+      quests.SetFact(n"nctc_passenger_requested_stop_id", 0);
+      quests.SetFact(n"nctc_display_revision", quests.GetFact(n"nctc_display_revision") + 1);
       this.arrived = false;
       this.dwellPolls = 0;
       this.legPolls = 0;
@@ -1868,6 +1950,27 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if this.bayParkingActive && Equals(this.bayParkingStage, 13) {
       this.ScheduleDispatch(0.25);
       return;
+    };
+
+    // Unrequested roadside stop: cross it at traffic speed and hand off to
+    // the following leg without entering ArriveAtStop(), opening doors or
+    // creating a dwell. The long +100 m target above prevents pre-stop braking.
+    if !this.followingPassage && !this.HasServiceBay() && !Equals(this.requestedStopId, this.serviceStopId) {
+      let skipRoadLateral: Float;
+      let skipRoadLongitudinal: Float = this.GetBerthProgress(skipRoadLateral);
+      if skipRoadLongitudinal <= 12.00 && skipRoadLongitudinal >= -8.00 && skipRoadLateral <= 12.00 {
+        let rollingSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
+        if !this.AdvanceToNextStop() {
+          this.PublishLoopDiagnostic(34, 0);
+          this.ScheduleDispatch(1.00);
+          return;
+        };
+        this.legPolls = 0;
+        this.driveCommandSent = this.controller.DriveToTrafficAfterRollingPassage(this.GetTrafficTarget(), 0.00, rollingSpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 94 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.05);
+        return;
+      };
     };
 
     // Road-stop / occupied-bay fallback remains native traffic.
