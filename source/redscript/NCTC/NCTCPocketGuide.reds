@@ -16,7 +16,7 @@ public class NCTCGuideButton extends HubLinkButton {
     super.OnCreate();
     this.m_icon.SetMargin(0.00, 30.00, 0.00, 6.00);
     this.m_icon.SetSize(Vector2(70.00, 52.00));
-    this.m_icon.SetAtlasResource(r"base\gameplay\gui\common\icons\mappin_icons.inkatlas");
+    this.m_icon.SetAtlasResource(r"base\\gameplay\\gui\\common\\icons\\mappin_icons.inkatlas");
     this.m_icon.SetTexturePart(n"fast_travel");
   }
 }
@@ -212,7 +212,7 @@ private final func NCTCCreatePocketGuide() -> Void {
 private final func NCTCGuideText(parent: ref<inkCompoundWidget>, value: String, size: Int32, x: Float, y: Float, width: Float, height: Float, color: HDRColor) -> ref<inkText> {
   let text: ref<inkText> = new inkText();
   text.SetText(value);
-  text.SetFontFamily("base\gameplay\gui\fonts\raj\raj.inkfontfamily");
+  text.SetFontFamily("base\\gameplay\\gui\\fonts\\raj\\raj.inkfontfamily");
   text.SetFontStyle(n"Medium");
   text.SetFontSize(size);
   text.SetLetterCase(textLetterCase.OriginalCase);
