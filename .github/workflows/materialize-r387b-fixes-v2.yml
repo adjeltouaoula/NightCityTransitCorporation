@@ -1,0 +1,182 @@
+name: materialize r387b fixes v2
+
+on:
+  push:
+    branches:
+      - fix/r387b-native-hint-bay-wait-deadlock
+    paths:
+      - .github/workflows/materialize-r387b-fixes-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Patch source
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('source/cet/nctc_passenger/init.lua')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace(', stopRequestVisible = false, stopRequestHub = nil }', ', stopRequestVisible = false }')
+          pat = re.compile(r'local function makeStopRequestHub\(\).*?\nlocal function hideChoice\(\)', re.S)
+          repl = '''local STOP_REQUEST_HINT_SOURCE = "NCTCStopRequest"
+          local STOP_REQUEST_HINT_CONTAINER = "GameplayInputHelper"
+          local STOP_REQUEST_ACTION = CName.new("NCTC_RequestNextStop")
+
+          local function hideStopRequestHint()
+              if not NCBN.stopRequestVisible then return end
+              NCBN.stopRequestVisible = false
+              local evt = DeleteInputHintBySourceEvent.new()
+              evt.source = STOP_REQUEST_HINT_SOURCE
+              evt.targetHintContainer = STOP_REQUEST_HINT_CONTAINER
+              Game.GetUISystem():QueueEvent(evt)
+          end
+
+          local function showStopRequestHint()
+              if NCBN.stopRequestVisible then return end
+              if getFact("nctc_player_in_service_bus") ~= 1 or getFact("nctc_display_stop_requested") == 1 then return end
+              local evt = UpdateInputHintEvent.new()
+              local data = InputHintData.new()
+              data.action = STOP_REQUEST_ACTION
+              data.source = STOP_REQUEST_HINT_SOURCE
+              data.localizedLabel = "Demander le prochain arrêt"
+              data.enableHoldAnimation = false
+              data.sortingPriority = 1
+              evt.data = data
+              evt.show = true
+              evt.targetHintContainer = STOP_REQUEST_HINT_CONTAINER
+              Game.GetUISystem():QueueEvent(evt)
+              NCBN.stopRequestVisible = true
+          end
+
+          local function hideChoice()'''
+          s, n = pat.subn(repl, s, count=1)
+          assert n == 1, f'hint block replacement count={n}'
+          s = s.replace(' or (NCBN.stopRequestVisible and NCBN.stopRequestHub)', '')
+          s = s.replace('            if NCBN.stopRequestVisible and NCBN.stopRequestHub then table.insert(hubs, NCBN.stopRequestHub) end\n', '')
+          s = s.replace('        if NCBN.stopRequestVisible then return wrapped(0) end\n', '')
+          s = s.replace('        if NCBN.stopRequestVisible and NCBN.stopRequestHub then return wrapped(NCBN.stopRequestHub.id) end\n', '')
+
+          tail = s.rfind('    if #seats > 0 and not NCBN.choiceVisible then')
+          assert tail >= 0, 'final seat/hint block not found'
+          s = s[:tail] + '''    if #seats > 0 and not NCBN.choiceVisible then
+              NCBN.choiceVisible = true
+              showChoice()
+          elseif #seats == 0 then
+              hideChoice()
+          end
+          -- Native GameplayInputHelper hint: keep the stop-request command visible
+          -- anywhere in the NCTC cabin, even while a seat interaction is offered.
+          if inside and getFact("nctc_display_stop_requested") == 0 then
+              showStopRequestHint()
+          else
+              hideStopRequestHint()
+          end
+          end)
+          '''
+          assert '77903' not in s
+          assert 'makeStopRequestHub' not in s
+          assert 'stopRequestHub' not in s
+          assert 'UpdateInputHintEvent.new()' in s
+          assert 'data.action = STOP_REQUEST_ACTION' in s
+          p.write_text(s, encoding='utf-8')
+
+          p = Path('source/redscript/NCTC/NCTCTransitSystem.reds')
+          s = p.read_text(encoding='utf-8')
+          pat = re.compile(r'    if this\.bayParkingActive && Equals\(this\.bayParkingStage, 15\) \{.*?\n    if this\.bayParkingActive && Equals\(this\.bayParkingStage, 10\) \{', re.S)
+          repl = '''    if this.bayParkingActive && Equals(this.bayParkingStage, 15) {
+              // r387b: after the stop command, the Mahir can roll across P1 and
+              // contaminate the broad Vehicle overlap with its own body. Before P1
+              // the overlap remains authoritative. Once the bus pivot is inside the
+              // bay, pair it with the native forward-path check, which is self-filtered.
+              let waitLateral: Float;
+              let waitProgress: Float = this.GetBayProgress(waitLateral);
+              let waitOccupied: Bool = this.IsBayOccupiedByVehicle();
+              let bayLength: Float = Vector4.Distance(this.GetBayEntryPoint(), this.GetBayExitPoint());
+              let overlapCanBeSelf: Bool = waitProgress >= -1.00 && waitProgress <= bayLength + 2.00;
+              let forwardProbeDistance: Float = ClampF(Vector4.Distance(this.controller.GetWorldPosition(), this.GetBayExitPoint()) + 4.00, 10.00, 35.00);
+              let nativeForwardClear: Bool = this.controller.IsVanillaDeparturePathClear(forwardProbeDistance);
+              quests.SetFact(n"nctc_dev_bay_wait_overlap", waitOccupied ? 1 : 0);
+              quests.SetFact(n"nctc_dev_bay_wait_self_possible", overlapCanBeSelf ? 1 : 0);
+              quests.SetFact(n"nctc_dev_bay_wait_forward_clear", nativeForwardClear ? 1 : 0);
+              quests.SetFact(n"nctc_dev_bay_wait_progress_mm", Cast<Int32>(waitProgress * 1000.00));
+              quests.SetFact(n"nctc_dev_bay_wait_lateral_mm", Cast<Int32>(waitLateral * 1000.00));
+              if waitOccupied && (!overlapCanBeSelf || !nativeForwardClear) {
+                this.bayParkingRetryCount = 0;
+                this.ScheduleDispatch(0.25);
+                return;
+              };
+              if waitOccupied && overlapCanBeSelf {
+                this.bayParkingRetryCount += 1;
+                if this.bayParkingRetryCount < 2 {
+                  this.ScheduleDispatch(0.25);
+                  return;
+                };
+              } else {
+                this.bayParkingRetryCount = 0;
+              };
+              let waitSplinePath: String = this.NCTCBayArrivalSplinePath();
+              if Equals(waitSplinePath, "") {
+                this.bayParkingActive = false;
+                this.bayParkingStage = 0;
+                this.ScheduleDispatch(0.25);
+                return;
+              };
+              this.bayParkingStage = 10;
+              this.bayParkingWasEntered = true;
+              this.bayParkingRetryCount = 0;
+              this.driveCommandSent = this.controller.DriveOnBaySpline(waitSplinePath, 2.00, true);
+              this.PublishLoopDiagnostic(this.driveCommandSent ? 92 : 33, this.requestedStopId);
+              this.ScheduleDispatch(0.10);
+              return;
+            };
+
+            if this.bayParkingActive && Equals(this.bayParkingStage, 10) {'''
+          s, n = pat.subn(repl, s, count=1)
+          assert n == 1, f'bay wait replacement count={n}'
+          s = s.replace('nctc_dev_build_revision", 38401', 'nctc_dev_build_revision", 38702')
+          s = s.replace('nctc_dev_build_revision", 38602', 'nctc_dev_build_revision", 38702')
+          assert 'nctc_dev_bay_wait_self_possible' in s
+          assert 'nctc_dev_build_revision", 38702' in s
+          p.write_text(s, encoding='utf-8')
+
+          # Retarget the existing branch-local package builder and real compiler.
+          p = Path('.github/workflows/r387a-native-stop-input-builder.yml')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('r387a native stop request builder', 'r387b native stop request + bay wait builder')
+          s = s.replace('feature/native-stop-request-input-v1', 'fix/r387b-native-hint-bay-wait-deadlock')
+          s = s.replace('r387a-native-input', 'r387b-native-input')
+          s = s.replace('r387a-native-stop-request-input', 'r387b-native-stop-request-bay-wait-fix')
+          s = s.replace('nctc-r387a-native-stop-request-input-package', 'nctc-r387b-native-stop-request-bay-wait-fix-package')
+          s = s.replace("          grep -q 'inputActionName = CName.new(\"NCTC_RequestNextStop\")' source/cet/nctc_passenger/init.lua\n",
+                        "          grep -q 'UpdateInputHintEvent.new()' source/cet/nctc_passenger/init.lua\n          grep -q 'data.action = STOP_REQUEST_ACTION' source/cet/nctc_passenger/init.lua\n          ! grep -q '77903' source/cet/nctc_passenger/init.lua\n          grep -q 'nctc_dev_bay_wait_self_possible' source/redscript/NCTC/NCTCTransitSystem.reds\n          grep -q 'nctc_dev_build_revision\", 38702' source/redscript/NCTC/NCTCTransitSystem.reds\n")
+          p.write_text(s, encoding='utf-8')
+
+          p = Path('.github/workflows/r387a-redscript-ci.yml')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace('r387a REDscript CI', 'r387b REDscript CI')
+          s = s.replace('feature/native-stop-request-input-v1', 'fix/r387b-native-hint-bay-wait-deadlock')
+          s = s.replace('redscript-ci-r387a-', 'redscript-ci-r387b-')
+          p.write_text(s, encoding='utf-8')
+          PY
+          git diff --check
+          grep -n 'UpdateInputHintEvent\|STOP_REQUEST_ACTION\|bay_wait_self_possible\|bayParkingStage, 15' source/cet/nctc_passenger/init.lua source/redscript/NCTC/NCTCTransitSystem.reds
+      - name: Commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source/cet/nctc_passenger/init.lua source/redscript/NCTC/NCTCTransitSystem.reds .github/workflows/r387a-native-stop-input-builder.yml .github/workflows/r387a-redscript-ci.yml
+          git commit -m "fix: native stop hint and occupied-bay wait deadlock"
+          git push origin HEAD:fix/r387b-native-hint-bay-wait-deadlock
