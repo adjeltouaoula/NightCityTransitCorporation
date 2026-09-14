@@ -1,0 +1,321 @@
+--- a/source/redscript/NCTC/NCTCTransitSystem.reds
++++ b/source/redscript/NCTC/NCTCTransitSystem.reds
+@@ -179,7 +179,7 @@
+     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
+     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
+     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
+-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38101);
++    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38306);
+     return true;
+   }
+ 
+@@ -305,6 +305,58 @@
+     return true;
+   }
+ 
++
++  // r383e: rolling handoff after native JoinTraffic. Unlike the older
++  // DriveToTrafficAfterSpline path, do not pulse NoDriver after vanilla has
++  // just reacquired a traffic lane; keep DriverReady and submit the successor
++  // command with the measured rolling speed.
++  public func DriveToTrafficAfterJoin(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {
++    let callback: ref<NCTCDeferredDriveCommand>;
++    let driverReady: ref<AIEvent>;
++    let speedProfile: Int32;
++    let speedLimit: Float;
++    let generation: Int32;
++    if !this.IsReady() { return false; };
++
++    generation = this.NextDriveGeneration();
++    this.previousRouteCommand = this.activeRouteCommand;
++    this.activeRouteCommand = null;
++    this.activeSplineCommand = null;
++    this.activeJoinTrafficCommand = null;
++
++    driverReady = new AIEvent();
++    driverReady.name = n"DriverReady";
++    this.bus.QueueEvent(driverReady);
++    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(
++      n"nctc_dev_command_forced_start_speed_mm",
++      Cast<Int32>(MaxF(startSpeed, 0.00) * 1000.00)
++    );
++
++    callback = new NCTCDeferredDriveCommand();
++    speedLimit = this.ResolveTrafficSpeed(target, speedProfile);
++    callback.Configure(
++      this.bus,
++      this,
++      target,
++      minimumDistance,
++      speedLimit,
++      speedProfile,
++      MaxF(startSpeed, 0.00),
++      generation
++    );
++    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.030, false);
++    return true;
++  }
++
++  // Forward half of the validated r382h departure guard.
++  public func IsVanillaDeparturePathClear(distance: Float) -> Bool {
++    let crowd: ref<CrowdMemberBaseComponent>;
++    if !this.IsReady() { return false; };
++    crowd = this.bus.GetCrowdMemberComponent();
++    if !IsDefined(crowd) { return true; };
++    return crowd.CheckEmptyPath(distance);
++  }
++
+   public func JoinTrafficDirectFromBerth() -> Bool {
+     let driverReady: ref<AIEvent>;
+     let command: ref<AIVehicleJoinTrafficCommand>;
+@@ -1055,6 +1107,73 @@
+     return spatial.Overlap(dimensions, center, rotation, n"Vehicle", result);
+   }
+ 
++
++  // r383e generic bay assets use the same validated H2-local spline shape but
++  // are addressed per authored stop.
++  private func NCTCBayArrivalSplinePath() -> String {
++    if Equals(this.requestedStopId, 20) { return "$/nctc/bays/stop_20/arrival_spline"; };
++    if Equals(this.requestedStopId, 69) { return "$/nctc/bays/stop_69/arrival_spline"; };
++    if Equals(this.requestedStopId, 70) { return "$/nctc/bays/stop_70/arrival_spline"; };
++    return "";
++  }
++
++  private func NCTCBayRoadSideSign() -> Float {
++    let forward: Vector4 = this.GetBayForward();
++    let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
++    let fromEntryToSpawn: Vector4 = this.surveySpawn - this.GetBayEntryPoint();
++    let lateral: Float = Vector4.Dot(fromEntryToSpawn, right);
++    if lateral < -0.50 { return -1.00; };
++    return 1.00;
++  }
++
++  // Full r382h departure gate generalized from authored P1/P2 geometry:
++  // vanilla CheckEmptyPath(10m) in front plus the adjacent road lane from
++  // 15m behind to 10m ahead. Two consecutive clear polls are required by the
++  // service loop before JoinTraffic is sent.
++  private func NCTCDepartureBlocked() -> Bool {
++    let spatial: ref<SpatialQueriesSystem>;
++    let result: TraceResult;
++    let dimensions: Vector4;
++    let rotation: EulerAngles;
++    let forward: Vector4;
++    let right: Vector4;
++    let center: Vector4;
++    let sideSign: Float = 1.00;
++    let sideOffset: Float;
++    let lateralBlocked: Bool = false;
++    let forwardClear: Bool;
++    let blocked: Bool;
++    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
++
++    if !this.HasServiceBay() || !IsDefined(this.controller) { return false; };
++
++    forwardClear = this.controller.IsVanillaDeparturePathClear(10.00);
++    sideSign = this.NCTCBayRoadSideSign();
++    spatial = GameInstance.GetSpatialQueriesSystem(this.GetGameInstance());
++    if IsDefined(spatial) {
++      forward = this.GetBayForward();
++      if AbsF(forward.X) > 0.01 || AbsF(forward.Y) > 0.01 {
++        right = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
++        sideOffset = MaxF(this.GetBayWidth() * 0.50 + 2.75, 4.10);
++        center = this.controller.GetWorldPosition() - forward * 2.50 + right * sideOffset * sideSign;
++        center.Z += 1.25;
++        dimensions = new Vector4(1.65, 12.50, 1.75, 0.00);
++        rotation = Quaternion.ToEulerAngles(Quaternion.BuildFromDirectionVector(forward));
++        lateralBlocked = spatial.Overlap(dimensions, center, rotation, n"Vehicle", result);
++      };
++    };
++
++    blocked = !forwardClear || lateralBlocked;
++    if IsDefined(quests) {
++      quests.SetFact(n"nctc_dev_generic_bay_road_side", sideSign > 0.00 ? 1 : -1);
++      quests.SetFact(n"nctc_dev_generic_bay_forward_clear", forwardClear ? 1 : 0);
++      quests.SetFact(n"nctc_dev_generic_bay_lateral_blocked", lateralBlocked ? 1 : 0);
++      quests.SetFact(n"nctc_dev_generic_bay_departure_blocked", blocked ? 1 : 0);
++      quests.SetFact(n"nctc_dev_generic_bay_guard_revision", 38306);
++    };
++    return blocked;
++  }
++
+   // Positive longitudinal means the real berth is still ahead of the bus.
+   // Lateral is measured against the surveyed berth axis, not the bus heading.
+   private func GetBerthProgress(out lateral: Float) -> Float {
+@@ -1448,33 +1567,42 @@
+         return;
+       };
+ 
++      let leaveBayDirect: Bool = this.HasServiceBay() && !this.bayParkingBypass && this.bayParkingWasEntered;
++      if leaveBayDirect {
++        this.controller.ClosePassengerDoor();
++        // r382h: never launch into traffic on one transient clear frame.
++        if this.NCTCDepartureBlocked() {
++          this.bayParkingRetryCount = 0;
++          quests.SetFact(n"nctc_dev_generic_bay_clear_polls", 0);
++          this.ScheduleDispatch(0.05);
++          return;
++        };
++        this.bayParkingRetryCount += 1;
++        quests.SetFact(n"nctc_dev_generic_bay_clear_polls", this.bayParkingRetryCount);
++        if this.bayParkingRetryCount < 2 {
++          this.ScheduleDispatch(0.05);
++          return;
++        };
++      };
++
+       quests.SetFact(n"nctc_passenger_departure_requested", 0);
+       quests.SetFact(n"nctc_service_bus_at_stop", 0);
+       this.controller.ClosePassengerDoor();
+-      let leaveBayDirect: Bool = this.HasServiceBay() && !this.bayParkingBypass && this.bayParkingWasEntered;
+       this.serviceStopId = 0;
+       this.arrived = false;
+       this.dwellPolls = 0;
+       this.legPolls = 0;
+       if leaveBayDirect {
+-        let exitSpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 5.00), 2.00);
+         this.bayParkingActive = true;
++        this.bayParkingStage = 14;
+         this.bayParkingRetryCount = 0;
+-        if Equals(this.requestedStopId, 70) {
+-          this.bayParkingStage = 14;
+-          quests.SetFact(n"nctc_dev_join_pre_speed_mm", Cast<Int32>(AbsF(this.controller.GetCurrentSpeed()) * 1000.00));
+-          this.driveCommandSent = this.controller.JoinTrafficDirectFromBerth();
+-          quests.SetFact(n"nctc_dev_join_traffic_state", this.controller.GetJoinTrafficCommandStatusCode());
+-          quests.SetFact(n"nctc_dev_bus_in_traffic_lane", this.controller.IsInTrafficLane() ? 1 : 0);
+-          this.PublishLoopDiagnostic(this.driveCommandSent ? 84 : 33, this.requestedStopId);
+-          this.ScheduleDispatch(0.05);
+-          return;
+-        };
+-        this.bayParkingStage = 3;
+-        this.bayParkingRoadTarget = this.GetBayParkingRoadTarget();
+-        this.driveCommandSent = this.controller.DriveToBerthDirect(this.bayParkingRoadTarget, exitSpeed, 5.00);
+-        this.PublishLoopDiagnostic(this.driveCommandSent ? 63 : 33, this.requestedStopId);
+-        this.ScheduleDispatch(0.10);
++        quests.SetFact(n"nctc_dev_build_revision", 38306);
++        quests.SetFact(n"nctc_dev_join_pre_speed_mm", Cast<Int32>(AbsF(this.controller.GetCurrentSpeed()) * 1000.00));
++        this.driveCommandSent = this.controller.JoinTrafficDirectFromBerth();
++        quests.SetFact(n"nctc_dev_join_traffic_state", this.controller.GetJoinTrafficCommandStatusCode());
++        quests.SetFact(n"nctc_dev_bus_in_traffic_lane", this.controller.IsInTrafficLane() ? 1 : 0);
++        this.PublishLoopDiagnostic(this.driveCommandSent ? 90 : 33, this.requestedStopId);
++        this.ScheduleDispatch(0.05);
+         return;
+       };
+       if !this.AdvanceToNextStop() {
+@@ -1562,10 +1690,9 @@
+         quests.SetFact(n"nctc_dev_berth_occupancy_stop_id", this.requestedStopId);
+         quests.SetFact(n"nctc_dev_berth_occupied", bayOccupied ? 1 : 0);
+         if bayOccupied {
+-          this.bayParkingBypass = true;
+-          this.bayParkingActive = false;
+-          this.bayParkingStage = 0;
+-          this.bayParkingWasEntered = false;
++          // r383f: occupancy is no longer a permanent bay bypass. Keep the
++          // request alive; the aligned handoff gate below will stop and wait
++          // near the bay entrance until the overlap becomes clear.
+           this.PublishLoopDiagnostic(50, this.requestedStopId);
+         };
+       };
+@@ -1590,24 +1717,67 @@
+       };
+     };
+ 
+-    // r376a H2-ONLY NATIVE SPLINE ARRIVAL POC.
+-    // All r375 DriveToPoint bay trajectory stages are intentionally removed.
++    // r383e generic native-spline arrival. H2, Cannery and Delamain all use
++    // the same validated H2-local curve transformed to their authored P1/P2.
+     if !this.followingPassage && this.HasServiceBay() && !this.bayParkingActive
+-      && !this.bayParkingBypass && Equals(this.requestedStopId, this.serviceStopId)
+-      && Equals(this.requestedStopId, 70) {
+-      let entryLateral: Float;
+-      let entryLongitudinal: Float = this.GetBayEntryProgress(entryLateral);
+-      if entryLongitudinal > 0.50 && entryLongitudinal <= 24.00 && entryLateral <= 12.00 {
+-        let entrySpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 6.00), 2.00);
+-        this.bayParkingActive = true;
+-        this.bayParkingStage = 10;
+-        this.bayParkingWasEntered = true;
+-        this.bayParkingRetryCount = 0;
+-        this.driveCommandSent = this.controller.DriveOnBaySpline("$/nctc/bays/h2/arrival_spline", entrySpeed, true);
+-        this.PublishLoopDiagnostic(this.driveCommandSent ? 68 : 33, this.requestedStopId);
+-        this.ScheduleDispatch(0.10);
++      && !this.bayParkingBypass && Equals(this.requestedStopId, this.serviceStopId) {
++      let splinePath: String = this.NCTCBayArrivalSplinePath();
++      if NotEquals(splinePath, "") {
++        let entryLateral: Float;
++        let entryLongitudinal: Float = this.GetBayEntryProgress(entryLateral);
++        let headingDot: Float = Vector4.Dot(Vector4.Normalize2D(this.controller.GetWorldForward()), this.GetBayForward());
++        // H2 and Cannery approach almost parallel to the bay. Delamain exits a
++        // junction immediately before the bay; switching at headingDot ~0.80
++        // cuts the corner and sends the Mahir toward the pole. Let vanilla
++        // traffic finish the turn and only hand off once the bus is aligned.
++        if entryLongitudinal > 0.50 && entryLongitudinal <= 26.00 && entryLateral <= 12.00 && headingDot >= 0.94 {
++          if this.IsBayOccupiedByVehicle() {
++            this.controller.ArriveAtStop();
++            this.bayParkingActive = true;
++            this.bayParkingStage = 15;
++            this.bayParkingWasEntered = false;
++            this.driveCommandSent = false;
++            this.PublishLoopDiagnostic(50, this.requestedStopId);
++            this.ScheduleDispatch(0.25);
++            return;
++          };
++          let entrySpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 6.00), 2.00);
++          this.bayParkingActive = true;
++          this.bayParkingStage = 10;
++          this.bayParkingWasEntered = true;
++          this.bayParkingRetryCount = 0;
++          quests.SetFact(n"nctc_dev_build_revision", 38306);
++          quests.SetFact(n"nctc_dev_generic_bay_arrival_stop_id", this.requestedStopId);
++          quests.SetFact(n"nctc_dev_generic_bay_heading_dot_x1000", Cast<Int32>(headingDot * 1000.00));
++          this.driveCommandSent = this.controller.DriveOnBaySpline(splinePath, entrySpeed, true);
++          this.PublishLoopDiagnostic(this.driveCommandSent ? 92 : 33, this.requestedStopId);
++          this.ScheduleDispatch(0.10);
++          return;
++        };
++      };
++    };
++
++    if this.bayParkingActive && Equals(this.bayParkingStage, 15) {
++      // Bay occupied at the aligned handoff gate: stay stopped on the road and
++      // enter once clear instead of permanently bypassing the bay.
++      if this.IsBayOccupiedByVehicle() {
++        this.ScheduleDispatch(0.25);
++        return;
++      };
++      let waitSplinePath: String = this.NCTCBayArrivalSplinePath();
++      if Equals(waitSplinePath, "") {
++        this.bayParkingActive = false;
++        this.bayParkingStage = 0;
++        this.ScheduleDispatch(0.25);
+         return;
+       };
++      this.bayParkingStage = 10;
++      this.bayParkingWasEntered = true;
++      this.bayParkingRetryCount = 0;
++      this.driveCommandSent = this.controller.DriveOnBaySpline(waitSplinePath, 2.00, true);
++      this.PublishLoopDiagnostic(this.driveCommandSent ? 92 : 33, this.requestedStopId);
++      this.ScheduleDispatch(0.10);
++      return;
+     };
+ 
+     if this.bayParkingActive && Equals(this.bayParkingStage, 10) {
+@@ -1673,11 +1843,17 @@
+       quests.SetFact(n"nctc_dev_join_poll_count", this.bayParkingRetryCount);
+       quests.SetFact(n"nctc_dev_join_speed_mm", Cast<Int32>(joinedSpeed * 1000.00));
+       if inTrafficLane {
++        if !this.AdvanceToNextStop() {
++          this.PublishLoopDiagnostic(34, 0);
++          this.ScheduleDispatch(1.00);
++          return;
++        };
++        this.legPolls = 0;
+         this.bayParkingActive = false;
+         this.bayParkingStage = 0;
+         this.bayParkingRetryCount = 0;
+-        this.driveCommandSent = this.controller.DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, joinedSpeed);
+-        this.PublishLoopDiagnostic(this.driveCommandSent ? 86 : 33, this.requestedStopId);
++        this.driveCommandSent = this.controller.DriveToTrafficAfterJoin(this.GetTrafficTarget(), 0.00, joinedSpeed);
++        this.PublishLoopDiagnostic(this.driveCommandSent ? 91 : 33, this.requestedStopId);
+         this.ScheduleDispatch(0.05);
+         return;
+       };
