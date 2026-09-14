@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""Generate native NCTC bay-arrival spline assets from validated geometry.
+
+The template curve is the player-validated H2 shape expressed in bay-local
+coordinates. For every authored bay we transform that same curve into the local
+P1/P2 frame, relocate both the streaming sector and its streaming-block
+metadata, and assign a deterministic NodeRef:
+
+    $/nctc/bays/stop_<ID>/arrival_spline
+
+The entry end is chosen automatically as the P1/P2 endpoint nearest the surveyed
+upstream spawn, so future captures may record the two endpoints in either order.
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import json
+import math
+from pathlib import Path
+from typing import Any
+
+TEMPLATE_PREFIX = "nctc\\bays\\h2"
+TEMPLATE_NODE_REF = "$/nctc/bays/h2/arrival_spline"
+
+
+def walk_replace(value: Any, replacements: dict[str, str]) -> Any:
+    if isinstance(value, dict):
+        return {k: walk_replace(v, replacements) for k, v in value.items()}
+    if isinstance(value, list):
+        return [walk_replace(v, replacements) for v in value]
+    if isinstance(value, str):
+        out = value
+        for old, new in replacements.items():
+            out = out.replace(old, new)
+        return out
+    return value
+
+
+def find_spline(obj: Any) -> dict[str, Any] | None:
+    if isinstance(obj, dict):
+        if obj.get("$type") == "Spline" and isinstance(obj.get("points"), list):
+            return obj
+        for value in obj.values():
+            found = find_spline(value)
+            if found is not None:
+                return found
+    elif isinstance(obj, list):
+        for value in obj:
+            found = find_spline(value)
+            if found is not None:
+                return found
+    return None
+
+
+def vec3(point: dict[str, float]) -> tuple[float, float, float]:
+    return float(point["x"]), float(point["y"]), float(point.get("z", 0.0))
+
+
+def streaming_grid_cell(x: float, y: float, z: float, level: int) -> int:
+    cell_m = 64 * (2**level)
+    side = 2 ** (8 - level)
+    half = side // 2
+    i = math.floor(x / cell_m)
+    j = math.floor(y / cell_m)
+    k = math.floor(z / cell_m)
+    return (i + half) + side * (j + half) + side * side * (k + half)
+
+
+def sqdist_xy(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+    return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
+
+
+def generate_bay(
+    sector_template: dict[str, Any],
+    block_template: dict[str, Any],
+    bay: dict[str, Any],
+    out: Path,
+) -> None:
+    stop_id = int(bay["stopId"])
+    p1 = vec3(bay["p1"])
+    p2 = vec3(bay["p2"])
+    spawn = vec3(bay["spawn"])
+    width = float(bay["width"])
+
+    if sqdist_xy(spawn, p2) < sqdist_xy(spawn, p1):
+        entry, exitp = p2, p1
+        entry_source = "p2"
+    else:
+        entry, exitp = p1, p2
+        entry_source = "p1"
+
+    ex, ey, ez = entry
+    xx, xy, xz = exitp
+    sx, sy, _ = spawn
+    dx, dy = xx - ex, xy - ey
+    bay_length = math.hypot(dx, dy)
+    if bay_length < 8.0:
+        raise ValueError(f"stop {stop_id}: bay too short ({bay_length:.2f}m)")
+    if not 2.0 <= width <= 5.0:
+        raise ValueError(f"stop {stop_id}: invalid width ({width:.2f}m)")
+
+    fx, fy = dx / bay_length, dy / bay_length
+    rx, ry = -fy, fx
+    spawn_lateral = (sx - ex) * rx + (sy - ey) * ry
+    side_sign = -1.0 if spawn_lateral < -0.50 else 1.0
+
+    road_offset = max(4.20, width * 0.50 + 2.75)
+    service_depth = min(20.0, bay_length * 0.65)
+    recipe = [
+        (-22.0, road_offset),
+        (-10.0, road_offset),
+        (0.0, road_offset),
+        (service_depth * 0.25, road_offset * (2.5 / 4.2)),
+        (service_depth * 0.50, road_offset * (0.8 / 4.2)),
+        (service_depth * 0.75, 0.0),
+        (service_depth, 0.0),
+    ]
+
+    prefix = f"nctc\\bays\\stop_{stop_id}"
+    node_ref = f"$/nctc/bays/stop_{stop_id}/arrival_spline"
+    replacements = {
+        TEMPLATE_PREFIX: prefix,
+        TEMPLATE_NODE_REF: node_ref,
+        "h2_arrival.streamingsector": "arrival.streamingsector",
+    }
+    sector = walk_replace(copy.deepcopy(sector_template), replacements)
+    block = walk_replace(copy.deepcopy(block_template), replacements)
+
+    root = sector["Data"]["RootChunk"]
+    node_data = root["nodeData"]["Data"][0]
+    for key in ("Position", "Pivot"):
+        node_data[key]["X"] = ex
+        node_data[key]["Y"] = ey
+        node_data[key]["Z"] = ez
+    node_data["QuestPrefabRefHash"]["$storage"] = "string"
+    node_data["QuestPrefabRefHash"]["$value"] = node_ref
+    root["nodeRefs"][0]["$storage"] = "string"
+    root["nodeRefs"][0]["$value"] = node_ref
+
+    spline = find_spline(sector)
+    if spline is None:
+        raise ValueError("validated template contains no Spline")
+    points = spline["points"]
+    if len(points) != 7:
+        raise ValueError(f"validated template has {len(points)} points; expected 7")
+
+    world_points: list[tuple[float, float, float]] = []
+    for point, (longitudinal, lateral) in zip(points, recipe):
+        lateral *= side_sign
+        lx = fx * longitudinal + rx * lateral
+        ly = fy * longitudinal + ry * lateral
+        point["position"]["X"] = lx
+        point["position"]["Y"] = ly
+        point["position"]["Z"] = 0.0
+        for tangent in point.get("tangents", {}).get("Elements", []):
+            tangent["X"] = 0.0
+            tangent["Y"] = 0.0
+            tangent["Z"] = 0.0
+        world_points.append((ex + lx, ey + ly, ez))
+
+    min_x = min(p[0] for p in world_points) - 8.0
+    max_x = max(p[0] for p in world_points) + 8.0
+    min_y = min(p[1] for p in world_points) - 8.0
+    max_y = max(p[1] for p in world_points) + 8.0
+    node_data["Bounds"]["Min"]["X"] = min_x
+    node_data["Bounds"]["Min"]["Y"] = min_y
+    node_data["Bounds"]["Min"]["Z"] = ez - 3.0
+    node_data["Bounds"]["Max"]["X"] = max_x
+    node_data["Bounds"]["Max"]["Y"] = max_y
+    node_data["Bounds"]["Max"]["Z"] = ez + 5.0
+
+    block_root = block["Data"]["RootChunk"]
+    descriptors = block_root.get("descriptors", [])
+    if len(descriptors) != 1:
+        raise ValueError(f"validated template has {len(descriptors)} descriptors; expected 1")
+    descriptor = descriptors[0]
+    level = int(descriptor.get("level", 1))
+    grid_cell = streaming_grid_cell(ex, ey, ez, level)
+    descriptor["blockIndex"]["rldGridCell"] = grid_cell
+    margin = 320.0
+    box = descriptor["streamingBox"]
+    box["Min"]["X"], box["Min"]["Y"], box["Min"]["Z"] = ex - margin, ey - margin, ez - margin
+    box["Max"]["X"], box["Max"]["Y"], box["Max"]["Z"] = ex + margin, ey + margin, ez + margin
+
+    bay_dir = out / f"stop_{stop_id}"
+    bay_dir.mkdir(parents=True, exist_ok=True)
+    (bay_dir / "arrival.streamingsector.json").write_text(
+        json.dumps(sector, indent=2), encoding="utf-8", newline="\n"
+    )
+    (bay_dir / "all.streamingblock.json").write_text(
+        json.dumps(block, indent=2), encoding="utf-8", newline="\n"
+    )
+    report = {
+        "stopId": stop_id,
+        "label": bay.get("label", ""),
+        "nodeRef": node_ref,
+        "entrySource": entry_source,
+        "entry": {"x": ex, "y": ey, "z": ez},
+        "exit": {"x": xx, "y": xy, "z": xz},
+        "bayLength": bay_length,
+        "width": width,
+        "roadSideSign": side_sign,
+        "roadOffset": road_offset,
+        "serviceDepth": service_depth,
+        "streamingLevel": level,
+        "streamingGridCell": grid_cell,
+        "streamingBoxCenter": {"x": ex, "y": ey, "z": ez},
+        "streamingBoxMargin": margin,
+        "recipe": [{"longitudinal": a, "lateral": b * side_sign} for a, b in recipe],
+        "worldPoints": [{"x": x, "y": y, "z": z} for x, y, z in world_points],
+    }
+    (bay_dir / "report.json").write_text(
+        json.dumps(report, indent=2), encoding="utf-8", newline="\n"
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--sector-template", required=True, type=Path)
+    parser.add_argument("--block-template", required=True, type=Path)
+    parser.add_argument("--manifest", required=True, type=Path)
+    parser.add_argument("--out", required=True, type=Path)
+    args = parser.parse_args()
+
+    sector_template = json.loads(args.sector_template.read_text(encoding="utf-8"))
+    block_template = json.loads(args.block_template.read_text(encoding="utf-8"))
+    manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+    args.out.mkdir(parents=True, exist_ok=True)
+    for bay in manifest["bays"]:
+        generate_bay(sector_template, block_template, bay, args.out)
+
+
+if __name__ == "__main__":
+    main()
