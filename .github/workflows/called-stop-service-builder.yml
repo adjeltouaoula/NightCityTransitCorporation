@@ -1,0 +1,174 @@
+name: r385a called stop service builder
+
+on:
+  push:
+    branches:
+      - feature/called-stop-service-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate called-stop source invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'private let calledStopId: Int32' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'private let calledStopPending: Bool' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'private func IsCurrentStopReservedForService() -> Bool' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'this.calledStopId = stopId' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'this.calledStopPending = true' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'this.CompleteCalledStopService();' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'PublishLoopDiagnostic(93, previousStopId)' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'nctc_dev_build_revision", 38501' source/redscript/NCTC/NCTCTransitSystem.reds
+          test ! -e source/redscript/NCTC/NCTCGenericBayDeparture.reds
+          test ! -e source/archive/pc/mod/NCTCH2Spline.archive
+          echo '83a70f4b30788b210093b2939ba3954923e26372b4f98443f407736e22ec9860  tools/bays/template/validated_arrival_template.archive' | sha256sum -c -
+
+      - name: Extract authored bays
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r385a"
+          mkdir -p "$WORK"
+          python3 tools/bays/extract_bays_from_network.py \
+            --network source/cet/nctc_survey/nctc_network.default.json \
+            --out "$WORK/bays.json"
+          cat "$WORK/bays.json"
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install WolvenKit CLI 9.0.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r385a"
+          mkdir -p "$WORK/tools"
+          dotnet tool install WolvenKit.CLI --version 9.0.1 --tool-path "$WORK/tools"
+
+      - name: Generate generic bay assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r385a"
+          TOOL="$WORK/tools/cp77tools"
+          RAW="$WORK/template-raw"
+          TEMPLATE="$WORK/template-json"
+          GENERATED="$WORK/generated"
+          OUT="$WORK/out"
+          MANIFEST="$WORK/bays.json"
+          mkdir -p "$RAW" "$TEMPLATE" "$GENERATED" "$OUT"
+
+          "$TOOL" unbundle tools/bays/template/validated_arrival_template.archive -o "$RAW"
+          SECTOR="$(find "$RAW" -type f -name 'h2_arrival.streamingsector' | head -n1)"
+          BLOCK="$(find "$RAW" -type f -name 'all.streamingblock' | head -n1)"
+          test -n "$SECTOR"
+          test -n "$BLOCK"
+
+          "$TOOL" convert serialize "$SECTOR" -o "$TEMPLATE"
+          "$TOOL" convert serialize "$BLOCK" -o "$TEMPLATE"
+          SECTOR_JSON="$(find "$TEMPLATE" -type f -name 'h2_arrival.streamingsector.json' | head -n1)"
+          BLOCK_JSON="$(find "$TEMPLATE" -type f -name 'all.streamingblock.json' | head -n1)"
+          test -n "$SECTOR_JSON"
+          test -n "$BLOCK_JSON"
+
+          python3 tools/bays/generate_arrival_splines.py \
+            --sector-template "$SECTOR_JSON" \
+            --block-template "$BLOCK_JSON" \
+            --manifest "$MANIFEST" \
+            --out "$GENERATED"
+
+          mapfile -t STOPS < <(python3 - "$MANIFEST" <<'PY'
+          import json, sys
+          data=json.load(open(sys.argv[1],encoding='utf-8'))
+          for bay in data['bays']:
+              print(int(bay['stopId']))
+          PY
+          )
+          test "${#STOPS[@]}" -gt 0
+
+          for STOP in "${STOPS[@]}"; do
+            D="$GENERATED/stop_${STOP}"
+            "$TOOL" convert deserialize "$D/arrival.streamingsector.json"
+            "$TOOL" convert deserialize "$D/all.streamingblock.json"
+            test -s "$D/arrival.streamingsector"
+            test -s "$D/all.streamingblock"
+
+            PACKROOT="$WORK/NCTCBay${STOP}Spline"
+            mkdir -p "$PACKROOT/nctc/bays/stop_${STOP}/sectors"
+            cp "$D/arrival.streamingsector" "$PACKROOT/nctc/bays/stop_${STOP}/sectors/arrival.streamingsector"
+            cp "$D/all.streamingblock" "$PACKROOT/nctc/bays/stop_${STOP}/all.streamingblock"
+            "$TOOL" pack "$PACKROOT" -o "$OUT"
+            test -s "$OUT/NCTCBay${STOP}Spline.archive"
+            cat > "$OUT/NCTCBay${STOP}Spline.archive.xl" <<EOF
+          streaming:
+            blocks:
+              - nctc\\bays\\stop_${STOP}\\all.streamingblock
+          EOF
+            cp "$D/report.json" "$OUT/stop_${STOP}_report.json"
+          done
+
+          cp "$MANIFEST" "$OUT/GENERATED_BAYS.json"
+          sha256sum "$OUT"/*.archive "$OUT"/*.archive.xl | tee "$OUT/SHA256SUMS.txt"
+
+      - name: Assemble r385a test package
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r385a"
+          OUT="$WORK/out"
+          PKG="$WORK/package"
+          mkdir -p \
+            "$PKG/archive/pc/mod" \
+            "$PKG/r6/scripts/NCTC" \
+            "$PKG/r6/tweaks/NCTC" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+
+          cp source/archive/pc/mod/* "$PKG/archive/pc/mod/"
+          cp "$OUT"/*.archive "$PKG/archive/pc/mod/"
+          cp "$OUT"/*.archive.xl "$PKG/archive/pc/mod/"
+          cp source/redscript/NCTC/*.reds "$PKG/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$PKG/r6/tweaks/NCTC/"
+          cp source/cet/nctc_passenger/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp source/cet/nctc_survey/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+
+          test ! -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+          test ! -e "$PKG/archive/pc/mod/NCTCH2Spline.archive"
+          test ! -e "$PKG/archive/pc/mod/NCTCH2Departure.archive"
+
+          EXPECTED="$(python3 - "$OUT/GENERATED_BAYS.json" <<'PY'
+          import json, sys
+          print(json.load(open(sys.argv[1],encoding='utf-8'))['bayCount'])
+          PY
+          )"
+          ACTUAL="$(find "$PKG/archive/pc/mod" -maxdepth 1 -type f -name 'NCTCBay*Spline.archive' | wc -l)"
+          test "$EXPECTED" -eq "$ACTUAL"
+
+          ZIP="$WORK/NightCityTransitCorporation-0.3.0-devkit-r385a-called-stop-service-v1.zip"
+          (cd "$PKG" && zip -qr "$ZIP" .)
+          unzip -t "$ZIP"
+          sha256sum "$ZIP" | tee "$WORK/PACKAGE_SHA256.txt"
+          cp "$OUT/SHA256SUMS.txt" "$WORK/GENERIC_BAY_ASSET_SHA256SUMS.txt"
+          cp "$OUT/GENERATED_BAYS.json" "$WORK/GENERATED_BAYS.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r385a-called-stop-service-v1-package
+          path: |
+            ${{ runner.temp }}/r385a/NightCityTransitCorporation-0.3.0-devkit-r385a-called-stop-service-v1.zip
+            ${{ runner.temp }}/r385a/PACKAGE_SHA256.txt
+            ${{ runner.temp }}/r385a/GENERIC_BAY_ASSET_SHA256SUMS.txt
+            ${{ runner.temp }}/r385a/GENERATED_BAYS.json
+            ${{ runner.temp }}/r385a/out/*_report.json
+          compression-level: 0
