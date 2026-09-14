@@ -37,7 +37,17 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
     command.targetPosition = Vector4.Vector4To3(this.target);
     command.secureTimeOut = 1200.00;
     command.useTraffic = true;
-    command.speedInTraffic = this.trafficSpeedLimit;
+    if Equals(this.trafficSpeedProfile, 5) {
+      // r374f: speedInTraffic alone is not a hard vehicle-speed cap.
+      // Match the standalone autonomous actuator semantics: the traffic
+      // controller keeps its >=8 traffic value while maxSpeed carries the
+      // actual requested approach cap.
+      command.speedInTraffic = MaxF(this.trafficSpeedLimit, 8.00);
+      command.maxSpeed = this.trafficSpeedLimit;
+      command.minSpeed = 0.00;
+    } else {
+      command.speedInTraffic = this.trafficSpeedLimit;
+    };
     command.forceGreenLights = false;
     // These must remain false for the service bus. Enabling either one lets
     // the traffic controller snap the long Mahir to a neighboring lane when
@@ -66,6 +76,89 @@ public class NCTCDeferredDriveCommand extends DelayCallback {
   }
 }
 
+public class NCTCDeferredBerthDriveCommand extends DelayCallback {
+  private let bus: wref<VehicleObject>;
+  private let controller: wref<NCTCServiceBusController>;
+  private let target: Vector4;
+  private let startSpeed: Float;
+  private let maxSpeed: Float;
+  private let commandGeneration: Int32;
+
+  public func Configure(bus: ref<VehicleObject>, controller: ref<NCTCServiceBusController>, target: Vector4, startSpeed: Float, maxSpeed: Float, commandGeneration: Int32) -> ref<NCTCDeferredBerthDriveCommand> {
+    this.bus = bus;
+    this.controller = controller;
+    this.target = target;
+    this.startSpeed = startSpeed;
+    this.maxSpeed = maxSpeed;
+    this.commandGeneration = commandGeneration;
+    return this;
+  }
+
+  public func Call() -> Void {
+    let command: ref<AIVehicleDriveToPointCommand>;
+    if !IsDefined(this.bus) || !this.bus.IsAttached() || !IsDefined(this.bus.GetAIComponent()) { return; };
+    if IsDefined(this.controller) && !this.controller.IsDriveGenerationCurrent(this.commandGeneration) {
+      this.controller.ReportStaleDriveCallback(this.commandGeneration);
+      return;
+    };
+    command = new AIVehicleDriveToPointCommand();
+    command.targetPosition = Vector4.Vector4To3(this.target);
+    command.secureTimeOut = 120.00;
+    command.useTraffic = false;
+    command.maxSpeed = ClampF(this.maxSpeed, 1.00, 7.00);
+    command.minSpeed = 0.00;
+    command.clearTrafficOnPath = false;
+    command.minimumDistanceToTarget = 0.00;
+    if this.startSpeed > 0.50 { command.forcedStartSpeed = this.startSpeed; };
+    command.needDriver = false;
+    command.driveDownTheRoadIndefinitely = false;
+    this.bus.GetAIComponent().SendCommand(command);
+    if IsDefined(this.controller) { this.controller.SetActiveRouteCommand(command, this.commandGeneration); };
+  }
+}
+
+
+public class NCTCDeferredSplineDriveCommand extends DelayCallback {
+  private let bus: wref<VehicleObject>;
+  private let controller: wref<NCTCServiceBusController>;
+  private let splinePath: String;
+  private let startSpeed: Float;
+  private let stopAtPathEnd: Bool;
+  private let commandGeneration: Int32;
+
+  public func Configure(bus: ref<VehicleObject>, controller: ref<NCTCServiceBusController>, splinePath: String, startSpeed: Float, stopAtPathEnd: Bool, commandGeneration: Int32) -> ref<NCTCDeferredSplineDriveCommand> {
+    this.bus = bus;
+    this.controller = controller;
+    this.splinePath = splinePath;
+    this.startSpeed = startSpeed;
+    this.stopAtPathEnd = stopAtPathEnd;
+    this.commandGeneration = commandGeneration;
+    return this;
+  }
+
+  public func Call() -> Void {
+    let command: ref<AIVehicleOnSplineCommand>;
+    if !IsDefined(this.bus) || !this.bus.IsAttached() || !IsDefined(this.bus.GetAIComponent()) { return; };
+    if IsDefined(this.controller) && !this.controller.IsDriveGenerationCurrent(this.commandGeneration) {
+      this.controller.ReportStaleDriveCallback(this.commandGeneration);
+      return;
+    };
+    command = new AIVehicleOnSplineCommand();
+    command.splineRef = CreateNodeRef(this.splinePath);
+    command.secureTimeOut = 120.00;
+    command.driveBackwards = false;
+    command.reverseSpline = false;
+    command.startFromClosest = true;
+    command.stopAtPathEnd = this.stopAtPathEnd;
+    command.needDriver = false;
+    command.useKinematic = false;
+    if this.startSpeed > 0.50 { command.forcedStartSpeed = this.startSpeed; };
+    this.bus.GetAIComponent().SendCommand(command);
+    if IsDefined(this.controller) { this.controller.SetActiveSplineCommand(command, this.commandGeneration); };
+  }
+}
+
+
 // NCTC owns the native autonomous command lifecycle. V remains an ordinary
 // passenger and no player AutoDrive system participates in service routing.
 public class NCTCServiceBusController extends IScriptable {
@@ -76,6 +169,8 @@ public class NCTCServiceBusController extends IScriptable {
   // route handoff, so the dev log can prove whether it was replaced or left
   // alive alongside the command for the next stop.
   private let previousRouteCommand: ref<AIVehicleDriveToPointCommand>;
+  private let activeSplineCommand: ref<AIVehicleOnSplineCommand>;
+  private let activeJoinTrafficCommand: ref<AIVehicleJoinTrafficCommand>;
   private let driveGeneration: Int32;
 
   public func Bind(bus: ref<VehicleObject>) -> Bool {
@@ -84,7 +179,7 @@ public class NCTCServiceBusController extends IScriptable {
     this.bus.GetVehiclePS().SetIsPlayerVehicle(false);
     GameInstance.GetGodModeSystem(this.bus.GetGame()).AddGodMode(this.bus.GetEntityID(), gameGodModeType.Invulnerable, n"NCTCServiceBus");
     GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_service_bus_invulnerable", 1);
-    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 37218);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38401);
     return true;
   }
 
@@ -210,6 +305,211 @@ public class NCTCServiceBusController extends IScriptable {
     return true;
   }
 
+
+  // r383e: rolling handoff after native JoinTraffic. Unlike the older
+  // DriveToTrafficAfterSpline path, do not pulse NoDriver after vanilla has
+  // just reacquired a traffic lane; keep DriverReady and submit the successor
+  // command with the measured rolling speed.
+  public func DriveToTrafficAfterJoin(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {
+    let callback: ref<NCTCDeferredDriveCommand>;
+    let driverReady: ref<AIEvent>;
+    let speedProfile: Int32;
+    let speedLimit: Float;
+    let generation: Int32;
+    if !this.IsReady() { return false; };
+
+    generation = this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.activeRouteCommand = null;
+    this.activeSplineCommand = null;
+    this.activeJoinTrafficCommand = null;
+
+    driverReady = new AIEvent();
+    driverReady.name = n"DriverReady";
+    this.bus.QueueEvent(driverReady);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(
+      n"nctc_dev_command_forced_start_speed_mm",
+      Cast<Int32>(MaxF(startSpeed, 0.00) * 1000.00)
+    );
+
+    callback = new NCTCDeferredDriveCommand();
+    speedLimit = this.ResolveTrafficSpeed(target, speedProfile);
+    callback.Configure(
+      this.bus,
+      this,
+      target,
+      minimumDistance,
+      speedLimit,
+      speedProfile,
+      MaxF(startSpeed, 0.00),
+      generation
+    );
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.030, false);
+    return true;
+  }
+
+  // Forward half of the validated r382h departure guard.
+  public func IsVanillaDeparturePathClear(distance: Float) -> Bool {
+    let crowd: ref<CrowdMemberBaseComponent>;
+    if !this.IsReady() { return false; };
+    crowd = this.bus.GetCrowdMemberComponent();
+    if !IsDefined(crowd) { return true; };
+    return crowd.CheckEmptyPath(distance);
+  }
+
+  public func JoinTrafficDirectFromBerth() -> Bool {
+    let driverReady: ref<AIEvent>;
+    let command: ref<AIVehicleJoinTrafficCommand>;
+    if !this.IsReady() { return false; };
+    this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.activeRouteCommand = null;
+    this.activeSplineCommand = null;
+    this.activeJoinTrafficCommand = null;
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleOnSplineCommand", false, true);
+    driverReady = new AIEvent();
+    driverReady.name = n"DriverReady";
+    this.bus.QueueEvent(driverReady);
+    command = new AIVehicleJoinTrafficCommand();
+    command.needDriver = false;
+    command.useKinematic = true;
+    this.bus.GetAIComponent().SendCommand(command);
+    this.activeJoinTrafficCommand = command;
+    return true;
+  }
+
+  public func IsInTrafficLane() -> Bool {
+    return this.IsReady() && this.bus.IsInTrafficLane();
+  }
+
+  public func IsJoinTrafficCommandFailed() -> Bool {
+    if !IsDefined(this.activeJoinTrafficCommand) { return false; };
+    return Equals(this.activeJoinTrafficCommand.state, AICommandState.Failure)
+      || Equals(this.activeJoinTrafficCommand.state, AICommandState.Cancelled)
+      || Equals(this.activeJoinTrafficCommand.state, AICommandState.Interrupted);
+  }
+
+  public func GetJoinTrafficCommandStatusCode() -> Int32 {
+    if !IsDefined(this.activeJoinTrafficCommand) { return 0; };
+    if Equals(this.activeJoinTrafficCommand.state, AICommandState.Success) { return 2; };
+    if this.IsJoinTrafficCommandFailed() { return 3; };
+    return 1;
+  }
+
+  // r376b: the departure spline has already completed successfully here,
+  // so do not interrupt it again. Hand the measured rolling speed to the
+  // normal traffic navigator through the established generation-safe pulse.
+  public func DriveToTrafficAfterSpline(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {
+    let callback: ref<NCTCDeferredDriveCommand>;
+    let noDriver: ref<AIEvent>;
+    let driverReady: ref<AIEvent>;
+    let speedProfile: Int32;
+    let speedLimit: Float;
+    let generation: Int32;
+    if !this.IsReady() { return false; };
+
+    generation = this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.activeRouteCommand = null;
+    this.activeSplineCommand = null;
+
+    noDriver = new AIEvent();
+    driverReady = new AIEvent();
+    noDriver.name = n"NoDriver";
+    driverReady.name = n"DriverReady";
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.030);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_forced_start_speed_mm", Cast<Int32>(MaxF(startSpeed, 0.00) * 1000.00));
+
+    callback = new NCTCDeferredDriveCommand();
+    speedLimit = this.ResolveTrafficSpeed(target, speedProfile);
+    callback.Configure(this.bus, this, target, minimumDistance, speedLimit, speedProfile, MaxF(startSpeed, 0.00), generation);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);
+    return true;
+  }
+
+  // r374e: generation-safe traffic replacement, but unlike r372n the
+  // successor intentionally does NOT inherit the rolling speed. A braking
+  // command cannot simultaneously be forced to start at the previous 14–16 m/s.
+  // It remains useTraffic=true with a 7.0 approach speed.
+  public func DriveToTrafficAtSpeed(target: Vector4, minimumDistance: Float, startSpeed: Float, speedLimit: Float) -> Bool {
+    let callback: ref<NCTCDeferredDriveCommand>;
+    let noDriver: ref<AIEvent>;
+    let driverReady: ref<AIEvent>;
+    let generation: Int32;
+    if !this.IsReady() { return false; };
+
+    generation = this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+    this.activeRouteCommand = null;
+
+    noDriver = new AIEvent();
+    driverReady = new AIEvent();
+    noDriver.name = n"NoDriver";
+    driverReady.name = n"DriverReady";
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.030);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_command_forced_start_speed_mm", Cast<Int32>(MaxF(startSpeed, 0.00) * 1000.00));
+
+    callback = new NCTCDeferredDriveCommand();
+    callback.Configure(this.bus, this, target, minimumDistance, speedLimit, 5, MaxF(startSpeed, 0.00), generation);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);
+    return true;
+  }
+
+  // r373a: keep normal traffic navigation for the route, then hand the last
+  // metres to the autonomous point driver so the Mahir may leave the traffic
+  // lane and enter a surveyed bus bay / berth.
+  public func DriveToBerthDirect(target: Vector4, startSpeed: Float, maxSpeed: Float) -> Bool {
+    let callback: ref<NCTCDeferredBerthDriveCommand>;
+    let noDriver: ref<AIEvent>;
+    let driverReady: ref<AIEvent>;
+    let generation: Int32;
+    if !this.IsReady() { return false; };
+    generation = this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+    this.activeRouteCommand = null;
+    noDriver = new AIEvent();
+    driverReady = new AIEvent();
+    noDriver.name = n"NoDriver";
+    driverReady.name = n"DriverReady";
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.030);
+    callback = new NCTCDeferredBerthDriveCommand();
+    callback.Configure(this.bus, this, target, MaxF(startSpeed, 0.00), maxSpeed, generation);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);
+    return true;
+  }
+
+  // Generic bay motion is a native continuous spline. Unlike DriveToPoint,
+  // the intermediate curve points are geometry, not destinations.
+  public func DriveOnBaySpline(splinePath: String, startSpeed: Float, stopAtPathEnd: Bool) -> Bool {
+    let callback: ref<NCTCDeferredSplineDriveCommand>;
+    let noDriver: ref<AIEvent>;
+    let driverReady: ref<AIEvent>;
+    let generation: Int32;
+    if !this.IsReady() { return false; };
+    generation = this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleOnSplineCommand", false, true);
+    this.activeRouteCommand = null;
+    this.activeSplineCommand = null;
+    noDriver = new AIEvent();
+    driverReady = new AIEvent();
+    noDriver.name = n"NoDriver";
+    driverReady.name = n"DriverReady";
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.030);
+    callback = new NCTCDeferredSplineDriveCommand();
+    callback.Configure(this.bus, this, splinePath, MaxF(startSpeed, 0.00), stopAtPathEnd, generation);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);
+    return true;
+  }
+
   // Adaptive NCTC service speed. The game district supplies the zone profile
   // while long uninterrupted legs receive a small arterial/highway bonus.
   // This only changes the per-command traffic target: vehicle physics and the
@@ -324,6 +624,29 @@ public class NCTCServiceBusController extends IScriptable {
     this.activeRouteCommand = command;
   }
 
+  public func SetActiveSplineCommand(command: ref<AIVehicleOnSplineCommand>, generation: Int32) -> Void {
+    if !this.IsDriveGenerationCurrent(generation) { return; };
+    this.activeSplineCommand = command;
+  }
+
+  public func IsSplineCommandSuccessful() -> Bool {
+    return IsDefined(this.activeSplineCommand) && Equals(this.activeSplineCommand.state, AICommandState.Success);
+  }
+
+  public func IsSplineCommandFailed() -> Bool {
+    if !IsDefined(this.activeSplineCommand) { return false; };
+    return Equals(this.activeSplineCommand.state, AICommandState.Failure)
+      || Equals(this.activeSplineCommand.state, AICommandState.Cancelled)
+      || Equals(this.activeSplineCommand.state, AICommandState.Interrupted);
+  }
+
+  public func GetSplineCommandStatusCode() -> Int32 {
+    if !IsDefined(this.activeSplineCommand) { return 0; };
+    if Equals(this.activeSplineCommand.state, AICommandState.Success) { return 2; };
+    if this.IsSplineCommandFailed() { return 3; };
+    return 1;
+  }
+
   public func IsRouteCommandSuccessful() -> Bool {
     return IsDefined(this.activeRouteCommand) && Equals(this.activeRouteCommand.state, AICommandState.Success);
   }
@@ -362,12 +685,14 @@ public class NCTCServiceBusController extends IScriptable {
   public func CancelTrafficRoute() -> Void {
     if this.IsReady() {
       this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+      this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleOnSplineCommand", false, true);
     };
   }
 
   public func ArriveAtStop() -> Void {
     if !this.IsReady() { return; };
     this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleDriveToPointCommand", false, true);
+    this.bus.GetAIComponent().CancelOrInterruptCommand(n"AIVehicleOnSplineCommand", false, true);
   }
 
   // The Mahir coach door is stateful. The old working prototype did not rely
@@ -457,6 +782,7 @@ public class NCTCServiceProfiles {
     quests.SetFact(n"nctc_dev_profile_probe_spawn_valid", quests.GetFact(StringToName(prefix + "spawn_valid")));
     quests.SetFact(n"nctc_dev_profile_probe_approach_valid", quests.GetFact(StringToName(prefix + "approach_valid")));
     quests.SetFact(n"nctc_dev_profile_probe_berth_valid", quests.GetFact(StringToName(prefix + "berth_valid")));
+    quests.SetFact(n"nctc_dev_profile_probe_berth2_valid", quests.GetFact(StringToName(prefix + "berth2_valid")));
     quests.SetFact(n"nctc_dev_profile_probe_spawn_x_mm", quests.GetFact(StringToName(prefix + "spawn_x")));
     quests.SetFact(n"nctc_dev_profile_probe_spawn_y_mm", quests.GetFact(StringToName(prefix + "spawn_y")));
     quests.SetFact(n"nctc_dev_profile_probe_berth_x_mm", quests.GetFact(StringToName(prefix + "berth_x")));
@@ -495,6 +821,28 @@ public class NCTCServiceProfiles {
     forward = new Vector4(Cast<Float>(quests.GetFact(StringToName(prefix + "forward_x"))) / 1000000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "forward_y"))) / 1000000.00, 0.00, 0.00);
     forward = Vector4.Normalize2D(forward);
     return AbsF(forward.X) > 0.01 || AbsF(forward.Y) > 0.01;
+  }
+
+  public static func TryGetBerth2(game: GameInstance, stopId: Int32, out berth2: Vector4, out forward: Vector4) -> Bool {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
+    let prefix: String = "nctc_external_capture_id" + ToString(stopId) + "_berth2_";
+    if !IsDefined(quests) || !Equals(quests.GetFact(StringToName(prefix + "valid")), 1) { return false; };
+    berth2 = NCTCServiceProfiles.ReadVector(quests, prefix);
+    if AbsF(berth2.X) < 1.00 && AbsF(berth2.Y) < 1.00 { return false; };
+    forward = new Vector4(0.00, 0.00, 0.00, 0.00);
+    if Equals(quests.GetFact(StringToName(prefix + "forward_valid")), 1) {
+      forward = new Vector4(Cast<Float>(quests.GetFact(StringToName(prefix + "forward_x"))) / 1000000.00, Cast<Float>(quests.GetFact(StringToName(prefix + "forward_y"))) / 1000000.00, 0.00, 0.00);
+      forward = Vector4.Normalize2D(forward);
+    };
+    return true;
+  }
+
+  public static func TryGetBayWidth(game: GameInstance, stopId: Int32, out width: Float) -> Bool {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(game);
+    let prefix: String = "nctc_external_capture_id" + ToString(stopId) + "_bay_width_";
+    if !IsDefined(quests) || !Equals(quests.GetFact(StringToName(prefix + "valid")), 1) { return false; };
+    width = Cast<Float>(quests.GetFact(StringToName(prefix + "mm"))) / 1000.00;
+    return width >= 2.00 && width <= 5.00;
   }
 
 
@@ -611,6 +959,11 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let surveyApproach: Vector4;
   private let surveyBerth: Vector4;
   private let surveyBerthForward: Vector4;
+  private let surveyBerth2: Vector4;
+  private let surveyBerth2Forward: Vector4;
+  private let hasSurveyBerth2: Bool;
+  private let surveyBayWidth: Float;
+  private let hasSurveyBayWidth: Bool;
   private let surveyYaw: Float;
   private let approachCommandSent: Bool;
   private let routeStarted: Bool;
@@ -621,14 +974,220 @@ public class NCTCTransitSystem extends ScriptableSystem {
   private let legPolls: Int32;
   private let telemetryPolls: Int32;
   private let followingPassage: Bool;
+  // r375a: fresh bay-parking state. No r374 stage/watchdog/merge state survives.
+  // 0=inactive, 1=entry ray, 2=final stop, 3=exit ray.
+  private let bayParkingActive: Bool;
+  private let bayParkingStage: Int32;
+  private let bayParkingWasEntered: Bool;
+  private let bayParkingBypass: Bool;
+  private let bayParkingRoadLateral: Float;
+  private let bayParkingRetryCount: Int32;
+  private let bayParkingEntryTarget: Vector4;
+  private let bayParkingRoadTarget: Vector4;
   private let passageAfterStopId: Int32;
   private let passageOrdinal: Int32;
   private let passageTarget: Vector4;
   private let passageForward: Vector4;
   private let passageForwardRecorded: Bool;
 
+  private func HasServiceBay() -> Bool {
+    return this.hasSurveyProfile && this.hasSurveyBerth2 && Vector4.Distance(this.surveyBerth, this.surveyBerth2) > 1.00;
+  }
+
+  private func GetBayForward() -> Vector4 {
+    let segment: Vector4 = this.surveyBerth2 - this.surveyBerth;
+    let authored: Vector4;
+    let forward: Vector4;
+    if Vector4.Distance(this.surveyBerth, this.surveyBerth2) < 0.10 { return this.surveyBerthForward; };
+    if AbsF(this.surveyBerthForward.X) > 0.01 || AbsF(this.surveyBerthForward.Y) > 0.01 { authored = Vector4.Normalize2D(this.surveyBerthForward); }
+    else {
+      if AbsF(this.surveyBerth2Forward.X) > 0.01 || AbsF(this.surveyBerth2Forward.Y) > 0.01 { authored = Vector4.Normalize2D(this.surveyBerth2Forward); }
+      else { authored = IsDefined(this.controller) ? this.controller.GetWorldForward() : new Vector4(0.00, 0.00, 0.00, 0.00); };
+    };
+    forward = Vector4.Normalize2D(segment);
+    if (AbsF(authored.X) > 0.01 || AbsF(authored.Y) > 0.01) && Vector4.Dot(forward, authored) < 0.00 { forward = forward * -1.00; };
+    return forward;
+  }
+
+  private func GetBayEntryPoint() -> Vector4 {
+    let forward: Vector4 = this.GetBayForward();
+    let segment: Vector4 = this.surveyBerth2 - this.surveyBerth;
+    return Vector4.Dot(segment, forward) >= 0.00 ? this.surveyBerth : this.surveyBerth2;
+  }
+
+  private func GetBayExitPoint() -> Vector4 {
+    let forward: Vector4 = this.GetBayForward();
+    let segment: Vector4 = this.surveyBerth2 - this.surveyBerth;
+    return Vector4.Dot(segment, forward) >= 0.00 ? this.surveyBerth2 : this.surveyBerth;
+  }
+
   private func GetServiceBerth() -> Vector4 {
+    let entry: Vector4;
+    let exit: Vector4;
+    if this.HasServiceBay() {
+      entry = this.GetBayEntryPoint();
+      exit = this.GetBayExitPoint();
+      return entry + (exit - entry) * 0.65;
+    };
     return this.hasSurveyProfile ? this.surveyBerth : this.requestedStop;
+  }
+
+  private func GetBerthForward() -> Vector4 {
+    let forward: Vector4;
+    if this.HasServiceBay() { return this.GetBayForward(); };
+    forward = this.surveyBerthForward;
+    if AbsF(forward.X) > 0.01 || AbsF(forward.Y) > 0.01 { return Vector4.Normalize2D(forward); };
+    if IsDefined(this.controller) { return this.controller.GetWorldForward(); };
+    return new Vector4(0.00, 0.00, 0.00, 0.00);
+  }
+
+  private func GetBayWidth() -> Float {
+    return this.hasSurveyBayWidth ? ClampF(this.surveyBayWidth, 2.20, 3.60) : 2.90;
+  }
+
+  // Signed progress from P1 along the bay centreline. Lateral is signed and
+  // measured in the bay frame; width is only a tolerance, never steering amplitude.
+  private func GetBayProgress(out lateral: Float) -> Float {
+    let forward: Vector4 = this.GetBayForward();
+    let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
+    let delta: Vector4 = this.controller.GetWorldPosition() - this.GetBayEntryPoint();
+    lateral = Vector4.Dot(delta, right);
+    return Vector4.Dot(delta, forward);
+  }
+
+  // Positive means P1 is still ahead of the bus.
+  private func GetBayEntryProgress(out lateral: Float) -> Float {
+    let forward: Vector4 = this.GetBayForward();
+    let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
+    let delta: Vector4 = this.GetBayEntryPoint() - this.controller.GetWorldPosition();
+    lateral = AbsF(Vector4.Dot(delta, right));
+    return Vector4.Dot(delta, forward);
+  }
+
+  // One long ray through the bay. P1 is never a destination, so the native
+  // point driver has no reason to brake at the mouth.
+  private func GetBayParkingEntryTarget() -> Vector4 {
+    return this.GetBayExitPoint() + this.GetBayForward() * 12.00;
+  }
+
+  // Rejoin the exact road line captured locally before P1. No guessed lane
+  // width and no overshoot beyond the measured bay axis.
+  private func GetBayParkingRoadTarget() -> Vector4 {
+    let forward: Vector4 = this.GetBayForward();
+    let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
+    let lead: Float = ClampF(AbsF(this.bayParkingRoadLateral) * 3.50, 12.00, 18.00);
+    return this.GetBayExitPoint() + forward * lead + right * this.bayParkingRoadLateral;
+  }
+
+  // Native physics overlap is authoritative for bay occupancy. TargetingSystem
+  // does not reliably enumerate parked traffic vehicles.
+  private func IsBayOccupiedByVehicle() -> Bool {
+    let spatial: ref<SpatialQueriesSystem>;
+    let result: TraceResult;
+    let dimensions: Vector4;
+    let rotation: EulerAngles;
+    let entry: Vector4;
+    let exit: Vector4;
+    let center: Vector4;
+    let forward: Vector4;
+    let length: Float;
+    if !this.HasServiceBay() { return false; };
+    spatial = GameInstance.GetSpatialQueriesSystem(this.GetGameInstance());
+    if !IsDefined(spatial) { return false; };
+    entry = this.GetBayEntryPoint();
+    exit = this.GetBayExitPoint();
+    forward = this.GetBayForward();
+    length = Vector4.Distance(entry, exit);
+    center = entry + (exit - entry) * 0.50;
+    center.Z += 1.25;
+    // Overlap() takes half extents. Keep the box tight laterally so traffic
+    // running beside the bay is not mistaken for a parked vehicle in it.
+    dimensions = new Vector4(2.40, length * 0.50 + 0.75, 1.75, 0.00);
+    rotation = Quaternion.ToEulerAngles(Quaternion.BuildFromDirectionVector(forward));
+    return spatial.Overlap(dimensions, center, rotation, n"Vehicle", result);
+  }
+
+
+  // Generic bay asset path: every authored P1 + P2 + width capture is built
+  // to the same deterministic NodeRef, so adding a bay no longer requires a
+  // REDscript stop-ID case.
+  private func NCTCBayArrivalSplinePath() -> String {
+    if this.requestedStopId < 1 { return ""; };
+    return "$/nctc/bays/stop_" + ToString(this.requestedStopId) + "/arrival_spline";
+  }
+
+  private func NCTCBayRoadSideSign() -> Float {
+    let forward: Vector4 = this.GetBayForward();
+    let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
+    let fromEntryToSpawn: Vector4 = this.surveySpawn - this.GetBayEntryPoint();
+    let lateral: Float = Vector4.Dot(fromEntryToSpawn, right);
+    if lateral < -0.50 { return -1.00; };
+    return 1.00;
+  }
+
+  // Full r382h departure gate generalized from authored P1/P2 geometry:
+  // vanilla CheckEmptyPath(10m) in front plus the adjacent road lane from
+  // 15m behind to 10m ahead. Two consecutive clear polls are required by the
+  // service loop before JoinTraffic is sent.
+  private func NCTCDepartureBlocked() -> Bool {
+    let spatial: ref<SpatialQueriesSystem>;
+    let result: TraceResult;
+    let dimensions: Vector4;
+    let rotation: EulerAngles;
+    let forward: Vector4;
+    let right: Vector4;
+    let center: Vector4;
+    let sideSign: Float = 1.00;
+    let sideOffset: Float;
+    let lateralBlocked: Bool = false;
+    let forwardClear: Bool;
+    let blocked: Bool;
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+
+    if !this.HasServiceBay() || !IsDefined(this.controller) { return false; };
+
+    forwardClear = this.controller.IsVanillaDeparturePathClear(10.00);
+    sideSign = this.NCTCBayRoadSideSign();
+    spatial = GameInstance.GetSpatialQueriesSystem(this.GetGameInstance());
+    if IsDefined(spatial) {
+      forward = this.GetBayForward();
+      if AbsF(forward.X) > 0.01 || AbsF(forward.Y) > 0.01 {
+        right = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
+        sideOffset = MaxF(this.GetBayWidth() * 0.50 + 2.75, 4.10);
+        center = this.controller.GetWorldPosition() - forward * 2.50 + right * sideOffset * sideSign;
+        center.Z += 1.25;
+        dimensions = new Vector4(1.65, 12.50, 1.75, 0.00);
+        rotation = Quaternion.ToEulerAngles(Quaternion.BuildFromDirectionVector(forward));
+        lateralBlocked = spatial.Overlap(dimensions, center, rotation, n"Vehicle", result);
+      };
+    };
+
+    blocked = !forwardClear || lateralBlocked;
+    if IsDefined(quests) {
+      quests.SetFact(n"nctc_dev_generic_bay_road_side", sideSign > 0.00 ? 1 : -1);
+      quests.SetFact(n"nctc_dev_generic_bay_forward_clear", forwardClear ? 1 : 0);
+      quests.SetFact(n"nctc_dev_generic_bay_lateral_blocked", lateralBlocked ? 1 : 0);
+      quests.SetFact(n"nctc_dev_generic_bay_departure_blocked", blocked ? 1 : 0);
+      quests.SetFact(n"nctc_dev_generic_bay_guard_revision", 38401);
+    };
+    return blocked;
+  }
+
+  // Positive longitudinal means the real berth is still ahead of the bus.
+  // Lateral is measured against the surveyed berth axis, not the bus heading.
+  private func GetBerthProgress(out lateral: Float) -> Float {
+    let forward: Vector4 = this.GetBerthForward();
+    let delta: Vector4 = this.GetServiceBerth() - this.controller.GetWorldPosition();
+    let right: Vector4 = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
+    lateral = AbsF(Vector4.Dot(delta, right));
+    return Vector4.Dot(delta, forward);
+  }
+
+  private func GetBayParkingActiveTarget() -> Vector4 {
+    if Equals(this.bayParkingStage, 1) { return this.bayParkingEntryTarget; };
+    if Equals(this.bayParkingStage, 2) { return this.GetServiceBerth(); };
+    if Equals(this.bayParkingStage, 3) { return this.bayParkingRoadTarget; };
+    return this.GetServiceBerth();
   }
 
   // The native Mahir controller settles the pivot before the target. Aim the
@@ -698,6 +1257,27 @@ public class NCTCTransitSystem extends ScriptableSystem {
   }
 
 
+  // r374o: scan the whole authored bay, not a guessed box around one berth.
+  private func PublishBerthOccupancyProbe(quests: ref<QuestsSystem>) -> Void {
+    let entry: Vector4; let exit: Vector4; let center: Vector4; let forward: Vector4; let halfLength: Float;
+    if !IsDefined(quests) { return; };
+    if this.requestedStopId <= 0 || !this.HasServiceBay() {
+      quests.SetFact(n"nctc_dev_service_berth_stop_id", 0);
+      quests.SetFact(n"nctc_dev_service_bay_half_length_mm", 0);
+      return;
+    };
+    entry = this.GetBayEntryPoint(); exit = this.GetBayExitPoint();
+    center = entry + (exit - entry) * 0.50; forward = this.GetBayForward();
+    halfLength = Vector4.Distance(entry, exit) * 0.50;
+    quests.SetFact(n"nctc_dev_service_berth_stop_id", this.requestedStopId);
+    quests.SetFact(n"nctc_dev_service_berth_x_mm", Cast<Int32>(center.X * 1000.00));
+    quests.SetFact(n"nctc_dev_service_berth_y_mm", Cast<Int32>(center.Y * 1000.00));
+    quests.SetFact(n"nctc_dev_service_berth_z_mm", Cast<Int32>(center.Z * 1000.00));
+    quests.SetFact(n"nctc_dev_service_berth_forward_x_mm", Cast<Int32>(forward.X * 1000.00));
+    quests.SetFact(n"nctc_dev_service_berth_forward_y_mm", Cast<Int32>(forward.Y * 1000.00));
+    quests.SetFact(n"nctc_dev_service_bay_half_length_mm", Cast<Int32>(halfLength * 1000.00));
+  }
+
   private func PublishRouteDisplay(nextStopId: Int32) -> Void {
     let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
     let lineNumber: Int32 = StringToInt(this.requestedLine, -1);
@@ -715,6 +1295,10 @@ public class NCTCTransitSystem extends ScriptableSystem {
     let busPosition: Vector4;
     let targetPosition: Vector4 = this.GetServiceBerth();
     let trafficTarget: Vector4 = this.GetTrafficTarget();
+    let berthActiveTarget: Vector4 = this.GetBayParkingActiveTarget();
+    let berthLateral: Float = 0.00;
+    let berthLongitudinal: Float = 0.00;
+    let berthHeadingDot: Float = 0.00;
     if !IsDefined(quests) { return; };
     quests.SetFact(n"nctc_dev_loop_code", code);
     quests.SetFact(n"nctc_dev_loop_line", StringToInt(this.requestedLine, -1));
@@ -733,17 +1317,40 @@ public class NCTCTransitSystem extends ScriptableSystem {
     quests.SetFact(n"nctc_dev_loop_berth_longitudinal_mm", 0);
     quests.SetFact(n"nctc_dev_loop_berth_lateral_mm", 0);
     quests.SetFact(n"nctc_dev_loop_berth_speed_mm", 0);
+    quests.SetFact(n"nctc_dev_loop_berth_stage", this.bayParkingStage);
+    quests.SetFact(n"nctc_dev_loop_berth_active", this.bayParkingActive ? 1 : 0);
+    quests.SetFact(n"nctc_dev_loop_berth_active_target_x_mm", Cast<Int32>(berthActiveTarget.X * 1000.00));
+    quests.SetFact(n"nctc_dev_loop_berth_active_target_y_mm", Cast<Int32>(berthActiveTarget.Y * 1000.00));
+    quests.SetFact(n"nctc_dev_loop_berth_active_target_z_mm", Cast<Int32>(berthActiveTarget.Z * 1000.00));
+    quests.SetFact(n"nctc_dev_loop_berth_heading_dot_x1000", 0);
+    quests.SetFact(n"nctc_dev_loop_berth_merge_lateral_mm", Cast<Int32>(this.bayParkingRoadLateral * 1000.00));
+    quests.SetFact(n"nctc_dev_loop_berth_gate_road_lateral_mm", 0);
     // Diagnostics only: record exactly why a service stop is about to leave.
     // These facts do not participate in the route decision.
     quests.SetFact(n"nctc_dev_loop_dwell_polls", this.dwellPolls);
     quests.SetFact(n"nctc_dev_loop_player_aboard", IsDefined(this.controller) && this.controller.IsPlayerAboard() ? 1 : 0);
     quests.SetFact(n"nctc_dev_loop_mount_request", quests.GetFact(n"nctc_passenger_departure_requested"));
+    quests.SetFact(n"nctc_dev_loop_has_bay", this.HasServiceBay() ? 1 : 0);
+    quests.SetFact(n"nctc_dev_loop_bay_p1_x_mm", Cast<Int32>(this.surveyBerth.X * 1000.00));
+    quests.SetFact(n"nctc_dev_loop_bay_p1_y_mm", Cast<Int32>(this.surveyBerth.Y * 1000.00));
+    quests.SetFact(n"nctc_dev_loop_bay_p2_x_mm", Cast<Int32>(this.surveyBerth2.X * 1000.00));
+    quests.SetFact(n"nctc_dev_loop_bay_p2_y_mm", Cast<Int32>(this.surveyBerth2.Y * 1000.00));
+    quests.SetFact(n"nctc_dev_loop_bay_length_mm", this.HasServiceBay() ? Cast<Int32>(Vector4.Distance(this.surveyBerth, this.surveyBerth2) * 1000.00) : 0);
+    quests.SetFact(n"nctc_dev_loop_bay_width_mm", this.HasServiceBay() ? Cast<Int32>(this.GetBayWidth() * 1000.00) : 0);
     if IsDefined(this.controller) && this.controller.IsReady() {
       busPosition = this.controller.GetWorldPosition();
       quests.SetFact(n"nctc_dev_loop_bus_x_mm", Cast<Int32>(busPosition.X * 1000.00));
       quests.SetFact(n"nctc_dev_loop_bus_y_mm", Cast<Int32>(busPosition.Y * 1000.00));
       quests.SetFact(n"nctc_dev_loop_bus_z_mm", Cast<Int32>(busPosition.Z * 1000.00));
       quests.SetFact(n"nctc_dev_loop_target_distance_mm", Cast<Int32>(Vector4.Distance(busPosition, targetPosition) * 1000.00));
+      if this.hasSurveyProfile {
+        berthLongitudinal = this.GetBerthProgress(berthLateral);
+        berthHeadingDot = Vector4.Dot(Vector4.Normalize2D(this.controller.GetWorldForward()), this.GetBerthForward());
+        quests.SetFact(n"nctc_dev_loop_berth_longitudinal_mm", Cast<Int32>(berthLongitudinal * 1000.00));
+        quests.SetFact(n"nctc_dev_loop_berth_lateral_mm", Cast<Int32>(berthLateral * 1000.00));
+        quests.SetFact(n"nctc_dev_loop_berth_speed_mm", Cast<Int32>(AbsF(this.controller.GetCurrentSpeed()) * 1000.00));
+        quests.SetFact(n"nctc_dev_loop_berth_heading_dot_x1000", Cast<Int32>(berthHeadingDot * 1000.00));
+      };
     };
     quests.SetFact(n"nctc_dev_loop_id", quests.GetFact(n"nctc_dev_loop_id") + 1);
   }
@@ -786,8 +1393,15 @@ public class NCTCTransitSystem extends ScriptableSystem {
     // bus ahead of V, then routed it to the stop marker.  That bus could never
     // reach a valid service-arrival state, so its doors stayed closed.
     this.surveyBerthForward = new Vector4(0.00, 0.00, 0.00, 0.00);
+    this.surveyBerth2 = new Vector4(0.00, 0.00, 0.00, 0.00);
+    this.surveyBerth2Forward = new Vector4(0.00, 0.00, 0.00, 0.00);
+    this.hasSurveyBerth2 = false;
+    this.surveyBayWidth = 0.00;
+    this.hasSurveyBayWidth = false;
     this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), line, stopId, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);
     NCTCServiceProfiles.TryGetBerthForward(this.GetGameInstance(), stopId, this.surveyBerthForward);
+    this.hasSurveyBerth2 = NCTCServiceProfiles.TryGetBerth2(this.GetGameInstance(), stopId, this.surveyBerth2, this.surveyBerth2Forward);
+    this.hasSurveyBayWidth = NCTCServiceProfiles.TryGetBayWidth(this.GetGameInstance(), stopId, this.surveyBayWidth);
     quests = GameInstance.GetQuestsSystem(this.GetGameInstance());
     player = GetPlayer(this.GetGameInstance());
     if !this.hasSurveyProfile {
@@ -824,6 +1438,14 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.approachCommandSent = false;
     this.boardingDoorWasOpen = false;
     this.departureRequested = false;
+    this.bayParkingActive = false;
+    this.bayParkingStage = 0;
+    this.bayParkingWasEntered = false;
+    this.bayParkingBypass = false;
+    this.bayParkingRoadLateral = 0.00;
+    this.bayParkingRetryCount = 0;
+    this.bayParkingEntryTarget = new Vector4(0.00, 0.00, 0.00, 0.00);
+    this.bayParkingRoadTarget = new Vector4(0.00, 0.00, 0.00, 0.00);
     this.legPolls = 0;
     GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_passenger_departure_requested", 0);
     // Development-only diagnostic bridge. CET writes this to nctc_survey.log;
@@ -864,12 +1486,21 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.dwellPolls = 0;
     this.boardingDoorWasOpen = false;
     this.departureRequested = false;
+    this.bayParkingActive = false;
+    this.bayParkingStage = 0;
+    this.bayParkingWasEntered = false;
+    this.bayParkingBypass = false;
+    this.bayParkingRoadLateral = 0.00;
+    this.bayParkingRetryCount = 0;
+    this.bayParkingEntryTarget = new Vector4(0.00, 0.00, 0.00, 0.00);
+    this.bayParkingRoadTarget = new Vector4(0.00, 0.00, 0.00, 0.00);
     this.legPolls = 0;
     GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_passenger_departure_requested", 0);
     this.ClearRouteWaypoint();
     this.arrived = false;
     GameInstance.GetQuestsSystem(this.GetGameInstance()).SetFact(n"nctc_service_bus_at_stop", 0);
     this.hasSurveyProfile = false;
+    this.hasSurveyBerth2 = false;
     this.routeStarted = false;
     this.dwellPolls = 0;
     return hadBus;
@@ -914,6 +1545,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
     if !EntityID.IsDefined(this.busEntityID) { return; };
     if !this.ResolveBus() { this.ScheduleDispatch(0.25); return; };
     quests = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    this.PublishBerthOccupancyProbe(quests);
 
     // Stop state: open for passengers, leave as soon as V boards, or after a
     // maximum ten-second dwell when nobody takes this service.
@@ -934,23 +1566,51 @@ public class NCTCTransitSystem extends ScriptableSystem {
         return;
       };
 
+      let leaveBayDirect: Bool = this.HasServiceBay() && !this.bayParkingBypass && this.bayParkingWasEntered;
+      if leaveBayDirect {
+        this.controller.ClosePassengerDoor();
+        // r382h: never launch into traffic on one transient clear frame.
+        if this.NCTCDepartureBlocked() {
+          this.bayParkingRetryCount = 0;
+          quests.SetFact(n"nctc_dev_generic_bay_clear_polls", 0);
+          this.ScheduleDispatch(0.05);
+          return;
+        };
+        this.bayParkingRetryCount += 1;
+        quests.SetFact(n"nctc_dev_generic_bay_clear_polls", this.bayParkingRetryCount);
+        if this.bayParkingRetryCount < 2 {
+          this.ScheduleDispatch(0.05);
+          return;
+        };
+      };
+
       quests.SetFact(n"nctc_passenger_departure_requested", 0);
       quests.SetFact(n"nctc_service_bus_at_stop", 0);
       this.controller.ClosePassengerDoor();
-      // The called stop has now been served. Future player stop requests will
-      // set serviceStopId again; until then the bus follows its route without
-      // opening its doors at intermediate points.
       this.serviceStopId = 0;
+      this.arrived = false;
+      this.dwellPolls = 0;
+      this.legPolls = 0;
+      if leaveBayDirect {
+        this.bayParkingActive = true;
+        this.bayParkingStage = 14;
+        this.bayParkingRetryCount = 0;
+        quests.SetFact(n"nctc_dev_build_revision", 38401);
+        quests.SetFact(n"nctc_dev_join_pre_speed_mm", Cast<Int32>(AbsF(this.controller.GetCurrentSpeed()) * 1000.00));
+        this.driveCommandSent = this.controller.JoinTrafficDirectFromBerth();
+        quests.SetFact(n"nctc_dev_join_traffic_state", this.controller.GetJoinTrafficCommandStatusCode());
+        quests.SetFact(n"nctc_dev_bus_in_traffic_lane", this.controller.IsInTrafficLane() ? 1 : 0);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 90 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.05);
+        return;
+      };
       if !this.AdvanceToNextStop() {
         this.PublishLoopDiagnostic(34, 0);
         this.ScheduleDispatch(1.00);
         return;
       };
-      this.arrived = false;
-      this.dwellPolls = 0;
-      this.legPolls = 0;
       this.driveCommandSent = this.controller.DriveToTraffic(this.GetTrafficTarget(), 0.00);
-      this.PublishLoopDiagnostic(this.driveCommandSent ? (this.followingPassage ? 41 : 32) : 33, this.requestedStopId);
+      this.PublishLoopDiagnostic(this.driveCommandSent ? 49 : 33, this.requestedStopId);
       this.ScheduleDispatch(0.25);
       return;
     };
@@ -963,6 +1623,7 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.ScheduleDispatch(0.25);
       return;
     };
+
     this.legPolls += 1;
     // Every five seconds, log the exact state of the command object NCTC
     // submitted to the native AI. This is diagnostic-only and distinguishes
@@ -970,7 +1631,15 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.telemetryPolls += 1;
     if this.telemetryPolls >= 10 {
       this.telemetryPolls = 0;
-      this.PublishRouteCommandTelemetry();
+      if this.bayParkingActive && Equals(this.bayParkingStage, 10) {
+        this.PublishLoopDiagnostic(71, this.requestedStopId);
+      } else {
+        if this.bayParkingActive && Equals(this.bayParkingStage, 12) {
+          this.PublishLoopDiagnostic(73, this.requestedStopId);
+        } else {
+          this.PublishRouteCommandTelemetry();
+        };
+      };
     };
     // r372n: cross the passage on one long outgoing-road command. Handoff is
     // deliberately AFTER the waypoint, while the first command still has
@@ -1010,12 +1679,211 @@ public class NCTCTransitSystem extends ScriptableSystem {
       this.ScheduleDispatch(0.25);
       return;
     };
+    // r375a BAY RESET. Occupancy remains the validated native overlap probe,
+    // but all trajectory logic below is new and intentionally minimal.
+    if !this.followingPassage && this.HasServiceBay() && !this.bayParkingActive && !this.bayParkingBypass
+      && Equals(this.requestedStopId, this.serviceStopId) {
+      let bayEntryDistance: Float = Vector4.Distance(this.controller.GetWorldPosition(), this.GetBayEntryPoint());
+      if bayEntryDistance <= 85.00 && bayEntryDistance >= 18.00 {
+        let bayOccupied: Bool = this.IsBayOccupiedByVehicle();
+        quests.SetFact(n"nctc_dev_berth_occupancy_stop_id", this.requestedStopId);
+        quests.SetFact(n"nctc_dev_berth_occupied", bayOccupied ? 1 : 0);
+        if bayOccupied {
+          // r383f: occupancy is no longer a permanent bay bypass. Keep the
+          // request alive; the aligned handoff gate below will stop and wait
+          // near the bay entrance until the overlap becomes clear.
+          this.PublishLoopDiagnostic(50, this.requestedStopId);
+        };
+      };
+    };
+
+    // Intermediate bay stops are deliberately NOT driven into during r375a.
+    // They remain route points, but this reset build isolates actual parking.
+    if !this.followingPassage && this.HasServiceBay() && !Equals(this.requestedStopId, this.serviceStopId) {
+      let skipLateral: Float;
+      let skipLongitudinal: Float = this.GetBayEntryProgress(skipLateral);
+      if skipLongitudinal <= 20.00 && skipLongitudinal >= -4.00 && skipLateral <= 12.00 {
+        let rollingSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
+        if !this.AdvanceToNextStop() {
+          this.PublishLoopDiagnostic(34, 0);
+          this.ScheduleDispatch(1.00);
+          return;
+        };
+        this.driveCommandSent = this.controller.DriveToTrafficAfterRollingPassage(this.GetTrafficTarget(), 0.00, rollingSpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 64 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.05);
+        return;
+      };
+    };
+
+    // Generic native-spline arrival. Every authored bay uses the same validated
+    // bay-local curve transformed to its own entry/exit geometry.
+    if !this.followingPassage && this.HasServiceBay() && !this.bayParkingActive
+      && !this.bayParkingBypass && Equals(this.requestedStopId, this.serviceStopId) {
+      let splinePath: String = this.NCTCBayArrivalSplinePath();
+      if NotEquals(splinePath, "") {
+        let entryLateral: Float;
+        let entryLongitudinal: Float = this.GetBayEntryProgress(entryLateral);
+        let headingDot: Float = Vector4.Dot(Vector4.Normalize2D(this.controller.GetWorldForward()), this.GetBayForward());
+        // Do not hand off while the bus is still finishing an upstream turn.
+        // Vanilla traffic remains authoritative until the Mahir is aligned with
+        // the authored bay axis, preventing corner-cutting into street furniture.
+        if entryLongitudinal > 0.50 && entryLongitudinal <= 26.00 && entryLateral <= 12.00 && headingDot >= 0.94 {
+          if this.IsBayOccupiedByVehicle() {
+            this.controller.ArriveAtStop();
+            this.bayParkingActive = true;
+            this.bayParkingStage = 15;
+            this.bayParkingWasEntered = false;
+            this.driveCommandSent = false;
+            this.PublishLoopDiagnostic(50, this.requestedStopId);
+            this.ScheduleDispatch(0.25);
+            return;
+          };
+          let entrySpeed: Float = MaxF(MinF(AbsF(this.controller.GetCurrentSpeed()), 6.00), 2.00);
+          this.bayParkingActive = true;
+          this.bayParkingStage = 10;
+          this.bayParkingWasEntered = true;
+          this.bayParkingRetryCount = 0;
+          quests.SetFact(n"nctc_dev_build_revision", 38401);
+          quests.SetFact(n"nctc_dev_generic_bay_arrival_stop_id", this.requestedStopId);
+          quests.SetFact(n"nctc_dev_generic_bay_heading_dot_x1000", Cast<Int32>(headingDot * 1000.00));
+          this.driveCommandSent = this.controller.DriveOnBaySpline(splinePath, entrySpeed, true);
+          this.PublishLoopDiagnostic(this.driveCommandSent ? 92 : 33, this.requestedStopId);
+          this.ScheduleDispatch(0.10);
+          return;
+        };
+      };
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 15) {
+      // Bay occupied at the aligned handoff gate: stay stopped on the road and
+      // enter once clear instead of permanently bypassing the bay.
+      if this.IsBayOccupiedByVehicle() {
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      let waitSplinePath: String = this.NCTCBayArrivalSplinePath();
+      if Equals(waitSplinePath, "") {
+        this.bayParkingActive = false;
+        this.bayParkingStage = 0;
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      this.bayParkingStage = 10;
+      this.bayParkingWasEntered = true;
+      this.bayParkingRetryCount = 0;
+      this.driveCommandSent = this.controller.DriveOnBaySpline(waitSplinePath, 2.00, true);
+      this.PublishLoopDiagnostic(this.driveCommandSent ? 92 : 33, this.requestedStopId);
+      this.ScheduleDispatch(0.10);
+      return;
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 10) {
+      if this.controller.IsSplineCommandSuccessful() {
+        this.controller.ArriveAtStop();
+        this.arrived = true;
+        this.bayParkingActive = false;
+        this.bayParkingStage = 0;
+        this.driveCommandSent = false;
+        this.dwellPolls = 0;
+        quests.SetFact(n"nctc_service_bus_at_stop", 1);
+        this.PublishLoopDiagnostic(69, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      if this.controller.IsSplineCommandFailed() {
+        this.bayParkingStage = 11;
+        this.PublishLoopDiagnostic(70, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      this.ScheduleDispatch(0.10);
+      return;
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 11) {
+      this.ScheduleDispatch(0.25);
+      return;
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 12) {
+      if this.controller.IsSplineCommandSuccessful() {
+        let rollingSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
+        if !this.AdvanceToNextStop() {
+          this.PublishLoopDiagnostic(34, 0);
+          this.ScheduleDispatch(1.00);
+          return;
+        };
+        this.legPolls = 0;
+        this.bayParkingActive = false;
+        this.bayParkingStage = 0;
+        this.driveCommandSent = this.controller.DriveToTrafficAfterSpline(this.GetTrafficTarget(), 0.00, rollingSpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 74 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.05);
+        return;
+      };
+      if this.controller.IsSplineCommandFailed() {
+        this.bayParkingStage = 13;
+        this.PublishLoopDiagnostic(75, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      this.ScheduleDispatch(0.10);
+      return;
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 14) {
+      let joinedSpeed: Float = AbsF(this.controller.GetCurrentSpeed());
+      let inTrafficLane: Bool = this.controller.IsInTrafficLane();
+      this.bayParkingRetryCount += 1;
+      quests.SetFact(n"nctc_dev_join_traffic_state", this.controller.GetJoinTrafficCommandStatusCode());
+      quests.SetFact(n"nctc_dev_bus_in_traffic_lane", inTrafficLane ? 1 : 0);
+      quests.SetFact(n"nctc_dev_join_poll_count", this.bayParkingRetryCount);
+      quests.SetFact(n"nctc_dev_join_speed_mm", Cast<Int32>(joinedSpeed * 1000.00));
+      if inTrafficLane {
+        if !this.AdvanceToNextStop() {
+          this.PublishLoopDiagnostic(34, 0);
+          this.ScheduleDispatch(1.00);
+          return;
+        };
+        this.legPolls = 0;
+        this.bayParkingActive = false;
+        this.bayParkingStage = 0;
+        this.bayParkingRetryCount = 0;
+        this.driveCommandSent = this.controller.DriveToTrafficAfterJoin(this.GetTrafficTarget(), 0.00, joinedSpeed);
+        this.PublishLoopDiagnostic(this.driveCommandSent ? 91 : 33, this.requestedStopId);
+        this.ScheduleDispatch(0.05);
+        return;
+      };
+      if this.controller.IsJoinTrafficCommandFailed() {
+        this.PublishLoopDiagnostic(87, this.requestedStopId);
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      this.PublishLoopDiagnostic(85, this.requestedStopId);
+      this.ScheduleDispatch(0.05);
+      return;
+    };
+
+    if this.bayParkingActive && Equals(this.bayParkingStage, 13) {
+      this.ScheduleDispatch(0.25);
+      return;
+    };
+
+    // Road-stop / occupied-bay fallback remains native traffic.
+    // The native Mahir controller settles the pivot before the target.
+    // r374h used to cancel it around 8-10 m from the berth and issue a new
+    // direct command to the exact berth. That extra native command lifecycle
+    // could visibly snap/reposition the long Mahir. The +4 m corridor target
+    // now remains authoritative until the normal 7 m stopped-near check below.
     // The AI target is offset beyond the berth. Service remains tied to the
     // real berth, where the Mahir pivot settles in one continuous approach.
-    if this.controller.IsStoppedNear(this.GetServiceBerth(), 7.00) {
+    if this.controller.IsStoppedNear(this.GetServiceBerth(), this.bayParkingBypass ? 12.00 : 7.00) {
       if Equals(this.requestedStopId, this.serviceStopId) {
         this.controller.ArriveAtStop();
         this.arrived = true;
+        this.bayParkingActive = false;
+        this.bayParkingStage = 0;
         this.driveCommandSent = false;
         this.dwellPolls = 0;
         quests.SetFact(n"nctc_service_bus_at_stop", 1);
@@ -1044,9 +1912,6 @@ public class NCTCTransitSystem extends ScriptableSystem {
     };
     if this.controller.IsRouteCommandFailed() {
       this.PublishLoopDiagnostic(35, this.requestedStopId);
-      // Mounting can cancel the command once while PassengerEvents settles.
-      // Retry the same berth on the next tick; DriveToTraffic deliberately
-      // avoids the NoDriver reset whenever V is already aboard.
       this.driveCommandSent = false;
       this.ScheduleDispatch(0.50);
       return;
@@ -1077,12 +1942,27 @@ public class NCTCTransitSystem extends ScriptableSystem {
     this.surveyApproach = nextApproach;
     this.surveyBerth = nextBerth;
     this.surveyBerthForward = new Vector4(0.00, 0.00, 0.00, 0.00);
+    this.surveyBerth2 = new Vector4(0.00, 0.00, 0.00, 0.00);
+    this.surveyBerth2Forward = new Vector4(0.00, 0.00, 0.00, 0.00);
+    this.hasSurveyBerth2 = false;
+    this.surveyBayWidth = 0.00;
+    this.hasSurveyBayWidth = false;
     NCTCServiceProfiles.TryGetBerthForward(this.GetGameInstance(), nextStopId, this.surveyBerthForward);
+    this.hasSurveyBerth2 = NCTCServiceProfiles.TryGetBerth2(this.GetGameInstance(), nextStopId, this.surveyBerth2, this.surveyBerth2Forward);
+    this.hasSurveyBayWidth = NCTCServiceProfiles.TryGetBayWidth(this.GetGameInstance(), nextStopId, this.surveyBayWidth);
     this.surveyYaw = nextYaw;
     this.hasSurveyProfile = true;
     this.arrived = false;
     this.driveCommandSent = false;
     this.approachCommandSent = false;
+    this.bayParkingActive = false;
+    this.bayParkingStage = 0;
+    this.bayParkingWasEntered = false;
+    this.bayParkingBypass = false;
+    this.bayParkingRoadLateral = 0.00;
+    this.bayParkingRetryCount = 0;
+    this.bayParkingEntryTarget = new Vector4(0.00, 0.00, 0.00, 0.00);
+    this.bayParkingRoadTarget = new Vector4(0.00, 0.00, 0.00, 0.00);
     this.routeStarted = true;
     this.dwellPolls = 0;
     this.boardingDoorWasOpen = false;
@@ -1124,8 +2004,12 @@ public class NCTCTransitSystem extends ScriptableSystem {
     // quest facts. Resolve again at actual entity creation, not only when the
     // player pressed the terminal, so the fresh persisted profile wins.
     this.surveyBerthForward = new Vector4(0.00, 0.00, 0.00, 0.00);
+    this.surveyBerth2 = new Vector4(0.00, 0.00, 0.00, 0.00);
+    this.surveyBerth2Forward = new Vector4(0.00, 0.00, 0.00, 0.00);
+    this.hasSurveyBerth2 = false;
     this.hasSurveyProfile = NCTCServiceProfiles.TryGet(this.GetGameInstance(), this.requestedLine, this.requestedStopId, this.surveySpawn, this.surveyApproach, this.surveyBerth, this.surveyYaw);
     NCTCServiceProfiles.TryGetBerthForward(this.GetGameInstance(), this.requestedStopId, this.surveyBerthForward);
+    this.hasSurveyBerth2 = NCTCServiceProfiles.TryGetBerth2(this.GetGameInstance(), this.requestedStopId, this.surveyBerth2, this.surveyBerth2Forward);
     entitySystem = GameInstance.GetDynamicEntitySystem();
     player = GetPlayer(this.GetGameInstance());
     record = TweakDBInterface.GetVehicleRecord(t"Vehicle.nctc_service_mahir_mt28_coach");

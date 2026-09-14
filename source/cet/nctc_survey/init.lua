@@ -40,6 +40,9 @@ local last_sequence_probe_id = 0
 local last_profile_probe_id = 0
 local last_build_revision = -1
 local last_stale_drive_callback_id = 0
+local berth_scan_accumulator = 0.0
+local last_berth_occupancy_stop_id = -1
+local last_berth_occupancy_state = -1
 local fact
 local deduplicate_same_line_stops
 local normalize_captures
@@ -414,6 +417,9 @@ normalize_captures = function(network)
       if vector_has_position(capture.spawn) then saved.spawn = capture.spawn end
       if vector_has_position(capture.approach) then saved.approach = capture.approach end
       if vector_has_position(capture.berth) then saved.berth = capture.berth end
+      if vector_has_position(capture.berth2) then saved.berth2 = capture.berth2 end
+      if vector_has_position(capture.bayWidthA) then saved.bayWidthA = capture.bayWidthA end
+      if vector_has_position(capture.bayWidthB) then saved.bayWidthB = capture.bayWidthB end
       saved.eventId = capture.eventId or saved.eventId
       saved.stopSequence = capture.stopSequence or saved.stopSequence
       saved.stopLocKey = capture.stopLocKey or saved.stopLocKey
@@ -677,9 +683,18 @@ local function update_capture_point(capture, point, value)
   elseif point == 2 then
     capture.approach = value
     return "approach"
+  elseif point == 4 then
+    capture.berth2 = value
+    return "bay point 2"
+  elseif point == 5 then
+    capture.bayWidthA = value
+    return "bay width A"
+  elseif point == 6 then
+    capture.bayWidthB = value
+    return "bay width B"
   end
   capture.berth = value
-  return "berth"
+  return "bay point 1"
 end
 
 local function persist_capture(quests, event_id)
@@ -798,6 +813,22 @@ local function persist_capture(quests, event_id)
     }
     local deleted = delete_nearest_passage(network, fact(quests, "nctc_delete_passage_line"), position)
     kind = deleted and "deleted passage point" or "no passage point deleted"
+  elseif event_kind == 10 then
+    local capture_line = fact(quests, "nctc_survey_capture_line")
+    local capture_stop_index = fact(quests, "nctc_survey_capture_stop_index")
+    local target, count = selected_stop(network, capture_line, capture_stop_index)
+    if not target then
+      log("bay point 2 removal rejected: line " .. tostring(capture_line) .. " stop " .. tostring(capture_stop_index) .. " unavailable")
+      return
+    end
+    local capture = find_capture(network, target.id)
+    if capture and vector_has_position(capture.berth2) then
+      capture.berth2 = nil
+      capture.eventId = event_id
+      kind = "removed bay point 2 L" .. tostring(capture_line) .. " stop " .. tostring(capture_stop_index) .. "/" .. tostring(count)
+    else
+      kind = "no bay point 2 to remove L" .. tostring(capture_line) .. " stop " .. tostring(capture_stop_index) .. "/" .. tostring(count)
+    end
   else
     local capture_line = fact(quests, "nctc_survey_capture_line")
     local capture_stop_index = fact(quests, "nctc_survey_capture_stop_index")
@@ -867,14 +898,32 @@ local function capture_directly(kind)
   capture.stopName = target.name
   capture.eventId = (capture.eventId or 0) + 1
   local point = { x = round3(position.x), y = round3(position.y), z = round3(position.z), yaw = round3(player:GetWorldYaw()) }
-  update_capture_point(capture, kind == "spawn" and 1 or (kind == "approach" and 2 or 3), point)
+  local editor_mode = fact(quests, "nctc_survey_bay_edit_mode")
+  local point_code = 3
+  if kind == "spawn" then point_code = 1
+  elseif kind == "approach" then point_code = 2
+  elseif editor_mode == 1 then point_code = 4
+  elseif editor_mode == 2 then point_code = 5
+  elseif editor_mode == 3 then point_code = 6
+  end
+  local point_name = update_capture_point(capture, point_code, point)
   network.revision = (network.revision or 0) + 1
   if write_network(network) then
-    local point_code = kind == "spawn" and 1 or (kind == "approach" and 2 or 3)
     set_fact(quests, "nctc_survey_direct_notice_point", point_code)
     set_fact(quests, "nctc_survey_direct_notice_id", fact(quests, "nctc_survey_direct_notice_id") + 1)
-    log("direct saved " .. kind .. " L" .. tostring(line) .. " stop " .. tostring(stop_index) .. "/" .. tostring(count)
+    log("direct saved " .. point_name .. " L" .. tostring(line) .. " stop " .. tostring(stop_index) .. "/" .. tostring(count)
       .. " at (" .. tostring(point.x) .. ", " .. tostring(point.y) .. ", " .. tostring(point.z) .. ")")
+    if vector_has_position(capture.bayWidthA) and vector_has_position(capture.bayWidthB) then
+      local dx = (capture.bayWidthA.x or 0) - (capture.bayWidthB.x or 0)
+      local dy = (capture.bayWidthA.y or 0) - (capture.bayWidthB.y or 0)
+      local width = math.sqrt(dx * dx + dy * dy)
+      log("BAY WIDTH CALIBRATION L" .. tostring(line)
+        .. " stop " .. tostring(stop_index) .. "/" .. tostring(count)
+        .. " stopId=" .. tostring(target.id)
+        .. " name=" .. tostring(target.name or capture.stopName or "")
+        .. string.format(" width=%.3fm", width)
+        .. string.format(" A=(%.3f, %.3f) B=(%.3f, %.3f)", capture.bayWidthA.x or 0, capture.bayWidthA.y or 0, capture.bayWidthB.x or 0, capture.bayWidthB.y or 0))
+    end
   end
 end
 
@@ -946,6 +995,7 @@ local function apply_capture(quests, capture)
   apply_vector("nctc_survey_spawn_", capture.spawn)
   apply_vector("nctc_survey_approach_", capture.approach)
   apply_vector("nctc_survey_berth_", capture.berth)
+  apply_vector("nctc_survey_berth2_", capture.berth2)
 end
 
 local function publish_capture(quests, capture)
@@ -959,8 +1009,8 @@ local function publish_capture(quests, capture)
     set_fact(quests, prefix .. "y", math.floor((point.y or 0) * 1000))
     set_fact(quests, prefix .. "z", math.floor((point.z or 0) * 1000))
     set_fact(quests, prefix .. "yaw", math.floor((point.yaw or 0) * 1000))
-    if kind == "berth" then
-      -- The capture yaw is the surveyed direction of circulation. Publish a
+    if kind == "berth" or kind == "berth2" then
+      -- Bay endpoint yaw is the surveyed direction of circulation. Publish a
       -- world-space forward vector so redscript never has to guess yaw-axis
       -- conventions when it computes the AI-only target beyond the berth.
       local radians = math.rad(point.yaw or 0)
@@ -973,6 +1023,18 @@ local function publish_capture(quests, capture)
   publish_vector("spawn", capture.spawn)
   publish_vector("approach", capture.approach)
   publish_vector("berth", capture.berth)
+  publish_vector("berth2", capture.berth2)
+  local width_prefix = "nctc_external_capture_id" .. tostring(capture.stopId or 0) .. "_bay_width_"
+  if vector_has_position(capture.bayWidthA) and vector_has_position(capture.bayWidthB) then
+    local dx = (capture.bayWidthA.x or 0) - (capture.bayWidthB.x or 0)
+    local dy = (capture.bayWidthA.y or 0) - (capture.bayWidthB.y or 0)
+    local width = math.sqrt(dx * dx + dy * dy)
+    set_fact(quests, width_prefix .. "mm", math.floor(width * 1000))
+    set_fact(quests, width_prefix .. "valid", 1)
+  else
+    set_fact(quests, width_prefix .. "mm", 0)
+    set_fact(quests, width_prefix .. "valid", 0)
+  end
 end
 
 local function synchronize_external_survey(quests)
@@ -1005,6 +1067,8 @@ local function synchronize_external_survey(quests)
     set_fact(quests, prefix .. "spawn_valid", 0)
     set_fact(quests, prefix .. "approach_valid", 0)
     set_fact(quests, prefix .. "berth_valid", 0)
+    set_fact(quests, prefix .. "berth2_valid", 0)
+    set_fact(quests, prefix .. "berth2_forward_valid", 0)
   end
   -- Every passage receives its own fact namespace. Future enabled routes can
   -- consume their capture directly; no information is thrown away when a
@@ -1076,9 +1140,24 @@ local function log_service_loop(quests)
   local berth_longitudinal = fact(quests, "nctc_dev_loop_berth_longitudinal_mm") / 1000.0
   local berth_lateral = fact(quests, "nctc_dev_loop_berth_lateral_mm") / 1000.0
   local berth_speed = fact(quests, "nctc_dev_loop_berth_speed_mm") / 1000.0
+  local berth_stage = fact(quests, "nctc_dev_loop_berth_stage")
+  local berth_active = fact(quests, "nctc_dev_loop_berth_active")
+  local berth_heading_dot = fact(quests, "nctc_dev_loop_berth_heading_dot_x1000") / 1000.0
+  local berth_merge_lateral = fact(quests, "nctc_dev_loop_berth_merge_lateral_mm") / 1000.0
+  local berth_gate_road_lateral = fact(quests, "nctc_dev_loop_berth_gate_road_lateral_mm") / 1000.0
+  local berth_active_target_x = fact(quests, "nctc_dev_loop_berth_active_target_x_mm") / 1000.0
+  local berth_active_target_y = fact(quests, "nctc_dev_loop_berth_active_target_y_mm") / 1000.0
+  local berth_active_target_z = fact(quests, "nctc_dev_loop_berth_active_target_z_mm") / 1000.0
   local dwell_polls = fact(quests, "nctc_dev_loop_dwell_polls")
   local player_aboard = fact(quests, "nctc_dev_loop_player_aboard")
   local mount_request = fact(quests, "nctc_dev_loop_mount_request")
+  local has_bay = fact(quests, "nctc_dev_loop_has_bay")
+  local bay_length = fact(quests, "nctc_dev_loop_bay_length_mm") / 1000.0
+  local bay_width = fact(quests, "nctc_dev_loop_bay_width_mm") / 1000.0
+  local bay_p1_x = fact(quests, "nctc_dev_loop_bay_p1_x_mm") / 1000.0
+  local bay_p1_y = fact(quests, "nctc_dev_loop_bay_p1_y_mm") / 1000.0
+  local bay_p2_x = fact(quests, "nctc_dev_loop_bay_p2_x_mm") / 1000.0
+  local bay_p2_y = fact(quests, "nctc_dev_loop_bay_p2_y_mm") / 1000.0
   local states = {
     [1] = "arrived and opened doors",
     [2] = "waiting: V is not mounted in this bus",
@@ -1106,10 +1185,42 @@ local function log_service_loop(quests)
     [37] = "route loop: bus manually despawned",
     [38] = "route loop: native stop detected; forward berth correction sent",
     [41] = "route loop: r372n outgoing corridor armed",
-    [42] = "route loop: r372n rolling post-passage handoff"
+    [42] = "route loop: r372n rolling post-passage handoff",
+    [43] = "route loop: r374w ROLLING-RAY ENTRY ATTACK",
+    [44] = "route loop: r374w LONG-CORRIDOR COUNTER-STEER",
+    [45] = "route loop: legacy final BERTH command sent (unexpected in r374m)",
+    [46] = "route loop: r374b rolling slow traffic handoff",
+    [47] = "route loop: legacy road brake (unexpected in r374s)",
+    [48] = "route loop: r374w rolling service departure armed",
+    [49] = "route loop: r374w traffic handoff after rolling rejoin",
+    [50] = "route loop: r374w native Vehicle overlap -> stay on road",
+    [51] = "route loop: r374w TRACK rolling centreline",
+    [52] = "route loop: r374w ROLLING EXIT ATTACK",
+    [53] = "route loop: r374w 3-to-1 rolling REJOIN",
+    [54] = "route loop: r374w direct departure stall recovery",
+    [60] = "route loop: r375b bay entry ray",
+    [61] = "route loop: r375b early progress parking target",
+    [62] = "route loop: r375b physically parked in bay",
+    [63] = "route loop: r375b bay exit/rejoin",
+    [64] = "route loop: r375b intermediate bay skipped",
+    [65] = "route loop: r375b entry retry",
+    [66] = "route loop: r375b one-shot parking correction",
+    [67] = "route loop: r375b exit retry",
+    [68] = "route loop: r376a H2 native spline armed",
+    [69] = "route loop: r376a H2 native spline reached path end",
+    [70] = "route loop: r376a H2 native spline FAILED",
+    [71] = "route loop: r376a H2 native spline active telemetry",
+    [72] = "route loop: r376b H2 native departure spline armed",
+    [73] = "route loop: r376b H2 native departure spline active telemetry",
+    [74] = "route loop: r376b H2 spline exit -> native traffic handoff",
+    [75] = "route loop: r376b H2 native departure spline FAILED",
+    [84] = "route loop: r381a direct JoinTraffic armed from berth",
+    [85] = "route loop: r381a direct JoinTraffic active",
+    [86] = "route loop: r381a traffic lane acquired -> normal route",
+    [87] = "route loop: r381a direct JoinTraffic FAILED; holding"
   }
   local command_extra = ""
-  if code == 29 or code == 31 or code == 32 or code == 41 then
+  if code == 29 or code == 31 or code == 32 or code == 41 or code == 46 then
     local speed_profiles = { [0] = "fallback/manual", [1] = "dense-city", [2] = "city", [3] = "outer-city", [4] = "badlands" }
     local profile_code = fact(quests, "nctc_dev_command_speed_profile")
     command_extra = " minDistance=" .. string.format("%.2fm", fact(quests, "nctc_dev_command_minimum_distance_mm") / 1000.0)
@@ -1142,6 +1253,41 @@ local function log_service_loop(quests)
       .. " forcedStartSpeed=" .. string.format("%.2f", fact(quests, "nctc_dev_command_forced_start_speed_mm") / 1000.0)
       .. " generation=" .. tostring(fact(quests, "nctc_dev_drive_generation"))
       .. string.format(" aiTarget=(%.3f, %.3f, %.3f)", ai_target_x, ai_target_y, ai_target_z)
+  end
+  if code == 84 or code == 85 or code == 86 or code == 87 then
+    local join_states = { [0] = "missing", [1] = "active", [2] = "success", [3] = "failed/cancelled" }
+    command_extra = command_extra
+      .. " joinState=" .. (join_states[fact(quests, "nctc_dev_join_traffic_state")] or "unknown")
+      .. " inTrafficLane=" .. tostring(fact(quests, "nctc_dev_bus_in_traffic_lane"))
+      .. " joinPoll=" .. tostring(fact(quests, "nctc_dev_join_poll_count"))
+      .. " preSpeed=" .. string.format("%.2f", fact(quests, "nctc_dev_join_pre_speed_mm") / 1000.0)
+      .. " joinSpeed=" .. string.format("%.2f", fact(quests, "nctc_dev_join_speed_mm") / 1000.0)
+  end
+  if code == 48 or code == 49 or code == 54 then
+    command_extra = command_extra
+      .. string.format(" departureTarget=(%.3f, %.3f, %.3f)",
+        fact(quests, "nctc_dev_departure_target_x_mm") / 1000.0,
+        fact(quests, "nctc_dev_departure_target_y_mm") / 1000.0,
+        fact(quests, "nctc_dev_departure_target_z_mm") / 1000.0)
+      .. " departureProgress=" .. string.format("%.1fm", fact(quests, "nctc_dev_departure_progress_mm") / 1000.0)
+      .. " departureSpeed=" .. string.format("%.2f", fact(quests, "nctc_dev_departure_speed_mm") / 1000.0)
+  end
+  if code == 29 or code == 30 or code == 36 or code == 43 or code == 47 or code == 48 or code == 49 or code == 50 or code == 51 or code == 52 or code == 53 or code == 54
+    or code == 60 or code == 61 or code == 62 or code == 63 or code == 64 or code == 65 or code == 66 or code == 67 or code == 68 or code == 69 or code == 70 or code == 71 or code == 72 or code == 73 or code == 74 or code == 75 or code == 84 or code == 85 or code == 86 or code == 87 then
+    command_extra = command_extra
+      .. " hasBay=" .. tostring(has_bay)
+      .. " bayLen=" .. string.format("%.2fm", bay_length)
+      .. " bayWidth=" .. string.format("%.3fm", bay_width)
+      .. string.format(" P1=(%.3f, %.3f) P2=(%.3f, %.3f)", bay_p1_x, bay_p1_y, bay_p2_x, bay_p2_y)
+  end
+  if berth_active == 1 or code == 43 or code == 44 or code == 45 or code == 51 or code == 52 or code == 53 then
+    command_extra = command_extra
+      .. " bayStage=" .. tostring(berth_stage)
+      .. " headingDot=" .. string.format("%.3f", berth_heading_dot)
+      .. " mergeLat=" .. string.format("%.2fm", berth_merge_lateral)
+      .. " gateRoadLat=" .. string.format("%.2fm", berth_gate_road_lateral)
+      .. string.format(" activeTarget=(%.3f, %.3f, %.3f)",
+        berth_active_target_x, berth_active_target_y, berth_active_target_z)
   end
   local session = fact(quests, "nctc_dev_service_session")
   log("service #" .. tostring(session) .. " loop " .. tostring(id) .. ": L" .. tostring(line) .. " currentStopId=" .. tostring(stop_id)
@@ -1195,11 +1341,89 @@ local function log_stale_drive_callback(quests)
     .. " currentGeneration=" .. tostring(fact(quests, "nctc_dev_drive_generation")))
 end
 
+local function scan_service_berth_occupancy(quests, delta_time)
+  berth_scan_accumulator = berth_scan_accumulator + (tonumber(delta_time) or 0.0)
+  if berth_scan_accumulator < 0.20 then return end
+  berth_scan_accumulator = 0.0
+  -- r374r: REDscript owns occupancy using the native physics Vehicle overlap.
+  -- CET is telemetry-only here and must never overwrite the physics result.
+  local stop_id = fact(quests, "nctc_dev_berth_occupancy_stop_id")
+  local occupied = fact(quests, "nctc_dev_berth_occupied")
+  if stop_id <= 0 then
+    last_berth_occupancy_stop_id, last_berth_occupancy_state = -1, -1
+    return
+  end
+  if stop_id ~= last_berth_occupancy_stop_id or occupied ~= last_berth_occupancy_state then
+    last_berth_occupancy_stop_id, last_berth_occupancy_state = stop_id, occupied
+    if occupied == 1 then
+      log("berth occupancy stopId=" .. tostring(stop_id) .. " OCCUPIED (native Vehicle overlap)")
+    else
+      log("berth occupancy stopId=" .. tostring(stop_id) .. " clear (native Vehicle overlap)")
+    end
+  end
+end
+
 local function log_build_revision(quests)
   local revision = fact(quests, "nctc_dev_build_revision")
   if revision <= 0 or revision == last_build_revision then return end
   last_build_revision = revision
-  if revision == 37218 then
+  if revision == 38101 then
+    log("NCTC runtime build=38101 r381a H2 direct vanilla JoinTraffic from berth")
+  elseif revision == 37606 then
+    log("NCTC runtime build=37606 r376f H2 final nose clearance")
+  elseif revision == 37601 then
+    log("NCTC runtime build=37601 r376a H2 native spline arrival POC")
+  elseif revision == 37502 then
+    log("NCTC runtime build=37502 r375b early-progress parking + physical bay arrival")
+  elseif revision == 37501 then
+    log("NCTC runtime build=37501 r375a fresh bay parking reset")
+  elseif revision == 37422 then
+    log("NCTC runtime build=37422 r374v calibrated narrow-bay geometry + departure recovery")
+  elseif revision == 37421 then
+    log("NCTC runtime build=37421 r374u bay-width calibration")
+  elseif revision == 37420 then
+    log("NCTC runtime build=37420 r374t real-bus S-curve bay path")
+  elseif revision == 37419 then
+    log("NCTC runtime build=37419 r374s early Point1 gate + local road rejoin")
+  elseif revision == 37418 then
+    log("NCTC runtime build=37418 r374r entry-gate + native bay overlap + road rejoin")
+  elseif revision == 37417 then
+    log("NCTC runtime build=37417 r374q bay geometry independent from service state")
+  elseif revision == 37416 then
+    log("NCTC runtime build=37416 r374p fresh bay facts + geometry diagnostics")
+  elseif revision == 37415 then
+    log("NCTC runtime build=37415 r374o two-point bay geometry + authored exit handoff")
+  elseif revision == 37414 then
+    log("NCTC runtime build=37414 r374n dual-point bay authoring")
+  elseif revision == 37413 then
+    log("NCTC runtime build=37413 r374m single bay arc + native lane recovery + occupied-bay road stop")
+  elseif revision == 37412 then
+    log("NCTC runtime build=37412 r374l rolling bay handoff, no entry hesitation")
+  elseif revision == 37411 then
+    log("NCTC runtime build=37411 r374k late align + stronger departure arc")
+  elseif revision == 37410 then
+    log("NCTC runtime build=37410 r374j early bay entry + immediate departure arc")
+  elseif revision == 37409 then
+    log("NCTC runtime build=37409 r374i continuous corridor, no final berth retarget")
+  elseif revision == 37408 then
+    log("NCTC runtime build=37408 r374h progressive shallow berth merge on development")
+  elseif revision == 37407 then
+    log("NCTC runtime build=37407 r374g road brake before entry")
+  elseif revision == 37406 then
+    log("NCTC runtime build=37406 r374f real traffic maxSpeed approach cap")
+  elseif revision == 37405 then
+    log("NCTC runtime build=37405 r374e approach slowdown no forced start")
+  elseif revision == 37404 then
+    log("NCTC runtime build=37404 r374d rolling approach 7ms")
+  elseif revision == 37402 then
+    log("NCTC runtime build=37402 r374b rolling approach slowdown")
+  elseif revision == 37308 then
+    log("NCTC runtime build=37308 r373h service-stop-only berth gate")
+  elseif revision == 37307 then
+    log("NCTC runtime build=37307 r373g berth maneuver telemetry")
+  elseif revision == 37306 then
+    log("NCTC runtime build=37306 r373f rebased berth corridor rolling-entry guard")
+  elseif revision == 37218 then
     log("NCTC runtime build=37218 r372r display regression rollback")
   elseif revision == 37217 then
     log("NCTC runtime build=37217 r372q vanilla arrival telemetry compile guard")
@@ -1214,9 +1438,10 @@ local function log_build_revision(quests)
   end
 end
 
-registerForEvent("onUpdate", function()
+registerForEvent("onUpdate", function(deltaTime)
   local quests = Game.GetQuestsSystem()
   if not quests then return end
+  scan_service_berth_occupancy(quests, deltaTime)
   if not runtime_announced then
     runtime_announced = true
     print("[NCTC Survey] Runtime active; external path: " .. tostring(NETWORK_FILE))

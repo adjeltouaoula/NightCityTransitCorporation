@@ -47,7 +47,7 @@ public class NCTCDirectSurveyNoticeCallback extends DelayCallback {
       noticeId = quests.GetFact(n"nctc_survey_direct_notice_id");
       if noticeId > this.lastNoticeId {
         point = quests.GetFact(n"nctc_survey_direct_notice_point");
-        NCTCSettings.Notify(this.game, "NCTC survey confirmed: " + (Equals(point, 1) ? "spawn" : Equals(point, 2) ? "approach" : "berth"));
+        NCTCSettings.Notify(this.game, "NCTC survey confirmed: " + (Equals(point, 1) ? "spawn" : Equals(point, 2) ? "approach" : Equals(point, 4) ? "Bay Point 2" : Equals(point, 5) ? "Bay Width A" : Equals(point, 6) ? "Bay Width B" : "Bay Point 1"));
         this.lastNoticeId = noticeId;
       } else if noticeId < this.lastNoticeId {
         this.lastNoticeId = noticeId;
@@ -362,6 +362,27 @@ public class NCTCSettings extends ScriptableSystem {
   public let recordBerthKey: EInputKey = EInputKey.IK_NumPad3;
 
   @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Edit Bay Point 2")
+  @runtimeProperty("ModSettings.description", "OFF: NumPad 3 creates/updates Bay Point 1 (the existing berth). ON: NumPad 3 creates/updates Bay Point 2, the second end of a bus bay.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let editBayPoint2: Bool = false;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Toggle Bay Point editor")
+  @runtimeProperty("ModSettings.description", "Developer-only shortcut. Cycles NumPad 3 through Bay Point 1, Bay Point 2, Width A and Width B.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let toggleBayPointEditorKey: EInputKey = EInputKey.IK_NumPad0;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
+  @runtimeProperty("ModSettings.displayName", "Remove Bay Point 2")
+  @runtimeProperty("ModSettings.description", "One-shot action. Removes only Bay Point 2 from the selected stop, keeps Bay Point 1, then resets to OFF.")
+  @runtimeProperty("ModSettings.category", "Developer mode")
+  @runtimeProperty("ModSettings.dependency", "developerMode")
+  public let removeBayPoint2: Bool = false;
+
+  @runtimeProperty("ModSettings.mod", "Night City Transit Corporation")
   @runtimeProperty("ModSettings.displayName", "Add manual stop")
   @runtimeProperty("ModSettings.description", "Adds a stop at V's current position. Use this for metro stations or roadside stops; nearby services are grouped into one hub.")
   @runtimeProperty("ModSettings.category", "Developer mode")
@@ -433,11 +454,16 @@ public class NCTCSettings extends ScriptableSystem {
   @runtimeProperty("ModSettings.dependency", "developerMode")
   public let beginDraftLine: Bool = false;
 
+  private let lastBayPoint2EditMode: Bool;
+  private let bayEditorMode: Int32;
+
   private func OnAttach() -> Void {
     let callback: ref<NCTCDirectSurveyNoticeCallback>;
     let selectionCallback: ref<NCTCSurveySelectionPublishCallback>;
     let quests: ref<QuestsSystem>;
     this.RegisterSettings();
+    this.lastBayPoint2EditMode = this.editBayPoint2;
+    this.bayEditorMode = this.editBayPoint2 ? 1 : 0;
     this.PublishSurveySettings();
     this.UpdateDeveloperVisibility();
     NCTCMapMarkerSystem.GetInstance(this.GetGameInstance()).RegisterAllMarkers();
@@ -458,6 +484,15 @@ public class NCTCSettings extends ScriptableSystem {
 
   @if(ModuleExists("ModSettingsModule"))
   public func OnModSettingsChange() -> Void {
+    if this.developerMode && NotEquals(this.editBayPoint2, this.lastBayPoint2EditMode) {
+      this.lastBayPoint2EditMode = this.editBayPoint2;
+      this.bayEditorMode = this.editBayPoint2 ? 1 : 0;
+      NCTCSettings.Notify(this.GetGameInstance(), "NCTC - Editing " + this.GetBayEditorName());
+    };
+    if this.developerMode && this.removeBayPoint2 {
+      this.removeBayPoint2 = false;
+      this.RemoveSelectedBayPoint2();
+    };
     this.PublishSurveySettings();
     this.UpdateDeveloperVisibility();
     if this.developerMode { this.NotifySelectedSurveyStop(); };
@@ -470,6 +505,8 @@ public class NCTCSettings extends ScriptableSystem {
     quests.SetFact(n"nctc_survey_line", this.activeLineNumber);
     quests.SetFact(n"nctc_survey_selected_line", this.GetSelectedLineNumber());
     quests.SetFact(n"nctc_survey_selected_stop_index", this.surveyStopIndex);
+    quests.SetFact(n"nctc_survey_edit_bay_point2", this.editBayPoint2 ? 1 : 0);
+    quests.SetFact(n"nctc_survey_bay_edit_mode", this.bayEditorMode);
     quests.SetFact(n"nctc_survey_passage", EnumInt(this.surveyPassage));
   }
 
@@ -477,7 +514,7 @@ public class NCTCSettings extends ScriptableSystem {
     let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(this.GetGameInstance());
     let line: Int32 = this.GetSelectedLineNumber();
     if !IsDefined(markers) || line < 1 { return; };
-    NCTCSettings.Notify(this.GetGameInstance(), "NCTC survey: line " + ToString(line) + " · stop " + ToString(this.surveyStopIndex) + " · " + markers.GetSurveyStopName(line, this.surveyStopIndex));
+    NCTCSettings.Notify(this.GetGameInstance(), "NCTC survey: line " + ToString(line) + " · stop " + ToString(this.surveyStopIndex) + " · " + markers.GetSurveyStopName(line, this.surveyStopIndex) + " · editing " + this.GetBayEditorName());
   }
 
   @if(ModuleExists("ModSettingsModule"))
@@ -487,6 +524,7 @@ public class NCTCSettings extends ScriptableSystem {
     // normal configuration screen. Only the master switch stays visible.
     for variable in ModSettings.GetVars(n"Night City Transit Corporation", n"Developer mode") {
       if Equals(variable.GetName(), n"surveyLine") || Equals(variable.GetName(), n"surveyPassage") || Equals(variable.GetName(), n"recordSpawnKey") || Equals(variable.GetName(), n"recordApproachKey") || Equals(variable.GetName(), n"recordBerthKey") || Equals(variable.GetName(), n"draftLineNumber") || Equals(variable.GetName(), n"beginDraftLine") { variable.SetVisible(false); }
+      else if Equals(variable.GetName(), n"removeBayPoint2") { variable.SetVisible(this.developerMode && this.editBayPoint2); }
       else if !Equals(variable.GetName(), n"developerMode") { variable.SetVisible(this.developerMode); };
     };
   }
@@ -501,6 +539,7 @@ public class NCTCSettings extends ScriptableSystem {
     if Equals(event.GetKey(), this.nextExistingLineKey) { this.CycleExistingLine(true); return; };
     if Equals(event.GetKey(), this.previousSurveyStopKey) { this.CycleSurveyStop(false); return; };
     if Equals(event.GetKey(), this.nextSurveyStopKey) { this.CycleSurveyStop(true); return; };
+    if Equals(event.GetKey(), this.toggleBayPointEditorKey) { this.ToggleBayPointEditor(); return; };
     if Equals(event.GetKey(), this.addManualStopKey) { this.RecordManualStop(); return; };
     if Equals(event.GetKey(), this.deleteNearestStopKey) { this.DeleteNearestStop(); return; };
     if Equals(event.GetKey(), this.moveSelectedStopKey) { this.MoveSelectedStop(); return; };
@@ -509,6 +548,42 @@ public class NCTCSettings extends ScriptableSystem {
     if Equals(event.GetKey(), this.despawnServiceBusKey) {
       if NCTCTransitSystem.Get(this.GetGameInstance()).DespawnServiceBus() { NCTCSettings.Notify(this.GetGameInstance(), "NCTC service bus despawned"); };
     };
+  }
+
+  private func GetBayEditorName() -> String {
+    if Equals(this.bayEditorMode, 1) { return "Bay Point 2"; };
+    if Equals(this.bayEditorMode, 2) { return "Bay Width A"; };
+    if Equals(this.bayEditorMode, 3) { return "Bay Width B"; };
+    return "Bay Point 1";
+  }
+
+  private func ToggleBayPointEditor() -> Void {
+    this.bayEditorMode += 1;
+    if this.bayEditorMode > 3 { this.bayEditorMode = 0; };
+    this.editBayPoint2 = Equals(this.bayEditorMode, 1);
+    this.lastBayPoint2EditMode = this.editBayPoint2;
+    this.PublishSurveySettings();
+    NCTCSettings.Notify(this.GetGameInstance(), "NCTC - Editing " + this.GetBayEditorName());
+  }
+
+  private func RemoveSelectedBayPoint2() -> Void {
+    let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGameInstance());
+    let eventId: Int32;
+    let confirmation: ref<NCTCSurveyWriteConfirmationCallback>;
+    if !IsDefined(quests) { return; };
+    quests.SetFact(n"nctc_survey_capture_line", this.GetSelectedLineNumber());
+    quests.SetFact(n"nctc_survey_capture_stop_index", this.surveyStopIndex);
+    quests.SetFact(n"nctc_survey_event_session", quests.GetFact(n"nctc_survey_runtime_session"));
+    quests.SetFact(n"nctc_survey_event_kind", 10);
+    eventId = quests.GetFact(n"nctc_survey_event_id") + 1;
+    quests.SetFact(n"nctc_survey_write_ack_event_id", -1);
+    quests.SetFact(n"nctc_survey_event_id", eventId);
+    confirmation = new NCTCSurveyWriteConfirmationCallback();
+    confirmation.game = this.GetGameInstance();
+    confirmation.eventId = eventId;
+    confirmation.kind = "Bay Point 2 removal";
+    GameInstance.GetDelaySystem(this.GetGameInstance()).DelayCallback(confirmation, 0.50, false);
+    NCTCSettings.Notify(this.GetGameInstance(), "NCTC - Remove Bay Point 2 requested");
   }
 
   private func CycleExistingLine(forward: Bool) -> Void {
