@@ -9,7 +9,7 @@ local NCBN = { tag = "NightCityBusNetwork.PrototypeBus", interactionUI = nil, ch
     uiMissingLogged = false, wasInside = false, lastMountedSlot = nil,
     passengerMountRequested = false, mountRequestDeadline = 0, wasMounted = false,
     hubChoiceVisible = false, hubChoiceHub = nil, hubChoices = {}, selectedHubLine = 0,
-    hubChoiceRevision = -1, lastInsideLocal = nil, stopRequestVisible = false, stopRequestHub = nil }
+    hubChoiceRevision = -1, lastInsideLocal = nil, stopRequestVisible = false }
 
 -- Local-space zone in the aisle beside the two validated rear passenger seats.
 local seatAreas = {
@@ -204,49 +204,34 @@ local function makeHubChoiceHub()
     return hub
 end
 
-local function makeStopRequestHub()
-    local hub = gameinteractionsvisListChoiceHubData.new()
-    hub.title, hub.activityState, hub.hubPriority, hub.id = "NCTC", gameinteractionsvisEVisualizerActivityState.Active, 1, 77903
-    local choiceType = gameinteractionsChoiceTypeWrapper.new()
-    choiceType:SetType(gameinteractionsChoiceType.Selected)
-    local choice = gameinteractionsvisListChoiceData.new()
-    choice.localizedName = "Demander le prochain arrêt"
-    -- The vanilla interaction HUD resolves this action name back to the
-    -- current Input Loader / Mod Settings binding, so the displayed glyph
-    -- follows keyboard/gamepad rebinding automatically.
-    choice.inputActionName = CName.new("NCTC_RequestNextStop")
-    choice.type = choiceType
-    hub.choices = { choice }
-    return hub
-end
+local STOP_REQUEST_HINT_SOURCE = "NCTCStopRequest"
+local STOP_REQUEST_HINT_CONTAINER = "GameplayInputHelper"
+local STOP_REQUEST_ACTION = CName.new("NCTC_RequestNextStop")
 
 local function hideStopRequestHint()
     if not NCBN.stopRequestVisible then return end
-    NCBN.stopRequestVisible, NCBN.stopRequestHub = false, nil
-    if NCBN.interactionUI then
-        local defs = GetAllBlackboardDefs().UIInteractions
-        local blackboard = Game.GetBlackboardSystem():Get(defs)
-        if blackboard:GetInt(defs.ActiveChoiceHubID) == 77903 then blackboard:SetInt(defs.ActiveChoiceHubID, 0) end
-        NCBN.interactionUI:OnDialogsData(blackboard:GetVariant(defs.DialogChoiceHubs))
-        NCBN.interactionUI:OnInteractionsChanged()
-        NCBN.interactionUI:UpdateListBlackboard()
-    end
+    NCBN.stopRequestVisible = false
+    local evt = DeleteInputHintBySourceEvent.new()
+    evt.source = STOP_REQUEST_HINT_SOURCE
+    evt.targetHintContainer = STOP_REQUEST_HINT_CONTAINER
+    Game.GetUISystem():QueueEvent(evt)
 end
 
 local function showStopRequestHint()
     if NCBN.stopRequestVisible then return end
-    if not NCBN.interactionUI or NCBN.choiceVisible or NCBN.hubChoiceVisible then return end
     if getFact("nctc_player_in_service_bus") ~= 1 or getFact("nctc_display_stop_requested") == 1 then return end
-    NCBN.stopRequestHub = makeStopRequestHub()
+    local evt = UpdateInputHintEvent.new()
+    local data = InputHintData.new()
+    data.action = STOP_REQUEST_ACTION
+    data.source = STOP_REQUEST_HINT_SOURCE
+    data.localizedLabel = "Demander le prochain arrêt"
+    data.enableHoldAnimation = false
+    data.sortingPriority = 1
+    evt.data = data
+    evt.show = true
+    evt.targetHintContainer = STOP_REQUEST_HINT_CONTAINER
+    Game.GetUISystem():QueueEvent(evt)
     NCBN.stopRequestVisible = true
-    local defs = GetAllBlackboardDefs().UIInteractions
-    local blackboard = Game.GetBlackboardSystem():Get(defs)
-    blackboard:SetInt(defs.ActiveChoiceHubID, NCBN.stopRequestHub.id)
-    NCBN.interactionUI:OnDialogsSelectIndex(0)
-    NCBN.interactionUI:OnDialogsData(blackboard:GetVariant(defs.DialogChoiceHubs))
-    NCBN.interactionUI:OnInteractionsChanged()
-    NCBN.interactionUI:UpdateListBlackboard()
-    NCBN.interactionUI:OnDialogsActivateHub(NCBN.stopRequestHub.id)
 end
 
 local function hideChoice()
@@ -404,14 +389,13 @@ registerForEvent("onInit", function()
     Observe("InteractionUIBase", "OnDialogsData", function(this) NCBN.interactionUI = this end)
     Observe("InteractionUIBase", "OnUninitialize", function(this) if NCBN.interactionUI == this then NCBN.interactionUI = nil end end)
     Override("InteractionUIBase", "OnDialogsData", function(_, value, wrapped)
-        if (NCBN.choiceVisible and NCBN.choiceHub) or (NCBN.hubChoiceVisible and NCBN.hubChoiceHub) or (NCBN.stopRequestVisible and NCBN.stopRequestHub) then
+        if (NCBN.choiceVisible and NCBN.choiceHub) or (NCBN.hubChoiceVisible and NCBN.hubChoiceHub) then
             local data = FromVariant(value)
             -- FromVariant properties are copied. Reassigning the modified
             -- array is required or the HUD never receives our seat choice.
             local hubs = data.choiceHubs
             if NCBN.choiceVisible and NCBN.choiceHub then table.insert(hubs, NCBN.choiceHub) end
             if NCBN.hubChoiceVisible and NCBN.hubChoiceHub then table.insert(hubs, NCBN.hubChoiceHub) end
-            if NCBN.stopRequestVisible and NCBN.stopRequestHub then table.insert(hubs, NCBN.stopRequestHub) end
             data.choiceHubs = hubs
             wrapped(ToVariant(data))
         else wrapped(value) end
@@ -419,13 +403,11 @@ registerForEvent("onInit", function()
     Override("InteractionUIBase", "OnDialogsSelectIndex", function(_, index, wrapped)
         if NCBN.hubChoiceVisible then return wrapped(NCBN.selectedHubLine) end
         if NCBN.choiceVisible then return wrapped(NCBN.selectedSeat) end
-        if NCBN.stopRequestVisible then return wrapped(0) end
         wrapped(index)
     end)
     Override("dialogWidgetGameController", "OnDialogsActivateHub", function(_, id, wrapped)
         if NCBN.hubChoiceVisible and NCBN.hubChoiceHub then return wrapped(NCBN.hubChoiceHub.id) end
         if NCBN.choiceVisible and NCBN.choiceHub then return wrapped(NCBN.choiceHub.id) end
-        if NCBN.stopRequestVisible and NCBN.stopRequestHub then return wrapped(NCBN.stopRequestHub.id) end
         return wrapped(id)
     end)
     Observe("PlayerPuppet", "OnAction", function(_, action, consumer)
@@ -563,13 +545,14 @@ registerForEvent("onUpdate", function()
         print("[NCBN] Seat choices: " .. (#names > 0 and table.concat(names, ", ") or "none"))
     end
     if #seats > 0 and not NCBN.choiceVisible then
-        hideStopRequestHint()
-        NCBN.choiceVisible = true
-        showChoice()
-    elseif #seats == 0 then
-        hideChoice()
-        if inside and getFact("nctc_display_stop_requested") == 0 then showStopRequestHint() else hideStopRequestHint() end
-    else
-        hideStopRequestHint()
-    end
+    NCBN.choiceVisible = true
+    showChoice()
+elseif #seats == 0 then
+    hideChoice()
+end
+if inside and getFact("nctc_display_stop_requested") == 0 then
+    showStopRequestHint()
+else
+    hideStopRequestHint()
+end
 end)
