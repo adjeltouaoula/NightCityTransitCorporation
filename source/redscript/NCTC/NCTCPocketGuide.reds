@@ -2,12 +2,11 @@ module NCTC
 
 import Codeware.UI.*
 
-// Native world-map pocket guide. This is intentionally built from vanilla Ink
-// primitives and the already-published NCTC network facts; CET is not used for
-// the player-facing UI.
+// Native world-map pocket guide. Player-facing UI is pure Ink/REDscript and
+// reads the same published network facts as the rest of NCTC.
 public class NCTCGuideButton extends HubLinkButton {
   public static func Create() -> ref<NCTCGuideButton> {
-    let self: ref<NCTCGuideButton> = new NCTCGuideButton();
+    let self = new NCTCGuideButton();
     self.CreateInstance();
     return self;
   }
@@ -15,7 +14,7 @@ public class NCTCGuideButton extends HubLinkButton {
   protected cb func OnCreate() {
     super.OnCreate();
     this.m_icon.SetVisible(false);
-    this.m_root.SetSize(new Vector2(260.00, 58.00));
+    this.m_root.SetSize(Vector2(260.00, 58.00));
   }
 
   public func SetVisible(visible: Bool) -> Void {
@@ -27,7 +26,7 @@ public class NCTCGuideLineButton extends HubLinkButton {
   private let m_line: Int32;
 
   public static func Create(line: Int32) -> ref<NCTCGuideLineButton> {
-    let self: ref<NCTCGuideLineButton> = new NCTCGuideLineButton();
+    let self = new NCTCGuideLineButton();
     self.m_line = line;
     self.CreateInstance();
     return self;
@@ -36,7 +35,7 @@ public class NCTCGuideLineButton extends HubLinkButton {
   protected cb func OnCreate() {
     super.OnCreate();
     this.m_icon.SetVisible(false);
-    this.m_root.SetSize(new Vector2(190.00, 56.00));
+    this.m_root.SetSize(Vector2(190.00, 56.00));
   }
 
   public func GetLine() -> Int32 {
@@ -86,9 +85,8 @@ let nctcGuideSelectedLine: Int32;
 
 @wrapMethod(WorldMapMenuGameController)
 protected cb func OnInitialize() -> Bool {
-  let result: Bool = wrappedMethod();
+  wrappedMethod();
   this.NCTCCreatePocketGuide();
-  return result;
 }
 
 @addMethod(WorldMapMenuGameController)
@@ -112,8 +110,8 @@ private final func NCTCCreatePocketGuide() -> Void {
   this.nctcGuideButtonContainer.SetName(n"NCTCGuideButtonContainer");
   this.nctcGuideButtonContainer.SetAnchor(inkEAnchor.BottomRight);
   this.nctcGuideButtonContainer.SetAnchorPoint(1.00, 1.00);
-  this.nctcGuideButtonContainer.SetMargin(new inkMargin(0.00, 0.00, 70.00, 110.00));
-  this.nctcGuideButtonContainer.SetSize(new Vector2(280.00, 70.00));
+  this.nctcGuideButtonContainer.SetMargin(inkMargin(0.00, 0.00, 70.00, 110.00));
+  this.nctcGuideButtonContainer.SetSize(Vector2(280.00, 70.00));
   this.nctcGuideButtonContainer.SetInteractive(false);
   this.nctcGuideButtonContainer.Reparent(parent);
 
@@ -127,73 +125,73 @@ private final func NCTCCreatePocketGuide() -> Void {
   this.nctcGuidePanel.SetName(n"NCTCPocketGuidePanel");
   this.nctcGuidePanel.SetAnchor(inkEAnchor.TopRight);
   this.nctcGuidePanel.SetAnchorPoint(1.00, 0.00);
-  this.nctcGuidePanel.SetMargin(new inkMargin(0.00, 88.00, 58.00, 0.00));
-  this.nctcGuidePanel.SetSize(new Vector2(880.00, 840.00));
+  this.nctcGuidePanel.SetMargin(inkMargin(0.00, 88.00, 58.00, 0.00));
+  this.nctcGuidePanel.SetSize(Vector2(880.00, 840.00));
   this.nctcGuidePanel.SetInteractive(true);
   this.nctcGuidePanel.SetVisible(false);
   this.nctcGuidePanel.Reparent(parent);
 
   background = new inkRectangle();
   background.SetName(n"NCTCGuideBackground");
-  background.SetSize(new Vector2(880.00, 840.00));
-  background.SetTintColor(new HDRColor(0.006, 0.010, 0.014, 0.96));
+  background.SetSize(Vector2(880.00, 840.00));
+  background.SetTintColor(HDRColor(0.006, 0.010, 0.014, 0.96));
   background.Reparent(this.nctcGuidePanel);
 
   topRail = new inkRectangle();
-  topRail.SetSize(new Vector2(880.00, 5.00));
-  topRail.SetTintColor(new HDRColor(0.20, 0.95, 1.35, 1.00));
+  topRail.SetSize(Vector2(880.00, 5.00));
+  topRail.SetTintColor(HDRColor(0.20, 0.95, 1.35, 1.00));
   topRail.Reparent(this.nctcGuidePanel);
 
   redRail = new inkRectangle();
-  redRail.SetMargin(new inkMargin(0.00, 5.00, 0.00, 0.00));
-  redRail.SetSize(new Vector2(182.00, 3.00));
-  redRail.SetTintColor(new HDRColor(2.20, 0.16, 0.14, 1.00));
+  redRail.SetMargin(inkMargin(0.00, 5.00, 0.00, 0.00));
+  redRail.SetSize(Vector2(182.00, 3.00));
+  redRail.SetTintColor(HDRColor(2.20, 0.16, 0.14, 1.00));
   redRail.Reparent(this.nctcGuidePanel);
 
-  brand = this.NCTCGuideText(this.nctcGuidePanel, "NIGHT CITY TRANSIT CORPORATION", 38, 38.00, 26.00, 720.00, 56.00, new HDRColor(0.32, 1.25, 1.55, 1.00));
+  brand = this.NCTCGuideText(this.nctcGuidePanel, "NIGHT CITY TRANSIT CORPORATION", 38, 38.00, 26.00, 720.00, 56.00, HDRColor(0.32, 1.25, 1.55, 1.00));
   brand.SetFontStyle(n"Semi-Bold");
 
-  subtitle = this.NCTCGuideText(this.nctcGuidePanel, "POCKET GUIDE // PUBLIC BUS NETWORK", 22, 40.00, 82.00, 720.00, 40.00, new HDRColor(1.70, 0.20, 0.18, 1.00));
+  subtitle = this.NCTCGuideText(this.nctcGuidePanel, "POCKET GUIDE // PUBLIC BUS NETWORK", 22, 40.00, 82.00, 720.00, 40.00, HDRColor(1.70, 0.20, 0.18, 1.00));
   subtitle.SetLetterCase(textLetterCase.UpperCase);
 
-  this.nctcGuideStatus = this.NCTCGuideText(this.nctcGuidePanel, "NETWORK OFFLINE", 18, 40.00, 123.00, 720.00, 32.00, new HDRColor(0.55, 0.62, 0.66, 1.00));
+  this.nctcGuideStatus = this.NCTCGuideText(this.nctcGuidePanel, "NETWORK OFFLINE", 18, 40.00, 123.00, 720.00, 32.00, HDRColor(0.55, 0.62, 0.66, 1.00));
 
   divider = new inkRectangle();
-  divider.SetMargin(new inkMargin(235.00, 178.00, 0.00, 0.00));
-  divider.SetSize(new Vector2(2.00, 590.00));
-  divider.SetTintColor(new HDRColor(0.10, 0.28, 0.34, 0.75));
+  divider.SetMargin(inkMargin(235.00, 178.00, 0.00, 0.00));
+  divider.SetSize(Vector2(2.00, 590.00));
+  divider.SetTintColor(HDRColor(0.10, 0.28, 0.34, 0.75));
   divider.Reparent(this.nctcGuidePanel);
 
-  lineHeader = this.NCTCGuideText(this.nctcGuidePanel, "LINES", 20, 38.00, 175.00, 180.00, 34.00, new HDRColor(0.36, 1.10, 1.28, 1.00));
+  lineHeader = this.NCTCGuideText(this.nctcGuidePanel, "LINES", 20, 38.00, 175.00, 180.00, 34.00, HDRColor(0.36, 1.10, 1.28, 1.00));
   lineHeader.SetLetterCase(textLetterCase.UpperCase);
 
   this.nctcGuideLinePanel = new inkVerticalPanel();
   this.nctcGuideLinePanel.SetName(n"NCTCGuideLines");
-  this.nctcGuideLinePanel.SetMargin(new inkMargin(35.00, 215.00, 0.00, 0.00));
-  this.nctcGuideLinePanel.SetSize(new Vector2(190.00, 500.00));
+  this.nctcGuideLinePanel.SetMargin(inkMargin(35.00, 215.00, 0.00, 0.00));
+  this.nctcGuideLinePanel.SetSize(Vector2(190.00, 500.00));
   this.nctcGuideLinePanel.SetFitToContent(true);
-  this.nctcGuideLinePanel.SetChildMargin(new inkMargin(0.00, 0.00, 0.00, 8.00));
+  this.nctcGuideLinePanel.SetChildMargin(inkMargin(0.00, 0.00, 0.00, 8.00));
   this.nctcGuideLinePanel.Reparent(this.nctcGuidePanel);
 
   this.nctcGuideAccent = new inkRectangle();
-  this.nctcGuideAccent.SetMargin(new inkMargin(267.00, 183.00, 0.00, 0.00));
-  this.nctcGuideAccent.SetSize(new Vector2(8.00, 66.00));
-  this.nctcGuideAccent.SetTintColor(new HDRColor(2.00, 0.26, 0.18, 1.00));
+  this.nctcGuideAccent.SetMargin(inkMargin(267.00, 183.00, 0.00, 0.00));
+  this.nctcGuideAccent.SetSize(Vector2(8.00, 66.00));
+  this.nctcGuideAccent.SetTintColor(HDRColor(2.00, 0.26, 0.18, 1.00));
   this.nctcGuideAccent.Reparent(this.nctcGuidePanel);
 
-  this.nctcGuideRouteTitle = this.NCTCGuideText(this.nctcGuidePanel, "SELECT A LINE", 34, 292.00, 178.00, 540.00, 48.00, new HDRColor(0.92, 0.96, 0.98, 1.00));
+  this.nctcGuideRouteTitle = this.NCTCGuideText(this.nctcGuidePanel, "SELECT A LINE", 34, 292.00, 178.00, 540.00, 48.00, HDRColor(0.92, 0.96, 0.98, 1.00));
   this.nctcGuideRouteTitle.SetFontStyle(n"Semi-Bold");
 
-  this.nctcGuideRouteMeta = this.NCTCGuideText(this.nctcGuidePanel, "--", 18, 294.00, 222.00, 535.00, 30.00, new HDRColor(0.48, 0.60, 0.65, 1.00));
+  this.nctcGuideRouteMeta = this.NCTCGuideText(this.nctcGuidePanel, "--", 18, 294.00, 222.00, 535.00, 30.00, HDRColor(0.48, 0.60, 0.65, 1.00));
 
   this.nctcGuideRoutePanel = new inkVerticalPanel();
   this.nctcGuideRoutePanel.SetName(n"NCTCGuideRoute");
-  this.nctcGuideRoutePanel.SetMargin(new inkMargin(286.00, 268.00, 0.00, 0.00));
-  this.nctcGuideRoutePanel.SetSize(new Vector2(540.00, 500.00));
+  this.nctcGuideRoutePanel.SetMargin(inkMargin(286.00, 268.00, 0.00, 0.00));
+  this.nctcGuideRoutePanel.SetSize(Vector2(540.00, 500.00));
   this.nctcGuideRoutePanel.SetFitToContent(true);
   this.nctcGuideRoutePanel.Reparent(this.nctcGuidePanel);
 
-  footer = this.NCTCGuideText(this.nctcGuidePanel, "NCTC // MOVE NIGHT CITY", 17, 38.00, 792.00, 790.00, 28.00, new HDRColor(0.28, 0.52, 0.58, 1.00));
+  footer = this.NCTCGuideText(this.nctcGuidePanel, "NCTC // MOVE NIGHT CITY", 17, 38.00, 792.00, 790.00, 28.00, HDRColor(0.28, 0.52, 0.58, 1.00));
   footer.SetLetterCase(textLetterCase.UpperCase);
 }
 
@@ -205,10 +203,11 @@ private final func NCTCGuideText(parent: ref<inkCompoundWidget>, value: String, 
   text.SetFontStyle(n"Medium");
   text.SetFontSize(size);
   text.SetLetterCase(textLetterCase.OriginalCase);
-  text.SetMargin(new inkMargin(x, y, 0.00, 0.00));
-  text.SetSize(new Vector2(width, height));
+  text.SetMargin(inkMargin(x, y, 0.00, 0.00));
+  text.SetSize(Vector2(width, height));
   text.SetFitToContent(false);
-  text.SetWrapping(false);
+  text.SetWrapping(false, width, textWrappingPolicy.PerCharacter);
+  text.SetOverflowPolicy(textOverflowPolicy.DotsEnd);
   text.SetHorizontalAlignment(textHorizontalAlignment.Left);
   text.SetVerticalAlignment(textVerticalAlignment.Center);
   text.SetContentHAlign(inkEHorizontalAlign.Left);
@@ -268,8 +267,8 @@ private final func NCTCGuideReload() -> Void {
   count = quests.GetFact(n"nctc_external_network_stop_count");
   while index < count {
     line = quests.GetFact(StringToName("nctc_external_stop_" + ToString(index) + "_line"));
-    // Development routes use 100+ / 900+ numbers. Keep the passenger guide
-    // clean until line metadata gains an explicit public/dev flag.
+    // Current development-only routes use 100+ / 900+ numbers. Hide them from
+    // the passenger guide until the network schema gains a public/dev flag.
     if line > 0 && line < 100 && !ArrayContains(lines, line) { ArrayPush(lines, line); };
     index += 1;
   };
@@ -291,6 +290,7 @@ private final func NCTCGuideReload() -> Void {
   if ArraySize(lines) == 0 {
     this.nctcGuideStatus.SetText("NO PUBLIC LINES PUBLISHED");
     this.nctcGuideRouteTitle.SetText("SERVICE UNAVAILABLE");
+    this.nctcGuideRouteMeta.SetText("No passenger services were found in the active network.");
     return;
   };
 
@@ -315,6 +315,7 @@ private final func NCTCGuideRefreshLine() -> Void {
   let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetPlayerControlledObject().GetGame());
   let markers: ref<NCTCMapMarkerSystem> = NCTCMapMarkerSystem.GetInstance(this.GetPlayerControlledObject().GetGame());
   let count: Int32;
+  let selectedCount: Int32 = 0;
   let index: Int32 = 0;
   let ordinal: Int32 = 0;
   let line: Int32;
@@ -339,6 +340,14 @@ private final func NCTCGuideRefreshLine() -> Void {
 
   count = quests.GetFact(n"nctc_external_network_stop_count");
   while index < count {
+    if Equals(quests.GetFact(StringToName("nctc_external_stop_" + ToString(index) + "_line")), this.nctcGuideSelectedLine) {
+      selectedCount += 1;
+    };
+    index += 1;
+  };
+
+  index = 0;
+  while index < count {
     prefix = "nctc_external_stop_" + ToString(index) + "_";
     line = quests.GetFact(StringToName(prefix + "line"));
     if Equals(line, this.nctcGuideSelectedLine) {
@@ -348,7 +357,7 @@ private final func NCTCGuideRefreshLine() -> Void {
       lastName = stopName;
       transfers = this.NCTCGuideTransfers(quests, index, line);
       if NotEquals(transfers, "") { transferCount += 1; };
-      this.NCTCGuideAddStopRow(ordinal, stopName, transfers, colorIndex, false);
+      this.NCTCGuideAddStopRow(ordinal, stopName, transfers, colorIndex, Equals(ordinal, selectedCount));
     };
     index += 1;
   };
@@ -418,28 +427,28 @@ private final func NCTCGuideAddStopRow(ordinal: Int32, stopName: String, transfe
   let change: ref<inkText>;
   let color: HDRColor = this.NCTCGuideLineColor(colorIndex);
 
-  row.SetSize(new Vector2(540.00, 36.00));
+  row.SetSize(Vector2(540.00, 32.00));
   row.SetInteractive(false);
   row.Reparent(this.nctcGuideRoutePanel);
 
-  connector.SetMargin(new inkMargin(13.00, 20.00, 0.00, 0.00));
-  connector.SetSize(new Vector2(3.00, 24.00));
+  connector.SetMargin(inkMargin(13.00, 18.00, 0.00, 0.00));
+  connector.SetSize(Vector2(3.00, 20.00));
   connector.SetTintColor(color);
   connector.SetOpacity(0.55);
   connector.SetVisible(!isLast);
   connector.Reparent(row);
 
-  marker.SetMargin(new inkMargin(8.00, 8.00, 0.00, 0.00));
-  marker.SetSize(new Vector2(13.00, 13.00));
+  marker.SetMargin(inkMargin(8.00, 8.00, 0.00, 0.00));
+  marker.SetSize(Vector2(13.00, 13.00));
   marker.SetTintColor(color);
   marker.Reparent(row);
 
-  number = this.NCTCGuideText(row, ordinal < 10 ? "0" + ToString(ordinal) : ToString(ordinal), 18, 34.00, 0.00, 42.00, 30.00, new HDRColor(0.42, 0.55, 0.60, 1.00));
-  label = this.NCTCGuideText(row, stopName, 23, 80.00, 0.00, 315.00, 30.00, new HDRColor(0.92, 0.96, 0.98, 1.00));
+  number = this.NCTCGuideText(row, ordinal < 10 ? "0" + ToString(ordinal) : ToString(ordinal), 18, 34.00, 0.00, 42.00, 30.00, HDRColor(0.42, 0.55, 0.60, 1.00));
+  label = this.NCTCGuideText(row, stopName, 22, 80.00, 0.00, 305.00, 30.00, HDRColor(0.92, 0.96, 0.98, 1.00));
   label.SetLetterCase(textLetterCase.UpperCase);
 
   if NotEquals(transfers, "") {
-    change = this.NCTCGuideText(row, transfers, 16, 392.00, 0.00, 145.00, 30.00, new HDRColor(1.65, 0.30, 0.18, 1.00));
+    change = this.NCTCGuideText(row, transfers, 15, 385.00, 0.00, 150.00, 30.00, HDRColor(1.65, 0.30, 0.18, 1.00));
     change.SetHorizontalAlignment(textHorizontalAlignment.Right);
     change.SetContentHAlign(inkEHorizontalAlign.Right);
   };
@@ -448,13 +457,13 @@ private final func NCTCGuideAddStopRow(ordinal: Int32, stopName: String, transfe
 @addMethod(WorldMapMenuGameController)
 private final func NCTCGuideLineColor(index: Int32) -> HDRColor {
   switch index {
-    case 0: return new HDRColor(0.20, 0.78, 1.50, 1.00);
-    case 1: return new HDRColor(2.00, 0.20, 0.18, 1.00);
-    case 2: return new HDRColor(1.85, 0.66, 0.12, 1.00);
-    case 3: return new HDRColor(1.55, 1.20, 0.12, 1.00);
-    case 4: return new HDRColor(0.35, 1.40, 0.62, 1.00);
-    case 5: return new HDRColor(0.95, 0.45, 1.55, 1.00);
-    case 6: return new HDRColor(0.35, 1.35, 1.20, 1.00);
-    default: return new HDRColor(0.32, 1.25, 1.55, 1.00);
+    case 0: return HDRColor(0.20, 0.78, 1.50, 1.00);
+    case 1: return HDRColor(2.00, 0.20, 0.18, 1.00);
+    case 2: return HDRColor(1.85, 0.66, 0.12, 1.00);
+    case 3: return HDRColor(1.55, 1.20, 0.12, 1.00);
+    case 4: return HDRColor(0.35, 1.40, 0.62, 1.00);
+    case 5: return HDRColor(0.95, 0.45, 1.55, 1.00);
+    case 6: return HDRColor(0.35, 1.35, 1.20, 1.00);
+    default: return HDRColor(0.32, 1.25, 1.55, 1.00);
   };
 }
