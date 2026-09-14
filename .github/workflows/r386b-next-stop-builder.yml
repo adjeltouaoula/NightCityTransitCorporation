@@ -1,0 +1,180 @@
+name: r386b next stop post-join fix builder
+
+on:
+  push:
+    branches:
+      - fix/r386b-post-join-driver-pulse
+    paths:
+      - .github/workflows/r386b-next-stop-builder.yml
+      - source/**
+      - tools/bays/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate r386b source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e source/redscript/NCTC/NCTCGenericBayDeparture.reds
+          test ! -e source/archive/pc/mod/NCTCH2Spline.archive
+          grep -q 'public func RequestNextStop()' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'passengerStopRequested' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'target + this.surveyBerthForward \* 100.00' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'skipRoadLongitudinal <= 12.00' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'registerInput("nctc_request_next_stop"' source/cet/nctc_passenger/init.lua
+          grep -q 'nctc_dev_build_revision", 38602' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'DelayEventNextFrame(this.bus, noDriver)' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'DelayCallback(callback, 0.060, false)' source/redscript/NCTC/NCTCTransitSystem.reds
+          echo '83a70f4b30788b210093b2939ba3954923e26372b4f98443f407736e22ec9860  tools/bays/template/validated_arrival_template.archive' | sha256sum -c -
+
+      - name: Extract authored bays
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r386b-next-stop"
+          mkdir -p "$WORK"
+          python3 tools/bays/extract_bays_from_network.py \
+            --network source/cet/nctc_survey/nctc_network.default.json \
+            --out "$WORK/bays.json"
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install WolvenKit CLI 9.0.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r386b-next-stop"
+          mkdir -p "$WORK/tools"
+          dotnet tool install WolvenKit.CLI --version 9.0.1 --tool-path "$WORK/tools"
+
+      - name: Generate generic bay assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r386b-next-stop"
+          TOOL="$WORK/tools/cp77tools"
+          RAW="$WORK/template-raw"
+          TEMPLATE="$WORK/template-json"
+          GENERATED="$WORK/generated"
+          OUT="$WORK/out"
+          MANIFEST="$WORK/bays.json"
+          mkdir -p "$RAW" "$TEMPLATE" "$GENERATED" "$OUT"
+
+          "$TOOL" unbundle tools/bays/template/validated_arrival_template.archive -o "$RAW"
+          SECTOR="$(find "$RAW" -type f -name 'h2_arrival.streamingsector' | head -n1)"
+          BLOCK="$(find "$RAW" -type f -name 'all.streamingblock' | head -n1)"
+          test -n "$SECTOR"
+          test -n "$BLOCK"
+          "$TOOL" convert serialize "$SECTOR" -o "$TEMPLATE"
+          "$TOOL" convert serialize "$BLOCK" -o "$TEMPLATE"
+          SECTOR_JSON="$(find "$TEMPLATE" -type f -name 'h2_arrival.streamingsector.json' | head -n1)"
+          BLOCK_JSON="$(find "$TEMPLATE" -type f -name 'all.streamingblock.json' | head -n1)"
+          test -n "$SECTOR_JSON"
+          test -n "$BLOCK_JSON"
+
+          python3 tools/bays/generate_arrival_splines.py \
+            --sector-template "$SECTOR_JSON" \
+            --block-template "$BLOCK_JSON" \
+            --manifest "$MANIFEST" \
+            --out "$GENERATED"
+
+          ORIGINAL="$SECTOR_JSON" GENERATED_H2="$GENERATED/stop_70/arrival.streamingsector.json" python3 - <<'PY'
+          import json, math, os
+          def find_spline(x):
+              if isinstance(x, dict):
+                  if x.get('$type') == 'Spline' and isinstance(x.get('points'), list): return x
+                  for v in x.values():
+                      f=find_spline(v)
+                      if f is not None: return f
+              elif isinstance(x, list):
+                  for v in x:
+                      f=find_spline(v)
+                      if f is not None: return f
+          a=find_spline(json.load(open(os.environ['ORIGINAL'], encoding='utf-8')))['points']
+          b=find_spline(json.load(open(os.environ['GENERATED_H2'], encoding='utf-8')))['points']
+          worst=max(math.hypot(float(pa['position']['X'])-float(pb['position']['X']), float(pa['position']['Y'])-float(pb['position']['Y'])) for pa,pb in zip(a,b))
+          print(f'validated stop 70 max XY delta = {worst:.6f} m')
+          if worst > 0.001: raise SystemExit('validated H2 geometry changed')
+          PY
+
+          mapfile -t STOPS < <(python3 - "$MANIFEST" <<'PY'
+          import json, sys
+          for bay in json.load(open(sys.argv[1],encoding='utf-8'))['bays']:
+              print(int(bay['stopId']))
+          PY
+          )
+          test "${#STOPS[@]}" -gt 0
+          for STOP in "${STOPS[@]}"; do
+            D="$GENERATED/stop_${STOP}"
+            "$TOOL" convert deserialize "$D/arrival.streamingsector.json"
+            "$TOOL" convert deserialize "$D/all.streamingblock.json"
+            test -s "$D/arrival.streamingsector"
+            test -s "$D/all.streamingblock"
+            PACKROOT="$WORK/NCTCBay${STOP}Spline"
+            mkdir -p "$PACKROOT/nctc/bays/stop_${STOP}/sectors"
+            cp "$D/arrival.streamingsector" "$PACKROOT/nctc/bays/stop_${STOP}/sectors/arrival.streamingsector"
+            cp "$D/all.streamingblock" "$PACKROOT/nctc/bays/stop_${STOP}/all.streamingblock"
+            "$TOOL" pack "$PACKROOT" -o "$OUT"
+            test -s "$OUT/NCTCBay${STOP}Spline.archive"
+            cat > "$OUT/NCTCBay${STOP}Spline.archive.xl" <<EOF
+          streaming:
+            blocks:
+              - nctc\\bays\\stop_${STOP}\\all.streamingblock
+          EOF
+          done
+          cp "$MANIFEST" "$OUT/GENERATED_BAYS.json"
+          sha256sum "$OUT"/*.archive "$OUT"/*.archive.xl > "$OUT/SHA256SUMS.txt"
+
+      - name: Assemble r386b test package
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/r386b-next-stop"
+          OUT="$WORK/out"
+          PKG="$WORK/package"
+          mkdir -p "$PKG/archive/pc/mod" "$PKG/r6/scripts/NCTC" "$PKG/r6/tweaks/NCTC" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+          cp source/archive/pc/mod/* "$PKG/archive/pc/mod/"
+          cp "$OUT"/*.archive "$PKG/archive/pc/mod/"
+          cp "$OUT"/*.archive.xl "$PKG/archive/pc/mod/"
+          cp source/redscript/NCTC/*.reds "$PKG/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$PKG/r6/tweaks/NCTC/"
+          cp source/cet/nctc_passenger/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp source/cet/nctc_survey/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+          test ! -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+          test ! -e "$PKG/archive/pc/mod/NCTCH2Spline.archive"
+          grep -q 'nctc_dev_build_revision", 38602' "$PKG/r6/scripts/NCTC/NCTCTransitSystem.reds"
+          grep -q 'registerInput("nctc_request_next_stop"' "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/init.lua"
+          EXPECTED="$(python3 - "$OUT/GENERATED_BAYS.json" <<'PY'
+          import json, sys
+          print(json.load(open(sys.argv[1], encoding='utf-8'))['bayCount'])
+          PY
+          )"
+          ACTUAL="$(find "$PKG/archive/pc/mod" -maxdepth 1 -type f -name 'NCTCBay*Spline.archive' | wc -l)"
+          test "$EXPECTED" -eq "$ACTUAL"
+          (cd "$PKG" && zip -qr "$WORK/NightCityTransitCorporation-0.3.0-devkit-r386b-next-stop-post-join-fix.zip" .)
+          unzip -t "$WORK/NightCityTransitCorporation-0.3.0-devkit-r386b-next-stop-post-join-fix.zip"
+          sha256sum "$WORK/NightCityTransitCorporation-0.3.0-devkit-r386b-next-stop-post-join-fix.zip" | tee "$WORK/PACKAGE_SHA256.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r386b-next-stop-post-join-fix-package
+          path: |
+            ${{ runner.temp }}/r386b-next-stop/NightCityTransitCorporation-0.3.0-devkit-r386b-next-stop-post-join-fix.zip
+            ${{ runner.temp }}/r386b-next-stop/PACKAGE_SHA256.txt
+            ${{ runner.temp }}/r386b-next-stop/out/SHA256SUMS.txt
+            ${{ runner.temp }}/r386b-next-stop/out/GENERATED_BAYS.json
+          compression-level: 0
