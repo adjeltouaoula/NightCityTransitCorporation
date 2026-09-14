@@ -1,9 +1,9 @@
-name: r383c generic bay REDscript hotfix builder
+name: r383f generic bay streaming fix builder
 
 on:
   push:
     branches:
-      - experiment/r383c-redscript-hotfix
+      - experiment/r383f-generic-bay-streaming-fix
   workflow_dispatch:
 
 permissions:
@@ -16,6 +16,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Integrate r383f runtime patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check tools/bays/r383f_runtime.patch
+          git apply tools/bays/r383f_runtime.patch
+          rm -f source/redscript/NCTC/NCTCGenericBayDeparture.reds
+          test ! -e source/redscript/NCTC/NCTCGenericBayDeparture.reds
+          grep -q 'nctc_dev_build_revision", 38306' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'headingDot >= 0.94' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'bayParkingStage = 15' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'DriveToTrafficAfterJoin' source/redscript/NCTC/NCTCTransitSystem.reds
+
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v5
         with:
@@ -25,15 +38,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          WORK="$RUNNER_TEMP/r383c"
+          WORK="$RUNNER_TEMP/r383f"
           mkdir -p "$WORK/tools"
           dotnet tool install WolvenKit.CLI --version 9.0.1 --tool-path "$WORK/tools"
 
-      - name: Generate generic bay arrival assets from validated H2 template
+      - name: Generate correctly streamed bay arrival assets
         shell: bash
         run: |
           set -euo pipefail
-          WORK="$RUNNER_TEMP/r383c"
+          WORK="$RUNNER_TEMP/r383f"
           TOOL="$WORK/tools/cp77tools"
           RAW="$WORK/unpacked"
           TEMPLATE="$WORK/template-json"
@@ -41,6 +54,7 @@ jobs:
           OUT="$WORK/out"
           mkdir -p "$RAW" "$TEMPLATE" "$GENERATED" "$OUT"
 
+          # Immutable validated H2 source asset.
           test "$(git hash-object source/archive/pc/mod/NCTCH2Spline.archive)" = "ff0be26fb781cf5f2aaf9dd75ce5b668f777a0f6"
           test "$(git hash-object source/archive/pc/mod/NCTCH2Spline.archive.xl)" = "6e934a5637bfe3300832eea2fef179386576c5e1"
 
@@ -63,6 +77,7 @@ jobs:
             --manifest tools/bays/r383b_test_bays.json \
             --out "$GENERATED"
 
+          # Geometry invariant: stop 70 must still reproduce validated H2.
           ORIGINAL="$SECTOR_JSON" GENERATED_H2="$GENERATED/stop_70/h2_arrival.streamingsector.json" python3 - <<'PY'
           import json, math, os
           def find_spline(x):
@@ -85,6 +100,29 @@ jobs:
           print(f'H2 generic reproduction max XY delta = {worst:.6f} m')
           if worst > 0.001:
               raise SystemExit('generic spline recipe no longer reproduces validated H2')
+          PY
+
+          # r383f invariant: every generated streaming block must be centered
+          # on its own P1 and use the grid cell calculated for that location.
+          GENERATED="$GENERATED" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root=Path(os.environ['GENERATED'])
+          expected={
+            20:(-905.679,-78.399,7.061),
+            69:(-2392.823,-520.017,12.674),
+            70:(-2161.015,-1012.713,7.851),
+          }
+          cells={}
+          for sid,(x,y,z) in expected.items():
+              report=json.load(open(root/f'stop_{sid}'/'report.json',encoding='utf-8'))
+              c=report['streamingBoxCenter']
+              if max(abs(c['x']-x),abs(c['y']-y),abs(c['z']-z)) > 0.001:
+                  raise SystemExit(f'stop {sid}: streaming box not relocated to bay')
+              cells[sid]=report['streamingGridCell']
+              print(f"stop {sid}: cell={cells[sid]} boxCenter=({c['x']:.3f},{c['y']:.3f},{c['z']:.3f})")
+          if len(set(cells.values())) < 2:
+              raise SystemExit(f'generated blocks unexpectedly all retained the same streaming cell: {cells}')
           PY
 
           for STOP in 20 69 70; do
@@ -112,11 +150,11 @@ jobs:
           cp "$GENERATED/stop_70/report.json" "$OUT/stop_70_report.json"
           sha256sum "$OUT"/*.archive "$OUT"/*.archive.xl | tee "$OUT/SHA256SUMS.txt"
 
-      - name: Assemble r383c devkit package
+      - name: Assemble r383f devkit package
         shell: bash
         run: |
           set -euo pipefail
-          WORK="$RUNNER_TEMP/r383c"
+          WORK="$RUNNER_TEMP/r383f"
           OUT="$WORK/out"
           PKG="$WORK/package"
           mkdir -p \
@@ -134,21 +172,26 @@ jobs:
           cp source/cet/nctc_passenger/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
           cp source/cet/nctc_survey/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
 
+          # Never package the player's active persistent network.
           test ! -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+          # The old extension file must not return; all generic logic is in the
+          # class definitions of NCTCTransitSystem.reds.
+          test ! -e "$PKG/r6/scripts/NCTC/NCTCGenericBayDeparture.reds"
+          test ! -e "$PKG/r6/scripts/NCTC/NCTCZZGenericBayDeparture.reds"
 
           cp "$OUT/SHA256SUMS.txt" "$WORK/GENERIC_BAY_ASSET_SHA256SUMS.txt"
-          (cd "$PKG" && zip -qr "$WORK/NightCityTransitCorporation-0.3.0-devkit-r383c-redscript-hotfix.zip" .)
-          unzip -t "$WORK/NightCityTransitCorporation-0.3.0-devkit-r383c-redscript-hotfix.zip"
-          sha256sum "$WORK/NightCityTransitCorporation-0.3.0-devkit-r383c-redscript-hotfix.zip" | tee "$WORK/PACKAGE_SHA256.txt"
+          (cd "$PKG" && zip -qr "$WORK/NightCityTransitCorporation-0.3.0-devkit-r383f-generic-bay-streaming-fix.zip" .)
+          unzip -t "$WORK/NightCityTransitCorporation-0.3.0-devkit-r383f-generic-bay-streaming-fix.zip"
+          sha256sum "$WORK/NightCityTransitCorporation-0.3.0-devkit-r383f-generic-bay-streaming-fix.zip" | tee "$WORK/PACKAGE_SHA256.txt"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nctc-r383c-redscript-hotfix-package
+          name: nctc-r383f-generic-bay-streaming-fix-package
           path: |
-            ${{ runner.temp }}/r383c/NightCityTransitCorporation-0.3.0-devkit-r383c-redscript-hotfix.zip
-            ${{ runner.temp }}/r383c/PACKAGE_SHA256.txt
-            ${{ runner.temp }}/r383c/GENERIC_BAY_ASSET_SHA256SUMS.txt
-            ${{ runner.temp }}/r383c/out/stop_20_report.json
-            ${{ runner.temp }}/r383c/out/stop_69_report.json
-            ${{ runner.temp }}/r383c/out/stop_70_report.json
+            ${{ runner.temp }}/r383f/NightCityTransitCorporation-0.3.0-devkit-r383f-generic-bay-streaming-fix.zip
+            ${{ runner.temp }}/r383f/PACKAGE_SHA256.txt
+            ${{ runner.temp }}/r383f/GENERIC_BAY_ASSET_SHA256SUMS.txt
+            ${{ runner.temp }}/r383f/out/stop_20_report.json
+            ${{ runner.temp }}/r383f/out/stop_69_report.json
+            ${{ runner.temp }}/r383f/out/stop_70_report.json
           compression-level: 0
