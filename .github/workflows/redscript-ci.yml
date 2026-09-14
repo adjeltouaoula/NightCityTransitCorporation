@@ -6,6 +6,7 @@ on:
       - development
       - 'experiment/**'
       - 'fix/**'
+      - 'feature/**'
   workflow_dispatch:
 
 permissions:
