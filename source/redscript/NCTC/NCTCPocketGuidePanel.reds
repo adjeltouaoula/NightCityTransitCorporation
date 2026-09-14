@@ -1,10 +1,16 @@
 module NCTC
 
+// Keep a strong reference to the panel controller-side. The live Ink tree also
+// owns the widget after Reparent(), but retaining it removes weak-reference
+// lifetime from the diagnostic path entirely.
+@addField(WorldMapMenuGameController)
+let nctcGuidePanelOwner: ref<inkCanvas>;
+
 // Builds only the native Pocket Guide panel. The main map button is provided
 // by NCTCPocketGuideProbe, whose Metro-style plumbing is already validated in-game.
 @addMethod(WorldMapMenuGameController)
 private final func NCTCCreatePocketGuidePanelOnly() -> Void {
-  let root: ref<inkCompoundWidget> = this.GetRootCompoundWidget();
+  let root: ref<inkCompoundWidget>;
   let parent: ref<inkCompoundWidget>;
   let background: ref<inkRectangle>;
   let cyanRail: ref<inkRectangle>;
@@ -22,20 +28,31 @@ private final func NCTCCreatePocketGuidePanelOnly() -> Void {
     return;
   };
 
-  if !IsDefined(root) {
-    LogChannel(n"DEBUG", "[NCTC] PocketGuide panel: root missing");
-    return;
+  // Reuse the exact Content widget that already hosts the visible/clickable
+  // NCTC button. Only resolve the path again as a defensive fallback.
+  parent = this.nctcGuideHost;
+  if IsDefined(parent) {
+    LogChannel(n"DEBUG", "[NCTC] PocketGuide panel: using retained Content host");
+  } else {
+    LogChannel(n"DEBUG", "[NCTC] PocketGuide panel: retained host missing, resolving fallback");
+    root = this.GetRootCompoundWidget();
+    if !IsDefined(root) {
+      LogChannel(n"DEBUG", "[NCTC] PocketGuide panel: root missing");
+      return;
+    };
+
+    parent = root.GetWidgetByPathName(n"Content") as inkCompoundWidget;
+    if !IsDefined(parent) {
+      LogChannel(n"DEBUG", "[NCTC] PocketGuide panel: Content missing");
+      return;
+    };
+    this.nctcGuideHost = parent;
   };
 
-  parent = root.GetWidgetByPathName(n"Content") as inkCompoundWidget;
-  if !IsDefined(parent) {
-    LogChannel(n"DEBUG", "[NCTC] PocketGuide panel: Content missing");
-    return;
-  };
-
-  // Create and attach the panel FIRST. If a later child widget fails, the
-  // probe can still show this panel and we get a visible partial result.
-  this.nctcGuidePanel = new inkCanvas();
+  // Create and attach the panel FIRST. Keep both a strong owner and the public
+  // weak reference used by the rest of the Pocket Guide code.
+  this.nctcGuidePanelOwner = new inkCanvas();
+  this.nctcGuidePanel = this.nctcGuidePanelOwner;
   this.nctcGuidePanel.SetName(n"NCTCPocketGuidePanel");
   this.nctcGuidePanel.SetAnchor(inkEAnchor.TopRight);
   this.nctcGuidePanel.SetAnchorPoint(1.00, 0.00);
