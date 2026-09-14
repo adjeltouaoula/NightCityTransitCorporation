@@ -1,0 +1,114 @@
+name: materialize r386d bay road target inline
+
+on:
+  push:
+    branches:
+      - fix/r386d-bay-road-target-inline
+    paths:
+      - .github/workflows/materialize-r386d-inline.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Inline bay road target into NCTCTransitSystem
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('source/redscript/NCTC/NCTCTransitSystem.reds')
+          text = path.read_text(encoding='utf-8')
+          marker = '  private func GetTrafficTarget() -> Vector4 {'
+          start = text.find(marker)
+          if start < 0:
+              raise SystemExit('GetTrafficTarget() not found')
+
+          brace = text.find('{', start)
+          depth = 0
+          end = None
+          for i in range(brace, len(text)):
+              c = text[i]
+              if c == '{':
+                  depth += 1
+              elif c == '}':
+                  depth -= 1
+                  if depth == 0:
+                      end = i + 1
+                      break
+          if end is None:
+              raise SystemExit('GetTrafficTarget() closing brace not found')
+
+          replacement = '''  // r386d: for service bays, keep the vanilla traffic command on the
+          // adjacent road corridor instead of targeting the off-lane berth. The arrival
+          // spline takes over only once the bus is aligned and within the existing gate.
+          private func GetTrafficTarget() -> Vector4 {
+            let target: Vector4 = this.GetServiceBerth();
+            let forward: Vector4;
+            let right: Vector4;
+            let sideOffset: Float;
+            let sideSign: Float;
+            let lead: Float;
+
+            if this.followingPassage {
+              if AbsF(this.passageForward.X) > 0.01 || AbsF(this.passageForward.Y) > 0.01 {
+                return this.passageTarget + this.passageForward * 100.00;
+              };
+              return this.passageTarget;
+            };
+
+            if this.HasServiceBay() {
+              forward = this.GetBayForward();
+              if AbsF(forward.X) > 0.01 || AbsF(forward.Y) > 0.01 {
+                right = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
+                sideOffset = MaxF(this.GetBayWidth() * 0.50 + 2.75, 4.20);
+                sideSign = this.NCTCBayRoadSideSign();
+                lead = Equals(this.requestedStopId, this.serviceStopId) ? 18.00 : 100.00;
+                return this.GetBayEntryPoint() + forward * lead + right * sideOffset * sideSign;
+              };
+            };
+
+            if AbsF(this.surveyBerthForward.X) > 0.01 || AbsF(this.surveyBerthForward.Y) > 0.01 {
+              if !this.HasServiceBay() && !Equals(this.requestedStopId, this.serviceStopId) {
+                return target + this.surveyBerthForward * 100.00;
+              };
+              return target + this.surveyBerthForward * 13.70;
+            };
+            return target;
+          }'''
+
+          new_text = text[:start] + replacement + text[end:]
+          if new_text == text:
+              print('already materialized')
+          else:
+              path.write_text(new_text, encoding='utf-8')
+              print('materialized r386d inline target')
+
+      - name: Verify source shape
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e source/redscript/NCTC/NCTCZZBayTrafficTarget.reds
+          grep -q 'lead = Equals(this.requestedStopId, this.serviceStopId) ? 18.00 : 100.00;' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'return this.GetBayEntryPoint() + forward \* lead + right \* sideOffset \* sideSign;' source/redscript/NCTC/NCTCTransitSystem.reds
+
+      - name: Commit materialized source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo 'No source change to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add source/redscript/NCTC/NCTCTransitSystem.reds
+          git commit -m 'fix: inline r386d bay road target'
+          git push origin HEAD:fix/r386d-bay-road-target-inline
