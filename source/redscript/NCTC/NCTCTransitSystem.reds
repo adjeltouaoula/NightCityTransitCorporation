@@ -1623,13 +1623,22 @@ private func GetTrafficTarget() -> Vector4 {
       this.controller.KeepPassengerDoorOpen();
       boarded = this.controller.IsPlayerAboard()
         || Equals(quests.GetFact(n"nctc_passenger_departure_requested"), 1);
-      // Always leave enough time for the door animation to be visible.
-      if this.dwellPolls < 8 {
+      // Passenger-requested stops are deliberate alighting stops. Give V a
+      // full 15 seconds from the moment service dwell begins, regardless of
+      // the fact that V is already detected aboard. The initial call/boarding
+      // stop keeps the previous shorter/conditional dwell semantics.
+      if this.passengerStopRequested && this.dwellPolls < 60 {
         this.dwellPolls += 1;
         this.ScheduleDispatch(0.25);
         return;
       };
-      if !boarded && this.dwellPolls < 40 {
+      // Always leave enough time for the door animation to be visible.
+      if !this.passengerStopRequested && this.dwellPolls < 8 {
+        this.dwellPolls += 1;
+        this.ScheduleDispatch(0.25);
+        return;
+      };
+      if !this.passengerStopRequested && !boarded && this.dwellPolls < 40 {
         this.dwellPolls += 1;
         this.ScheduleDispatch(0.25);
         return;
