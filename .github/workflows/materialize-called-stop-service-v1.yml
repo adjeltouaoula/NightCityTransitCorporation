@@ -1,0 +1,134 @@
+name: materialize called-stop service v1
+
+on:
+  push:
+    branches:
+      - feature/called-stop-service-v1
+    paths:
+      - .github/workflows/materialize-called-stop-service-v1.yml
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Harden called-stop reservation in runtime source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('source/redscript/NCTC/NCTCTransitSystem.reds')
+          s = p.read_text(encoding='utf-8')
+
+          def once(old, new, label):
+              global s
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, got {count}')
+              s = s.replace(old, new, 1)
+
+          once(
+          '  private let serviceStopId: Int32;\n  private let requestedStop: Vector4;',
+          '  private let serviceStopId: Int32;\n  // The stop selected by the player when summoning the service is a stronger\n  // reservation than the mutable serviceStopId used by later onboard requests.\n  // It stays pending until that exact stop has completed its boarding dwell.\n  private let calledStopId: Int32;\n  private let calledStopPending: Bool;\n  private let requestedStop: Vector4;',
+          'called-stop fields')
+
+          once(
+          '  private func HasServiceBay() -> Bool {\n    return this.hasSurveyProfile && this.hasSurveyBerth2 && Vector4.Distance(this.surveyBerth, this.surveyBerth2) > 1.00;\n  }',
+          '  private func HasServiceBay() -> Bool {\n    return this.hasSurveyProfile && this.hasSurveyBerth2 && Vector4.Distance(this.surveyBerth, this.surveyBerth2) > 1.00;\n  }\n\n  // Called-stop v1 invariant: the stop where V summoned the bus cannot become\n  // a pass-through even if another code path clears or changes serviceStopId.\n  private func IsCurrentStopReservedForService() -> Bool {\n    return Equals(this.requestedStopId, this.serviceStopId)\n      || (this.calledStopPending && Equals(this.requestedStopId, this.calledStopId));\n  }\n\n  private func CompleteCalledStopService() -> Void {\n    let quests: ref<QuestsSystem>;\n    if !this.calledStopPending || !Equals(this.requestedStopId, this.calledStopId) { return; };\n    this.calledStopPending = false;\n    quests = GameInstance.GetQuestsSystem(this.GetGameInstance());\n    if IsDefined(quests) {\n      quests.SetFact(n"nctc_dev_called_stop_served_id", this.calledStopId);\n      quests.SetFact(n"nctc_dev_called_stop_pending", 0);\n    };\n  }',
+          'called-stop helper')
+
+          once(
+          '    quests.SetFact(n"nctc_dev_loop_service_stop_id", this.serviceStopId);\n    quests.SetFact(n"nctc_dev_loop_next_stop_id", nextStopId);',
+          '    quests.SetFact(n"nctc_dev_loop_service_stop_id", this.serviceStopId);\n    quests.SetFact(n"nctc_dev_loop_called_stop_id", this.calledStopId);\n    quests.SetFact(n"nctc_dev_loop_called_stop_pending", this.calledStopPending ? 1 : 0);\n    quests.SetFact(n"nctc_dev_loop_current_stop_reserved", this.IsCurrentStopReservedForService() ? 1 : 0);\n    quests.SetFact(n"nctc_dev_loop_next_stop_id", nextStopId);',
+          'called-stop telemetry')
+
+          once(
+          '    this.requestedStopId = stopId;\n    this.serviceStopId = stopId;\n    this.requestedStop = stop;',
+          '    this.requestedStopId = stopId;\n    this.serviceStopId = stopId;\n    this.calledStopId = stopId;\n    this.calledStopPending = true;\n    this.requestedStop = stop;',
+          'reserve called stop')
+
+          once(
+          '      quests.SetFact(n"nctc_dev_dispatch_stop_id", stopId);\n      quests.SetFact(n"nctc_dev_dispatch_has_profile", this.hasSurveyProfile ? 1 : 0);',
+          '      quests.SetFact(n"nctc_dev_dispatch_stop_id", stopId);\n      quests.SetFact(n"nctc_dev_called_stop_id", stopId);\n      quests.SetFact(n"nctc_dev_called_stop_pending", 1);\n      quests.SetFact(n"nctc_dev_dispatch_has_profile", this.hasSurveyProfile ? 1 : 0);',
+          'dispatch telemetry')
+
+          once(
+          '    this.requestPending = false;\n    this.driveCommandSent = false;',
+          '    this.requestPending = false;\n    this.calledStopId = 0;\n    this.calledStopPending = false;\n    this.serviceStopId = 0;\n    this.driveCommandSent = false;',
+          'despawn reset')
+
+          once(
+          '      this.controller.ClosePassengerDoor();\n      this.serviceStopId = 0;\n      this.arrived = false;',
+          '      this.controller.ClosePassengerDoor();\n      // The called stop is considered fulfilled only after the actual dwell\n      // completed. Until this exact point every pass-through path is blocked.\n      this.CompleteCalledStopService();\n      this.serviceStopId = 0;\n      this.arrived = false;',
+          'complete reservation after dwell')
+
+          old_eq = 'Equals(this.requestedStopId, this.serviceStopId)'
+          count_eq = s.count(old_eq)
+          # One occurrence belongs inside IsCurrentStopReservedForService itself;
+          # four remaining occurrences are route decisions that must use the invariant.
+          if count_eq != 5:
+              raise SystemExit(f'service-stop equality sites: expected 5 including helper, got {count_eq}')
+          # Protect the helper occurrence with a temporary sentinel.
+          helper = 'return Equals(this.requestedStopId, this.serviceStopId)'
+          s = s.replace(helper, 'return __NCTC_HELPER_EQ__', 1)
+          s = s.replace(old_eq, 'this.IsCurrentStopReservedForService()')
+          s = s.replace('return __NCTC_HELPER_EQ__', helper, 1)
+
+          old_ne = '!Equals(this.requestedStopId, this.serviceStopId)'
+          if old_ne in s:
+              raise SystemExit('negated equality should have been transformed through equality replacement')
+          # Equality replacement turns !Equals(...) into !this.IsCurrent... automatically.
+
+          once(
+          '    let previousStopId: Int32 = this.requestedStopId;\n    if !NCTCServiceProfiles.TryGetNextStop',
+          '    let previousStopId: Int32 = this.requestedStopId;\n    // Final safety net: no route transition is allowed to move away from the\n    // player-called stop until its dwell has actually completed.\n    if this.calledStopPending && Equals(previousStopId, this.calledStopId) {\n      this.PublishLoopDiagnostic(93, previousStopId);\n      return false;\n    };\n    if !NCTCServiceProfiles.TryGetNextStop',
+          'advance guard')
+
+          # Distinguish this feature build in diagnostics.
+          s = s.replace('nctc_dev_build_revision", 38401', 'nctc_dev_build_revision", 38501')
+          s = s.replace('nctc_dev_generic_bay_guard_revision", 38401', 'nctc_dev_generic_bay_guard_revision", 38501')
+
+          # Static invariants before writing.
+          required = [
+              'private let calledStopId: Int32;',
+              'private let calledStopPending: Bool;',
+              'private func IsCurrentStopReservedForService() -> Bool',
+              'private func CompleteCalledStopService() -> Void',
+              'this.calledStopId = stopId;',
+              'this.calledStopPending = true;',
+              'this.CompleteCalledStopService();',
+              'this.PublishLoopDiagnostic(93, previousStopId);',
+          ]
+          for needle in required:
+              if needle not in s:
+                  raise SystemExit(f'missing invariant: {needle}')
+          if s.count('this.IsCurrentStopReservedForService()') < 5:
+              raise SystemExit('not all service/pass-through route decisions use the reservation helper')
+
+          p.write_text(s, encoding='utf-8', newline='\n')
+          PY
+
+          # This workflow is one-shot; leave the branch source clean.
+          rm .github/workflows/materialize-called-stop-service-v1.yml
+
+          git diff --check
+          grep -q 'private let calledStopId: Int32' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'PublishLoopDiagnostic(93, previousStopId)' source/redscript/NCTC/NCTCTransitSystem.reds
+          test ! -e .github/workflows/materialize-called-stop-service-v1.yml
+
+      - name: Commit materialized source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: make called stop an unskippable service reservation"
+          git push origin HEAD:feature/called-stop-service-v1
