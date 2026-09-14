@@ -1,0 +1,217 @@
+name: generic bay v1 builder
+
+on:
+  push:
+    branches:
+      - development
+      - integration/generic-bays-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate clean generic-bay source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e source/redscript/NCTC/NCTCGenericBayDeparture.reds
+          test ! -e source/redscript/NCTC/NCTCZZGenericBayDeparture.reds
+          test ! -e source/archive/pc/mod/NCTCH2Spline.archive
+          test ! -e source/archive/pc/mod/NCTCH2Departure.archive
+          test ! -e tools/bays/r383f_runtime.patch
+          test ! -e tools/bays/r383b_test_bays.json
+          grep -q 'return "\$/nctc/bays/stop_" + ToString(this.requestedStopId) + "/arrival_spline"' source/redscript/NCTC/NCTCTransitSystem.reds
+          grep -q 'nctc_dev_build_revision", 38401' source/redscript/NCTC/NCTCTransitSystem.reds
+          echo '83a70f4b30788b210093b2939ba3954923e26372b4f98443f407736e22ec9860  tools/bays/template/validated_arrival_template.archive' | sha256sum -c -
+
+      - name: Extract all authored bays from canonical network
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/generic-bays-v1"
+          mkdir -p "$WORK"
+          python3 tools/bays/extract_bays_from_network.py \
+            --network source/cet/nctc_survey/nctc_network.default.json \
+            --out "$WORK/bays.json"
+          cat "$WORK/bays.json"
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install WolvenKit CLI 9.0.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/generic-bays-v1"
+          mkdir -p "$WORK/tools"
+          dotnet tool install WolvenKit.CLI --version 9.0.1 --tool-path "$WORK/tools"
+
+      - name: Generate every authored bay asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/generic-bays-v1"
+          TOOL="$WORK/tools/cp77tools"
+          RAW="$WORK/template-raw"
+          TEMPLATE="$WORK/template-json"
+          GENERATED="$WORK/generated"
+          OUT="$WORK/out"
+          MANIFEST="$WORK/bays.json"
+          mkdir -p "$RAW" "$TEMPLATE" "$GENERATED" "$OUT"
+
+          "$TOOL" unbundle tools/bays/template/validated_arrival_template.archive -o "$RAW"
+          SECTOR="$(find "$RAW" -type f -name 'h2_arrival.streamingsector' | head -n1)"
+          BLOCK="$(find "$RAW" -type f -name 'all.streamingblock' | head -n1)"
+          test -n "$SECTOR"
+          test -n "$BLOCK"
+
+          "$TOOL" convert serialize "$SECTOR" -o "$TEMPLATE"
+          "$TOOL" convert serialize "$BLOCK" -o "$TEMPLATE"
+          SECTOR_JSON="$(find "$TEMPLATE" -type f -name 'h2_arrival.streamingsector.json' | head -n1)"
+          BLOCK_JSON="$(find "$TEMPLATE" -type f -name 'all.streamingblock.json' | head -n1)"
+          test -n "$SECTOR_JSON"
+          test -n "$BLOCK_JSON"
+
+          python3 tools/bays/generate_arrival_splines.py \
+            --sector-template "$SECTOR_JSON" \
+            --block-template "$BLOCK_JSON" \
+            --manifest "$MANIFEST" \
+            --out "$GENERATED"
+
+          ORIGINAL="$SECTOR_JSON" GENERATED_H2="$GENERATED/stop_70/arrival.streamingsector.json" python3 - <<'PY'
+          import json, math, os
+          def find_spline(x):
+              if isinstance(x, dict):
+                  if x.get('$type') == 'Spline' and isinstance(x.get('points'), list): return x
+                  for v in x.values():
+                      f=find_spline(v)
+                      if f is not None: return f
+              elif isinstance(x, list):
+                  for v in x:
+                      f=find_spline(v)
+                      if f is not None: return f
+          a=find_spline(json.load(open(os.environ['ORIGINAL'], encoding='utf-8')))['points']
+          b=find_spline(json.load(open(os.environ['GENERATED_H2'], encoding='utf-8')))['points']
+          worst=0.0
+          for pa,pb in zip(a,b):
+              aa=pa['position']; bb=pb['position']
+              d=math.hypot(float(aa['X'])-float(bb['X']), float(aa['Y'])-float(bb['Y']))
+              worst=max(worst,d)
+          print(f'validated stop 70 max XY delta = {worst:.6f} m')
+          if worst > 0.001:
+              raise SystemExit('generic recipe no longer reproduces validated stop 70')
+          PY
+
+          GENERATED="$GENERATED" MANIFEST="$MANIFEST" python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root=Path(os.environ['GENERATED'])
+          manifest=json.load(open(os.environ['MANIFEST'],encoding='utf-8'))
+          cells={}
+          for bay in manifest['bays']:
+              sid=int(bay['stopId'])
+              report=json.load(open(root/f'stop_{sid}'/'report.json',encoding='utf-8'))
+              c=report['streamingBoxCenter']
+              e=report['entry']
+              if max(abs(c[k]-e[k]) for k in ('x','y','z')) > 0.001:
+                  raise SystemExit(f'stop {sid}: streaming box not centered on generated entry')
+              cells[sid]=report['streamingGridCell']
+              print(f"stop {sid}: entrySource={report['entrySource']} cell={cells[sid]} center=({c['x']:.3f},{c['y']:.3f},{c['z']:.3f})")
+          if len(manifest['bays']) >= 2 and len(set(cells.values())) < 2:
+              raise SystemExit(f'generated blocks unexpectedly share one streaming cell: {cells}')
+          PY
+
+          mapfile -t STOPS < <(python3 - "$MANIFEST" <<'PY'
+          import json, sys
+          data=json.load(open(sys.argv[1],encoding='utf-8'))
+          for bay in data['bays']:
+              print(int(bay['stopId']))
+          PY
+          )
+          test "${#STOPS[@]}" -gt 0
+
+          for STOP in "${STOPS[@]}"; do
+            D="$GENERATED/stop_${STOP}"
+            "$TOOL" convert deserialize "$D/arrival.streamingsector.json"
+            "$TOOL" convert deserialize "$D/all.streamingblock.json"
+            test -s "$D/arrival.streamingsector"
+            test -s "$D/all.streamingblock"
+
+            PACKROOT="$WORK/NCTCBay${STOP}Spline"
+            mkdir -p "$PACKROOT/nctc/bays/stop_${STOP}/sectors"
+            cp "$D/arrival.streamingsector" "$PACKROOT/nctc/bays/stop_${STOP}/sectors/arrival.streamingsector"
+            cp "$D/all.streamingblock" "$PACKROOT/nctc/bays/stop_${STOP}/all.streamingblock"
+            "$TOOL" pack "$PACKROOT" -o "$OUT"
+            test -s "$OUT/NCTCBay${STOP}Spline.archive"
+            cat > "$OUT/NCTCBay${STOP}Spline.archive.xl" <<EOF
+          streaming:
+            blocks:
+              - nctc\\bays\\stop_${STOP}\\all.streamingblock
+          EOF
+            cp "$D/report.json" "$OUT/stop_${STOP}_report.json"
+          done
+
+          cp "$MANIFEST" "$OUT/GENERATED_BAYS.json"
+          sha256sum "$OUT"/*.archive "$OUT"/*.archive.xl | tee "$OUT/SHA256SUMS.txt"
+
+      - name: Assemble generic-bay v1 devkit package
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/generic-bays-v1"
+          OUT="$WORK/out"
+          PKG="$WORK/package"
+          mkdir -p \
+            "$PKG/archive/pc/mod" \
+            "$PKG/r6/scripts/NCTC" \
+            "$PKG/r6/tweaks/NCTC" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+
+          cp source/archive/pc/mod/* "$PKG/archive/pc/mod/"
+          cp "$OUT"/*.archive "$PKG/archive/pc/mod/"
+          cp "$OUT"/*.archive.xl "$PKG/archive/pc/mod/"
+          cp source/redscript/NCTC/*.reds "$PKG/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$PKG/r6/tweaks/NCTC/"
+          cp source/cet/nctc_passenger/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp source/cet/nctc_survey/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+
+          test ! -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+          test ! -e "$PKG/archive/pc/mod/NCTCH2Spline.archive"
+          test ! -e "$PKG/archive/pc/mod/NCTCH2Departure.archive"
+          test ! -e "$PKG/r6/scripts/NCTC/NCTCGenericBayDeparture.reds"
+          test ! -e "$PKG/r6/scripts/NCTC/NCTCZZGenericBayDeparture.reds"
+
+          EXPECTED="$(OUT="$OUT" python3 - <<'PY'
+          import json, os
+          print(json.load(open(os.path.join(os.environ['OUT'], 'GENERATED_BAYS.json'), encoding='utf-8'))['bayCount'])
+          PY
+          )"
+          ACTUAL="$(find "$PKG/archive/pc/mod" -maxdepth 1 -type f -name 'NCTCBay*Spline.archive' | wc -l)"
+          test "$EXPECTED" -eq "$ACTUAL"
+
+          cp "$OUT/SHA256SUMS.txt" "$WORK/GENERIC_BAY_ASSET_SHA256SUMS.txt"
+          cp "$OUT/GENERATED_BAYS.json" "$WORK/GENERATED_BAYS.json"
+          (cd "$PKG" && zip -qr "$WORK/NightCityTransitCorporation-0.3.0-devkit-r384a-generic-bays-v1.zip" .)
+          unzip -t "$WORK/NightCityTransitCorporation-0.3.0-devkit-r384a-generic-bays-v1.zip"
+          sha256sum "$WORK/NightCityTransitCorporation-0.3.0-devkit-r384a-generic-bays-v1.zip" | tee "$WORK/PACKAGE_SHA256.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-r384a-generic-bays-v1-package
+          path: |
+            ${{ runner.temp }}/generic-bays-v1/NightCityTransitCorporation-0.3.0-devkit-r384a-generic-bays-v1.zip
+            ${{ runner.temp }}/generic-bays-v1/PACKAGE_SHA256.txt
+            ${{ runner.temp }}/generic-bays-v1/GENERIC_BAY_ASSET_SHA256SUMS.txt
+            ${{ runner.temp }}/generic-bays-v1/GENERATED_BAYS.json
+            ${{ runner.temp }}/generic-bays-v1/out/*_report.json
+          compression-level: 0
