@@ -20,3 +20,14 @@ NCTC does not include ADE's player AutoDrive, HUD, settings, cameras, or CET
 runtime. The compatibility layer is used only by the NCTC service bus.
 
 Original mod: https://www.nexusmods.com/cyberpunk2077/mods/23157
+
+## Metro Pocket Guide
+
+The NCTC Pocket Guide world-map interaction model is adapted from
+**Metro Pocket Guide** by **DJ_Kovrik**, with the author's explicit permission
+to reuse and adapt the work for NCTC. The port keeps NCTC-specific class,
+field, widget, and runtime names so Metro Pocket Guide and NCTC can remain
+installed together.
+
+Original mod: https://www.nexusmods.com/cyberpunk2077/mods/11882
+Source: https://github.com/djkovrik/CP77Mods/tree/master/src/Metro%20Pocket%20Guide
