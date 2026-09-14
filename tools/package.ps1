@@ -58,6 +58,13 @@ if ($IncludeSurveyRuntime -and (Test-Path -LiteralPath (Join-Path $projectRoot "
     New-Item -ItemType Directory -Force (Join-Path $stageRoot "bin\x64\plugins\cyber_engine_tweaks\mods\nctc_passenger") | Out-Null
     Copy-Item -Path (Join-Path $projectRoot "source\cet\nctc_passenger\*") -Destination (Join-Path $stageRoot "bin\x64\plugins\cyber_engine_tweaks\mods\nctc_passenger")
 }
+# Dev-kit V1 of the NC Transit Pocket Guide. It is a standalone CET module but
+# consumes the network quest facts published by nctc_survey, so ship both under
+# the existing developer-runtime switch until the guide graduates to public UI.
+if ($IncludeSurveyRuntime -and (Test-Path -LiteralPath (Join-Path $projectRoot "source\cet\nctc_pocket_guide\init.lua"))) {
+    New-Item -ItemType Directory -Force (Join-Path $stageRoot "bin\x64\plugins\cyber_engine_tweaks\mods\nctc_pocket_guide") | Out-Null
+    Copy-Item -Path (Join-Path $projectRoot "source\cet\nctc_pocket_guide\*") -Destination (Join-Path $stageRoot "bin\x64\plugins\cyber_engine_tweaks\mods\nctc_pocket_guide")
+}
 Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination $stageRoot
 Copy-Item -LiteralPath (Join-Path $projectRoot "THIRD_PARTY_NOTICES.md") -Destination $stageRoot
 if (Test-Path -LiteralPath $archivePath) { Remove-Item -LiteralPath $archivePath -Force }
