@@ -1203,27 +1203,43 @@ public class NCTCTransitSystem extends ScriptableSystem {
   // The native Mahir controller settles the pivot before the target. Aim the
   // traffic command beyond the real berth, using its surveyed travel vector,
   // so that this native stop lands at the passenger-service point in one pass.
-  private func GetTrafficTarget() -> Vector4 {
-    let target: Vector4 = this.GetServiceBerth();
-    if this.followingPassage {
-      // r372n: a passage is not an endpoint. Aim a full 100 m down the
-      // surveyed outgoing road so the native controller has no reason to
-      // brake while the bus crosses the waypoint and the handoff zone.
-      if AbsF(this.passageForward.X) > 0.01 || AbsF(this.passageForward.Y) > 0.01 { return this.passageTarget + this.passageForward * 100.00; };
-      return this.passageTarget;
+  // r386d: for service bays, keep the vanilla traffic command on the
+// adjacent road corridor instead of targeting the off-lane berth. The arrival
+// spline takes over only once the bus is aligned and within the existing gate.
+private func GetTrafficTarget() -> Vector4 {
+  let target: Vector4 = this.GetServiceBerth();
+  let forward: Vector4;
+  let right: Vector4;
+  let sideOffset: Float;
+  let sideSign: Float;
+  let lead: Float;
+
+  if this.followingPassage {
+    if AbsF(this.passageForward.X) > 0.01 || AbsF(this.passageForward.Y) > 0.01 {
+      return this.passageTarget + this.passageForward * 100.00;
     };
-    if AbsF(this.surveyBerthForward.X) > 0.01 || AbsF(this.surveyBerthForward.Y) > 0.01 {
-      // An unrequested roadside stop is a route marker, not a destination.
-      // Keep a long corridor beyond it so the native traffic controller never
-      // brakes merely because the stop exists. A rolling handoff below changes
-      // to the following route leg while the Mahir is still moving.
-      if !this.HasServiceBay() && !Equals(this.requestedStopId, this.serviceStopId) {
-        return target + this.surveyBerthForward * 100.00;
-      };
-      return target + this.surveyBerthForward * 13.70;
+    return this.passageTarget;
+  };
+
+  if this.HasServiceBay() {
+    forward = this.GetBayForward();
+    if AbsF(forward.X) > 0.01 || AbsF(forward.Y) > 0.01 {
+      right = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
+      sideOffset = MaxF(this.GetBayWidth() * 0.50 + 2.75, 4.20);
+      sideSign = this.NCTCBayRoadSideSign();
+      lead = Equals(this.requestedStopId, this.serviceStopId) ? 18.00 : 100.00;
+      return this.GetBayEntryPoint() + forward * lead + right * sideOffset * sideSign;
     };
-    return target;
-  }
+  };
+
+  if AbsF(this.surveyBerthForward.X) > 0.01 || AbsF(this.surveyBerthForward.Y) > 0.01 {
+    if !this.HasServiceBay() && !Equals(this.requestedStopId, this.serviceStopId) {
+      return target + this.surveyBerthForward * 100.00;
+    };
+    return target + this.surveyBerthForward * 13.70;
+  };
+  return target;
+}
 
   // A passage yaw is authored as the direction of the ROAD AFTER the
   // waypoint. r371 discarded that information and rebuilt a vector toward the
