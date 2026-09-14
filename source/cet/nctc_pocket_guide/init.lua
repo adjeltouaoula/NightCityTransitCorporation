@@ -189,20 +189,19 @@ local function draw_selected_line()
   ImGui.Text("LINE " .. tostring(line) .. "  |  " .. tostring(#stops) .. " stops")
   ImGui.Separator()
 
-  if ImGui.BeginChild("##nctc_pocket_route", 0, 0, true) then
-    for index, stop in ipairs(stops) do
-      local name = localized_stop_name(stop)
-      local sequence = stop.sequence > 0 and stop.sequence or index
-      ImGui.Text(string.format("%02d   o   %s", sequence, name))
+  ImGui.BeginChild("##nctc_pocket_route", 0, 0, true)
+  for index, stop in ipairs(stops) do
+    local name = localized_stop_name(stop)
+    local sequence = stop.sequence > 0 and stop.sequence or index
+    ImGui.Text(string.format("%02d   o   %s", sequence, name))
 
-      local transfers = transfer_lines(stop, line)
-      if #transfers > 0 then
-        ImGui.SameLine()
-        ImGui.Text("   change: L" .. table.concat(transfers, " / L"))
-      end
-
-      if index < #stops then ImGui.Text("     |") end
+    local transfers = transfer_lines(stop, line)
+    if #transfers > 0 then
+      ImGui.SameLine()
+      ImGui.Text("   change: L" .. table.concat(transfers, " / L"))
     end
+
+    if index < #stops then ImGui.Text("     |") end
   end
   ImGui.EndChild()
 end
