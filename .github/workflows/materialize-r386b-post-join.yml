@@ -1,4 +1,4 @@
-name: materialize r386b post-join driver pulse
+name: materialize r386b post-join source
 
 on:
   push:
@@ -21,48 +21,110 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-
           reds = Path('source/redscript/NCTC/NCTCTransitSystem.reds')
           s = reds.read_text(encoding='utf-8')
-          old = '''  // r383e: rolling handoff after native JoinTraffic. Unlike the older\n  // DriveToTrafficAfterSpline path, do not pulse NoDriver after vanilla has\n  // just reacquired a traffic lane; keep DriverReady and submit the successor\n  // command with the measured rolling speed.\n  public func DriveToTrafficAfterJoin(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {\n    let callback: ref<NCTCDeferredDriveCommand>;\n    let driverReady: ref<AIEvent>;\n    let speedProfile: Int32;\n    let speedLimit: Float;\n    let generation: Int32;\n    if !this.IsReady() { return false; };\n\n    generation = this.NextDriveGeneration();\n    this.previousRouteCommand = this.activeRouteCommand;\n    this.activeRouteCommand = null;\n    this.activeSplineCommand = null;\n    this.activeJoinTrafficCommand = null;\n\n    driverReady = new AIEvent();\n    driverReady.name = n"DriverReady";\n    this.bus.QueueEvent(driverReady);\n    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(\n      n"nctc_dev_command_forced_start_speed_mm",\n      Cast<Int32>(MaxF(startSpeed, 0.00) * 1000.00)\n    );\n\n    callback = new NCTCDeferredDriveCommand();\n    speedLimit = this.ResolveTrafficSpeed(target, speedProfile);\n    callback.Configure(\n      this.bus,\n      this,\n      target,\n      minimumDistance,\n      speedLimit,\n      speedProfile,\n      MaxF(startSpeed, 0.00),\n      generation\n    );\n    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.030, false);\n    return true;\n  }'''
-          new = '''  // r386b: after vanilla JoinTraffic reports a lane, explicitly pulse the\n  // native driver lifecycle before the successor DriveToPoint command. The\n  // r383e shortcut (DriverReady only) can leave the command Active while the\n  // Mahir remains physically idle at 0 m/s. Preserve the measured join speed\n  // and use the same short cross-frame NoDriver -> DriverReady sequence as the\n  // validated rolling-passage handoff.\n  public func DriveToTrafficAfterJoin(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {\n    let callback: ref<NCTCDeferredDriveCommand>;\n    let noDriver: ref<AIEvent>;\n    let driverReady: ref<AIEvent>;\n    let speedProfile: Int32;\n    let speedLimit: Float;\n    let generation: Int32;\n    if !this.IsReady() { return false; };\n\n    generation = this.NextDriveGeneration();\n    this.previousRouteCommand = this.activeRouteCommand;\n    this.activeRouteCommand = null;\n    this.activeSplineCommand = null;\n    this.activeJoinTrafficCommand = null;\n\n    noDriver = new AIEvent();\n    driverReady = new AIEvent();\n    noDriver.name = n"NoDriver";\n    driverReady.name = n"DriverReady";\n    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);\n    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.030);\n    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38602);\n    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(\n      n"nctc_dev_command_forced_start_speed_mm",\n      Cast<Int32>(MaxF(startSpeed, 0.00) * 1000.00)\n    );\n\n    callback = new NCTCDeferredDriveCommand();\n    speedLimit = this.ResolveTrafficSpeed(target, speedProfile);\n    callback.Configure(\n      this.bus,\n      this,\n      target,\n      minimumDistance,\n      speedLimit,\n      speedProfile,\n      MaxF(startSpeed, 0.00),\n      generation\n    );\n    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);\n    return true;\n  }'''
+          old = '''  // r383e: rolling handoff after native JoinTraffic. Unlike the older
+  // DriveToTrafficAfterSpline path, do not pulse NoDriver after vanilla has
+  // just reacquired a traffic lane; keep DriverReady and submit the successor
+  // command with the measured rolling speed.
+  public func DriveToTrafficAfterJoin(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {
+    let callback: ref<NCTCDeferredDriveCommand>;
+    let driverReady: ref<AIEvent>;
+    let speedProfile: Int32;
+    let speedLimit: Float;
+    let generation: Int32;
+    if !this.IsReady() { return false; };
+
+    generation = this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.activeRouteCommand = null;
+    this.activeSplineCommand = null;
+    this.activeJoinTrafficCommand = null;
+
+    driverReady = new AIEvent();
+    driverReady.name = n"DriverReady";
+    this.bus.QueueEvent(driverReady);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(
+      n"nctc_dev_command_forced_start_speed_mm",
+      Cast<Int32>(MaxF(startSpeed, 0.00) * 1000.00)
+    );
+
+    callback = new NCTCDeferredDriveCommand();
+    speedLimit = this.ResolveTrafficSpeed(target, speedProfile);
+    callback.Configure(
+      this.bus,
+      this,
+      target,
+      minimumDistance,
+      speedLimit,
+      speedProfile,
+      MaxF(startSpeed, 0.00),
+      generation
+    );
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.030, false);
+    return true;
+  }'''
+          new = '''  // r386b: after vanilla JoinTraffic reports a lane, explicitly pulse the
+  // native driver lifecycle before the successor DriveToPoint command. The
+  // r383e shortcut (DriverReady only) can leave the command Active while the
+  // Mahir remains physically idle at 0 m/s. Preserve the measured join speed
+  // and use the same short cross-frame NoDriver -> DriverReady sequence as the
+  // validated rolling-passage handoff.
+  public func DriveToTrafficAfterJoin(target: Vector4, minimumDistance: Float, startSpeed: Float) -> Bool {
+    let callback: ref<NCTCDeferredDriveCommand>;
+    let noDriver: ref<AIEvent>;
+    let driverReady: ref<AIEvent>;
+    let speedProfile: Int32;
+    let speedLimit: Float;
+    let generation: Int32;
+    if !this.IsReady() { return false; };
+
+    generation = this.NextDriveGeneration();
+    this.previousRouteCommand = this.activeRouteCommand;
+    this.activeRouteCommand = null;
+    this.activeSplineCommand = null;
+    this.activeJoinTrafficCommand = null;
+
+    noDriver = new AIEvent();
+    driverReady = new AIEvent();
+    noDriver.name = n"NoDriver";
+    driverReady.name = n"DriverReady";
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEventNextFrame(this.bus, noDriver);
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayEvent(this.bus, driverReady, 0.030);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(n"nctc_dev_build_revision", 38602);
+    GameInstance.GetQuestsSystem(this.bus.GetGame()).SetFact(
+      n"nctc_dev_command_forced_start_speed_mm",
+      Cast<Int32>(MaxF(startSpeed, 0.00) * 1000.00)
+    );
+
+    callback = new NCTCDeferredDriveCommand();
+    speedLimit = this.ResolveTrafficSpeed(target, speedProfile);
+    callback.Configure(
+      this.bus,
+      this,
+      target,
+      minimumDistance,
+      speedLimit,
+      speedProfile,
+      MaxF(startSpeed, 0.00),
+      generation
+    );
+    GameInstance.GetDelaySystem(this.bus.GetGame()).DelayCallback(callback, 0.060, false);
+    return true;
+  }'''
           if old not in s:
               raise SystemExit('r383e post-join block not found')
-          s = s.replace(old, new, 1)
-          reds.write_text(s, encoding='utf-8', newline='\n')
-
-          builder = Path('.github/workflows/next-stop-request-builder.yml')
-          b = builder.read_text(encoding='utf-8')
-          b = b.replace('name: r386a next stop request builder', 'name: r386b next stop request + post-join fix builder')
-          b = b.replace('- feature/next-stop-request-v1', '- fix/r386b-post-join-driver-pulse')
-          b = b.replace('WORK="$RUNNER_TEMP/next-stop-request-v1"', 'WORK="$RUNNER_TEMP/r386b-next-stop"')
-          b = b.replace('Assemble r386a test package', 'Assemble r386b test package')
-          b = b.replace('NightCityTransitCorporation-0.3.0-devkit-r386a-next-stop-request-v1.zip', 'NightCityTransitCorporation-0.3.0-devkit-r386b-next-stop-post-join-fix.zip')
-          b = b.replace('nctc-r386a-next-stop-request-v1-package', 'nctc-r386b-next-stop-post-join-fix-package')
-          validation = "          grep -q 'registerInput(\"nctc_request_next_stop\"' source/cet/nctc_passenger/init.lua\n"
-          replacement = validation + "          grep -q 'nctc_dev_build_revision\", 38602' source/redscript/NCTC/NCTCTransitSystem.reds\n          grep -q 'DelayEventNextFrame(this.bus, noDriver)' source/redscript/NCTC/NCTCTransitSystem.reds\n"
-          if validation not in b:
-              raise SystemExit('builder validation anchor not found')
-          b = b.replace(validation, replacement, 1)
-          builder.write_text(b, encoding='utf-8', newline='\n')
-
-          ci = Path('.github/workflows/next-stop-redscript-ci.yml')
-          c = ci.read_text(encoding='utf-8')
-          c = c.replace('name: next stop REDscript CI', 'name: r386b next stop REDscript CI')
-          c = c.replace('- feature/next-stop-request-v1', '- fix/r386b-post-join-driver-pulse')
-          c = c.replace('redscript-next-stop-ci-', 'redscript-r386b-next-stop-ci-')
-          ci.write_text(c, encoding='utf-8', newline='\n')
+          reds.write_text(s.replace(old, new, 1), encoding='utf-8', newline='\n')
           PY
           git diff --check
           grep -q 'nctc_dev_build_revision", 38602' source/redscript/NCTC/NCTCTransitSystem.reds
           grep -q 'DelayEventNextFrame(this.bus, noDriver)' source/redscript/NCTC/NCTCTransitSystem.reds
-      - name: Commit r386b source and CI
+      - name: Commit r386b source
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add source/redscript/NCTC/NCTCTransitSystem.reds .github/workflows/next-stop-request-builder.yml .github/workflows/next-stop-redscript-ci.yml
-          git rm .github/workflows/materialize-r386b-post-join.yml
+          git add source/redscript/NCTC/NCTCTransitSystem.reds
           git commit -m "fix: restore driver lifecycle after JoinTraffic"
           git push origin HEAD:fix/r386b-post-join-driver-pulse
