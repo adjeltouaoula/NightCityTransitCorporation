@@ -7,6 +7,11 @@ The validated H2 spline is expressed in bay-local coordinates:
 where longitudinal 0 is P1 / the physical bay entrance and positive lateral
 points toward the adjacent road. The last longitudinal point is min(20m, 65%
 of bay length), matching the validated H2 curve almost exactly.
+
+r383f also relocates the worldStreamingBlock descriptor itself. r383b-r383e
+moved the sector node to each bay but accidentally kept H2's rldGridCell and
+streamingBox, so non-H2 NodeRefs could resolve while their sector was not
+actually streamed at Delamain/Cannery.
 """
 
 from __future__ import annotations
@@ -50,6 +55,18 @@ def find_spline(obj: Any) -> dict[str, Any] | None:
 
 def vec3(point: dict[str, float]) -> tuple[float, float, float]:
     return float(point["x"]), float(point["y"]), float(point["z"])
+
+
+def streaming_grid_cell(x: float, y: float, z: float, level: int) -> int:
+    # Same worldStreamingBlockIndex formula used by the original validated
+    # r376a H2 builder.
+    cell_m = 64 * (2**level)
+    side = 2 ** (8 - level)
+    half = side // 2
+    i = math.floor(x / cell_m)
+    j = math.floor(y / cell_m)
+    k = math.floor(z / cell_m)
+    return (i + half) + side * (j + half) + side * side * (k + half)
 
 
 def generate_bay(sector_template: dict[str, Any], block_template: dict[str, Any], bay: dict[str, Any], out: Path) -> None:
@@ -143,6 +160,27 @@ def generate_bay(sector_template: dict[str, Any], block_template: dict[str, Any]
     node_data["Bounds"]["Max"]["Y"] = max_y
     node_data["Bounds"]["Max"]["Z"] = p1z + 5.0
 
+    # r383f critical fix: a streaming sector is not relocated merely by moving
+    # its nodes. The descriptor in the streaming block must live in the correct
+    # world grid cell and its streaming box must cover the new bay position.
+    block_root = block["Data"]["RootChunk"]
+    descriptors = block_root.get("descriptors", [])
+    if len(descriptors) != 1:
+        raise ValueError(f"validated template has {len(descriptors)} streaming descriptors; expected 1")
+    descriptor = descriptors[0]
+    level = int(descriptor.get("level", 1))
+    grid_cell = streaming_grid_cell(p1x, p1y, p1z, level)
+    descriptor["blockIndex"]["rldGridCell"] = grid_cell
+
+    margin = 320.0
+    streaming_box = descriptor["streamingBox"]
+    streaming_box["Min"]["X"] = p1x - margin
+    streaming_box["Min"]["Y"] = p1y - margin
+    streaming_box["Min"]["Z"] = p1z - margin
+    streaming_box["Max"]["X"] = p1x + margin
+    streaming_box["Max"]["Y"] = p1y + margin
+    streaming_box["Max"]["Z"] = p1z + margin
+
     bay_dir = out / f"stop_{stop_id}"
     bay_dir.mkdir(parents=True, exist_ok=True)
     (bay_dir / "h2_arrival.streamingsector.json").write_text(
@@ -160,6 +198,10 @@ def generate_bay(sector_template: dict[str, Any], block_template: dict[str, Any]
         "roadSideSign": side_sign,
         "roadOffset": road_offset,
         "serviceDepth": service_depth,
+        "streamingLevel": level,
+        "streamingGridCell": grid_cell,
+        "streamingBoxCenter": {"x": p1x, "y": p1y, "z": p1z},
+        "streamingBoxMargin": margin,
         "recipe": [{"longitudinal": a, "lateral": b * side_sign} for a, b in recipe],
         "worldPoints": [{"x": x, "y": y, "z": z} for x, y, z in world_points],
     }
