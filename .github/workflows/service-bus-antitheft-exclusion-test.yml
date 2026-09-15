@@ -1,0 +1,149 @@
+name: service bus anti-theft exclusion test
+
+on:
+  push:
+    branches:
+      - fix/service-bus-antitheft-exclusion-v2
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify exact runtime scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin development:refs/remotes/origin/development
+          mapfile -t CHANGED < <(git diff --name-only origin/development...HEAD)
+          printf '%s\n' "${CHANGED[@]}"
+          test "${#CHANGED[@]}" -eq 2
+          printf '%s\n' "${CHANGED[@]}" | grep -qx 'source/redscript/NCTC/NCTCAntiTheftCompatibility.reds'
+          printf '%s\n' "${CHANGED[@]}" | grep -qx '.github/workflows/service-bus-antitheft-exclusion-test.yml'
+          grep -q 'SetIsMarkedAsQuest(true)' source/redscript/NCTC/NCTCAntiTheftCompatibility.reds
+          grep -q 'RecordHasTag(n"NCTCServiceBus")' source/redscript/NCTC/NCTCAntiTheftCompatibility.reds
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install WolvenKit CLI 9.0.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/nctc-antitheft-exclusion"
+          mkdir -p "$WORK/tools"
+          dotnet tool install WolvenKit.CLI --version 9.0.1 --tool-path "$WORK/tools"
+
+      - name: Generate authored bay assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/nctc-antitheft-exclusion"
+          TOOL="$WORK/tools/cp77tools"
+          RAW="$WORK/template-raw"
+          TEMPLATE="$WORK/template-json"
+          GENERATED="$WORK/generated"
+          OUT="$WORK/out"
+          MANIFEST="$WORK/bays.json"
+          mkdir -p "$RAW" "$TEMPLATE" "$GENERATED" "$OUT"
+
+          python3 tools/bays/extract_bays_from_network.py \
+            --network source/cet/nctc_survey/nctc_network.default.json \
+            --out "$MANIFEST"
+
+          "$TOOL" unbundle tools/bays/template/validated_arrival_template.archive -o "$RAW"
+          SECTOR="$(find "$RAW" -type f -name 'h2_arrival.streamingsector' | head -n1)"
+          BLOCK="$(find "$RAW" -type f -name 'all.streamingblock' | head -n1)"
+          test -n "$SECTOR"
+          test -n "$BLOCK"
+          "$TOOL" convert serialize "$SECTOR" -o "$TEMPLATE"
+          "$TOOL" convert serialize "$BLOCK" -o "$TEMPLATE"
+          SECTOR_JSON="$(find "$TEMPLATE" -type f -name 'h2_arrival.streamingsector.json' | head -n1)"
+          BLOCK_JSON="$(find "$TEMPLATE" -type f -name 'all.streamingblock.json' | head -n1)"
+          test -n "$SECTOR_JSON"
+          test -n "$BLOCK_JSON"
+
+          python3 tools/bays/generate_arrival_splines.py \
+            --sector-template "$SECTOR_JSON" \
+            --block-template "$BLOCK_JSON" \
+            --manifest "$MANIFEST" \
+            --out "$GENERATED"
+
+          mapfile -t STOPS < <(python3 - "$MANIFEST" <<'PY'
+          import json, sys
+          data=json.load(open(sys.argv[1],encoding='utf-8'))
+          for bay in data['bays']:
+              print(int(bay['stopId']))
+          PY
+          )
+          test "${#STOPS[@]}" -gt 0
+
+          for STOP in "${STOPS[@]}"; do
+            D="$GENERATED/stop_${STOP}"
+            "$TOOL" convert deserialize "$D/arrival.streamingsector.json"
+            "$TOOL" convert deserialize "$D/all.streamingblock.json"
+            PACKROOT="$WORK/NCTCBay${STOP}Spline"
+            mkdir -p "$PACKROOT/nctc/bays/stop_${STOP}/sectors"
+            cp "$D/arrival.streamingsector" "$PACKROOT/nctc/bays/stop_${STOP}/sectors/arrival.streamingsector"
+            cp "$D/all.streamingblock" "$PACKROOT/nctc/bays/stop_${STOP}/all.streamingblock"
+            "$TOOL" pack "$PACKROOT" -o "$OUT"
+            test -s "$OUT/NCTCBay${STOP}Spline.archive"
+            cat > "$OUT/NCTCBay${STOP}Spline.archive.xl" <<EOF
+          streaming:
+            blocks:
+              - nctc\\bays\\stop_${STOP}\\all.streamingblock
+          EOF
+          done
+
+      - name: Assemble test package
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/nctc-antitheft-exclusion"
+          OUT="$WORK/out"
+          PKG="$WORK/package"
+          mkdir -p \
+            "$PKG/archive/pc/mod" \
+            "$PKG/r6/scripts/NCTC" \
+            "$PKG/r6/tweaks/NCTC" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger" \
+            "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey"
+
+          cp source/archive/pc/mod/*.archive "$PKG/archive/pc/mod/"
+          cp "$OUT"/*.archive "$PKG/archive/pc/mod/"
+          cp "$OUT"/*.archive.xl "$PKG/archive/pc/mod/"
+          cp source/redscript/NCTC/*.reds "$PKG/r6/scripts/NCTC/"
+          cp source/tweaks/NCTC/* "$PKG/r6/tweaks/NCTC/"
+          cp source/cet/nctc_passenger/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_passenger/"
+          cp source/cet/nctc_survey/* "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/"
+
+          test -f "$PKG/r6/scripts/NCTC/NCTCAntiTheftCompatibility.reds"
+          test ! -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_stop_request"
+          test ! -e "$PKG/r6/input/nctc_stop_request.xml"
+          test ! -e "$PKG/r6/scripts/NCTC/NCTCStopRequestSettings.reds"
+          test ! -e "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_survey/nctc_network.json"
+
+          ZIP="$WORK/NightCityTransitCorporation-0.3.0-devkit-antitheft-exclusion-v2.zip"
+          (cd "$PKG" && zip -qr "$ZIP" .)
+          unzip -t "$ZIP"
+          sha256sum "$ZIP" | tee "$WORK/PACKAGE_SHA256.txt"
+          git rev-parse HEAD | tee "$WORK/SOURCE_COMMIT.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-antitheft-exclusion-v2
+          path: |
+            ${{ runner.temp }}/nctc-antitheft-exclusion/NightCityTransitCorporation-0.3.0-devkit-antitheft-exclusion-v2.zip
+            ${{ runner.temp }}/nctc-antitheft-exclusion/PACKAGE_SHA256.txt
+            ${{ runner.temp }}/nctc-antitheft-exclusion/SOURCE_COMMIT.txt
+          compression-level: 0
