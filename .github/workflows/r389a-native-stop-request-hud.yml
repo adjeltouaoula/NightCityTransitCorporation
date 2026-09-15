@@ -1,0 +1,50 @@
+name: r389a native stop-request HUD
+
+on:
+  push:
+    branches:
+      - feature/native-stop-request-hud-v2
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scope-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify native stop-request scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f source/redscript/NCTC/NCTCStopRequestNative.reds
+          test -f source/redscript/NCTC/NCTCStopRequestSettings.reds
+          test -f source/input/nctc_stop_request.xml
+          test ! -e source/cet/nctc_stop_request/init.lua
+          grep -q 'ModSettings.mod' source/redscript/NCTC/NCTCStopRequestSettings.reds
+          grep -q 'NCTC_RequestNextStop' source/input/nctc_stop_request.xml
+          grep -q 'UpdateInputHintEvent' source/redscript/NCTC/NCTCStopRequestNative.reds
+          grep -q 'GameplayInputHelper' source/redscript/NCTC/NCTCStopRequestNative.reds
+          grep -q '@wrapMethod(PlayerPuppet)' source/redscript/NCTC/NCTCStopRequestNative.reds
+          grep -q 'NCTC_RequestNextStop' source/redscript/NCTC/NCTCStopRequestNative.reds
+          ! grep -R -q 'registerInput("nctc_request_next_stop"' source/cet source/redscript || true
+
+  redscript-compile:
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Compile NCTC with real REDscript compiler
+        shell: pwsh
+        run: ./tools/ci/redscript-compile.ps1
+      - name: Upload REDscript CI log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r389a-redscript-ci-log-${{ github.run_id }}
+          path: ${{ env.NCTC_REDSCRIPT_CI_LOG }}
+          if-no-files-found: ignore
+          retention-days: 14
