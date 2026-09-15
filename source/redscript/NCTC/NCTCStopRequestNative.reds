@@ -1,40 +1,36 @@
 module NCTC
 
-// Native stop-request input + HUD. The key binding remains owned by
-// Input Loader / Mod Settings through NCTC_RequestNextStop.
-//
-// Important: patch annotations are used only on the base-game PlayerPuppet
-// class. NCTCTransitSystem is a mod-defined class, so it must never be the
-// target of @addField/@addMethod/@wrapMethod annotations.
+// Native stop-request input + Interaction UI prompt. The key binding remains
+// owned by Input Loader / Mod Settings through NCTC_RequestNextStop.
 
-public class NCTCStopRequestHintTick extends DelayCallback {
+public class NCTCStopRequestChoiceTick extends DelayCallback {
   private let player: wref<PlayerPuppet>;
 
-  public func Configure(player: ref<PlayerPuppet>) -> ref<NCTCStopRequestHintTick> {
+  public func Configure(player: ref<PlayerPuppet>) -> ref<NCTCStopRequestChoiceTick> {
     this.player = player;
     return this;
   }
 
   public func Call() -> Void {
-    let next: ref<NCTCStopRequestHintTick>;
+    let next: ref<NCTCStopRequestChoiceTick>;
     if !IsDefined(this.player) { return; };
 
-    this.player.NCTCRefreshStopRequestHint();
+    this.player.NCTCRefreshStopRequestChoice();
 
-    next = new NCTCStopRequestHintTick();
+    next = new NCTCStopRequestChoiceTick();
     next.Configure(this.player);
     GameInstance.GetDelaySystem(this.player.GetGame()).DelayCallback(next, 0.25, false);
   }
 }
 
 @addField(PlayerPuppet)
-private let nctcStopRequestHintVisible: Bool;
+private let nctcStopRequestChoiceVisible: Bool;
 
 @addField(PlayerPuppet)
-private let nctcStopRequestHintPollStarted: Bool;
+private let nctcStopRequestChoicePollStarted: Bool;
 
 @addMethod(PlayerPuppet)
-private func NCTCShouldShowStopRequestHint() -> Bool {
+public func NCTCShouldShowStopRequestChoice() -> Bool {
   let quests: ref<QuestsSystem> = GameInstance.GetQuestsSystem(this.GetGame());
   if !IsDefined(quests) { return false; };
   if !Equals(quests.GetFact(n"nctc_player_in_service_bus"), 1) { return false; };
@@ -43,55 +39,99 @@ private func NCTCShouldShowStopRequestHint() -> Bool {
 }
 
 @addMethod(PlayerPuppet)
-private func NCTCShowStopRequestHint() -> Void {
-  let data: InputHintData;
-  let evt: ref<UpdateInputHintEvent>;
-  if this.nctcStopRequestHintVisible { return; };
+public func NCTCBuildStopRequestChoiceHub() -> ListChoiceHubData {
+  let hub: ListChoiceHubData;
+  let choice: ListChoiceData;
+  let choiceType: ChoiceTypeWrapper;
 
-  data.action = n"NCTC_RequestNextStop";
-  data.source = n"NCTCStopRequest";
-  data.localizedLabel = "Demander le prochain arrêt";
-  data.enableHoldAnimation = false;
-  data.sortingPriority = 1;
+  hub.id = 77903;
+  hub.title = "NIGHT CITY TRANSIT CORPORATION";
+  hub.activityState = EVisualizerActivityState.Active;
 
-  evt = new UpdateInputHintEvent();
-  evt.data = data;
-  evt.show = true;
-  evt.targetHintContainer = n"GameplayInputHelper";
-  GameInstance.GetUISystem(this.GetGame()).QueueEvent(evt);
-  this.nctcStopRequestHintVisible = true;
+  ChoiceTypeWrapper.SetType(choiceType, gameinteractionsChoiceType.Selected);
+  choice.localizedName = "Demander le prochain arrêt";
+  choice.inputActionName = n"NCTC_RequestNextStop";
+  choice.type = choiceType;
+  ArrayPush(hub.choices, choice);
+
+  return hub;
 }
 
 @addMethod(PlayerPuppet)
-private func NCTCHideStopRequestHint() -> Void {
-  let evt: ref<DeleteInputHintBySourceEvent>;
-  if !this.nctcStopRequestHintVisible { return; };
+public func NCTCRefreshStopRequestChoice() -> Void {
+  let blackboard = GameInstance.GetBlackboardSystem(this.GetGame()).Get(GetAllBlackboardDefs().UIInteractions);
+  let defs = GetAllBlackboardDefs().UIInteractions;
+  let activeHubId: Int32;
+  let shouldShow: Bool;
+  let wasVisible: Bool;
 
-  evt = new DeleteInputHintBySourceEvent();
-  evt.source = n"NCTCStopRequest";
-  evt.targetHintContainer = n"GameplayInputHelper";
-  GameInstance.GetUISystem(this.GetGame()).QueueEvent(evt);
-  this.nctcStopRequestHintVisible = false;
-}
+  if !IsDefined(blackboard) { return; };
 
-@addMethod(PlayerPuppet)
-public func NCTCRefreshStopRequestHint() -> Void {
-  if this.NCTCShouldShowStopRequestHint() {
-    this.NCTCShowStopRequestHint();
-  } else {
-    this.NCTCHideStopRequestHint();
+  shouldShow = this.NCTCShouldShowStopRequestChoice();
+  wasVisible = this.nctcStopRequestChoiceVisible;
+  activeHubId = blackboard.GetInt(defs.ActiveChoiceHubID);
+
+  if shouldShow {
+    this.nctcStopRequestChoiceVisible = true;
+
+    // Never steal the Interaction UI while another real interaction owns it
+    // (for example the existing rear-seat choice hub). As soon as that hub
+    // releases the cursor, this prompt takes its place on the next poll.
+    if Equals(activeHubId, 0) || Equals(activeHubId, -1) {
+      blackboard.SetVariant(defs.DialogChoiceHubs, blackboard.GetVariant(defs.DialogChoiceHubs), true);
+      blackboard.SetInt(defs.ActiveChoiceHubID, 77903, true);
+    } else {
+      if Equals(activeHubId, 77903) && !wasVisible {
+        blackboard.SetVariant(defs.DialogChoiceHubs, blackboard.GetVariant(defs.DialogChoiceHubs), true);
+      };
+    };
+    return;
   };
+
+  this.nctcStopRequestChoiceVisible = false;
+  if Equals(activeHubId, 77903) {
+    blackboard.SetInt(defs.ActiveChoiceHubID, 0, true);
+  };
+  if wasVisible || Equals(activeHubId, 77903) {
+    blackboard.SetVariant(defs.DialogChoiceHubs, blackboard.GetVariant(defs.DialogChoiceHubs), true);
+  };
+}
+
+// Inject the NCTC prompt into the same native Interaction UI list used by
+// ordinary world interactions. The dedicated input is the same configurable
+// NCTC_RequestNextStop action exposed in Mod Settings.
+@wrapMethod(InteractionUIBase)
+protected cb func OnDialogsData(value: Variant) -> Bool {
+  let player: ref<PlayerPuppet> = this.GetPlayerControlledObject() as PlayerPuppet;
+  let data: DialogChoiceHubs;
+  let i: Int32;
+
+  if !IsDefined(player) || !player.NCTCShouldShowStopRequestChoice() {
+    return wrappedMethod(value);
+  };
+
+  data = FromVariant<DialogChoiceHubs>(value);
+  i = 0;
+  while i < ArraySize(data.choiceHubs) {
+    if Equals(data.choiceHubs[i].id, 77903) {
+      return wrappedMethod(value);
+    };
+    i += 1;
+  };
+
+  ArrayPush(data.choiceHubs, player.NCTCBuildStopRequestChoiceHub());
+  return wrappedMethod(ToVariant(data));
 }
 
 @wrapMethod(PlayerPuppet)
 protected cb func OnGameAttached() -> Bool {
   let result: Bool = wrappedMethod();
-  let tick: ref<NCTCStopRequestHintTick>;
+  let tick: ref<NCTCStopRequestChoiceTick>;
 
-  if !this.nctcStopRequestHintPollStarted {
-    this.nctcStopRequestHintPollStarted = true;
+  if !this.nctcStopRequestChoicePollStarted {
+    this.nctcStopRequestChoicePollStarted = true;
     this.RegisterInputListener(this, n"NCTC_RequestNextStop");
-    tick = new NCTCStopRequestHintTick();
+    tick = new NCTCStopRequestChoiceTick();
     tick.Configure(this);
     GameInstance.GetDelaySystem(this.GetGame()).DelayCallback(tick, 0.25, false);
   };
@@ -119,6 +159,6 @@ protected cb func OnAction(action: ListenerAction, consumer: ListenerActionConsu
   if IsDefined(transit) {
     transit.RequestNextStop();
   };
-  this.NCTCRefreshStopRequestHint();
+  this.NCTCRefreshStopRequestChoice();
   return result;
 }
