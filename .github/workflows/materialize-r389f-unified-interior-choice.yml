@@ -1,3 +1,4 @@
+# second push: workflow now already exists on the feature branch
 name: Materialize r389f unified interior choice
 
 on:
@@ -59,9 +60,6 @@ jobs:
               raise SystemExit(f'expected one passenger replacement, found {count}: {old[:100]!r}')
             text = text.replace(old, new, 1)
 
-          # The request is no longer a separately bound action. It is selected
-          # through the same ChoiceScrollUp/Down + ChoiceApply interaction as a
-          # seat or a line at a stop.
           passenger.write_text(text, encoding='utf-8')
 
           native = Path('source/redscript/NCTC/NCTCStopRequestNative.reds')
@@ -97,10 +95,6 @@ public func NCTCBuildStopRequestChoice() -> ListChoiceData {
   return choice;
 }
 
-// The passenger module owns one stable interior hub (77901) everywhere inside
-// the bus. REDscript only appends the request entry to that hub when available;
-// it never creates a competing standalone hub, which removes the previous
-// flashing/focus fight between two UI owners.
 @wrapMethod(InteractionUIBase)
 protected cb func OnDialogsData(value: Variant) -> Bool {
   let player: ref<PlayerPuppet> = this.GetPlayerControlledObject() as PlayerPuppet;
