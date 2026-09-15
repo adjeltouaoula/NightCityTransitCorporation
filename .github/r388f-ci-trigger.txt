@@ -1,0 +1,1 @@
+Trigger REDscript CI on the exact r388f runtime head after the bot-authored runtime commit.
