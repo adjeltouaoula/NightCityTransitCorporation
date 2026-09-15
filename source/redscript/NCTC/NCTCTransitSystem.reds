@@ -1221,7 +1221,7 @@ private func GetTrafficTarget() -> Vector4 {
     return this.passageTarget;
   };
 
-  if this.HasServiceBay() {
+  if this.HasServiceBay() && !this.bayParkingBypass {
     forward = this.GetBayForward();
     if AbsF(forward.X) > 0.01 || AbsF(forward.Y) > 0.01 {
       right = new Vector4(-forward.Y, forward.X, 0.00, 0.00);
@@ -1778,7 +1778,11 @@ private func GetTrafficTarget() -> Vector4 {
           this.bayParkingActive = false;
           this.bayParkingStage = 0;
           this.bayParkingWasEntered = false;
-          this.PublishLoopDiagnostic(96, this.requestedStopId);
+          this.controller.CancelTrafficRoute();
+          this.driveCommandSent = this.controller.DriveToTraffic(this.GetTrafficTarget(), 0.00);
+          this.PublishLoopDiagnostic(this.driveCommandSent ? 96 : 33, this.requestedStopId);
+          this.ScheduleDispatch(0.25);
+          return;
         };
       };
     };
@@ -1824,7 +1828,9 @@ private func GetTrafficTarget() -> Vector4 {
             this.bayParkingActive = false;
             this.bayParkingStage = 0;
             this.bayParkingWasEntered = false;
-            this.PublishLoopDiagnostic(96, this.requestedStopId);
+            this.controller.CancelTrafficRoute();
+            this.driveCommandSent = this.controller.DriveToTraffic(this.GetTrafficTarget(), 0.00);
+            this.PublishLoopDiagnostic(this.driveCommandSent ? 96 : 33, this.requestedStopId);
             this.ScheduleDispatch(0.10);
             return;
           };
