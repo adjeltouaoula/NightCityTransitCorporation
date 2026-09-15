@@ -47,6 +47,7 @@ public func NCTCBuildStopRequestChoiceHub() -> ListChoiceHubData {
   hub.id = 77903;
   hub.title = "NIGHT CITY TRANSIT CORPORATION";
   hub.activityState = EVisualizerActivityState.Active;
+  hub.hubPriority = Cast<Uint8>(1);
 
   ChoiceTypeWrapper.SetType(choiceType, gameinteractionsChoiceType.Selected);
   choice.localizedName = "Demander le prochain arrêt";
@@ -59,8 +60,8 @@ public func NCTCBuildStopRequestChoiceHub() -> ListChoiceHubData {
 
 @addMethod(PlayerPuppet)
 public func NCTCRefreshStopRequestChoice() -> Void {
-  let blackboard = GameInstance.GetBlackboardSystem(this.GetGame()).Get(GetAllBlackboardDefs().UIInteractions);
-  let defs = GetAllBlackboardDefs().UIInteractions;
+  let defs: ref<UIInteractionsDef> = GetAllBlackboardDefs().UIInteractions;
+  let blackboard: ref<IBlackboard> = GameInstance.GetBlackboardSystem(this.GetGame()).Get(defs);
   let activeHubId: Int32;
   let shouldShow: Bool;
   let wasVisible: Bool;
@@ -74,16 +75,12 @@ public func NCTCRefreshStopRequestChoice() -> Void {
   if shouldShow {
     this.nctcStopRequestChoiceVisible = true;
 
-    // Never steal the Interaction UI while another real interaction owns it
-    // (for example the existing rear-seat choice hub). As soon as that hub
-    // releases the cursor, this prompt takes its place on the next poll.
-    if Equals(activeHubId, 0) || Equals(activeHubId, -1) {
+    // Re-send the existing dialog data only when our prompt first becomes
+    // eligible or when no interaction currently owns the list. The REDscript
+    // OnDialogsData wrapper below injects the NCTC choice without replacing
+    // any vanilla or modded interaction hub.
+    if !wasVisible || Equals(activeHubId, 0) || Equals(activeHubId, -1) {
       blackboard.SetVariant(defs.DialogChoiceHubs, blackboard.GetVariant(defs.DialogChoiceHubs), true);
-      blackboard.SetInt(defs.ActiveChoiceHubID, 77903, true);
-    } else {
-      if Equals(activeHubId, 77903) && !wasVisible {
-        blackboard.SetVariant(defs.DialogChoiceHubs, blackboard.GetVariant(defs.DialogChoiceHubs), true);
-      };
     };
     return;
   };
@@ -92,34 +89,54 @@ public func NCTCRefreshStopRequestChoice() -> Void {
   if Equals(activeHubId, 77903) {
     blackboard.SetInt(defs.ActiveChoiceHubID, 0, true);
   };
-  if wasVisible || Equals(activeHubId, 77903) {
+  if wasVisible {
     blackboard.SetVariant(defs.DialogChoiceHubs, blackboard.GetVariant(defs.DialogChoiceHubs), true);
   };
 }
 
-// Inject the NCTC prompt into the same native Interaction UI list used by
-// ordinary world interactions. The dedicated input is the same configurable
-// NCTC_RequestNextStop action exposed in Mod Settings.
+// Inject the NCTC prompt into the same native dialog-choice UI used by the
+// existing passenger-seat choices. The dedicated input remains the same
+// configurable NCTC_RequestNextStop action exposed in Mod Settings.
 @wrapMethod(InteractionUIBase)
 protected cb func OnDialogsData(value: Variant) -> Bool {
   let player: ref<PlayerPuppet> = this.GetPlayerControlledObject() as PlayerPuppet;
+  let defs: ref<UIInteractionsDef> = GetAllBlackboardDefs().UIInteractions;
+  let blackboard: ref<IBlackboard>;
   let data: DialogChoiceHubs;
-  let i: Int32;
+  let activeHubId: Int32;
+  let activeHubStillExists: Bool = false;
+  let hasNCTCHub: Bool = false;
+  let i: Int32 = 0;
 
   if !IsDefined(player) || !player.NCTCShouldShowStopRequestChoice() {
     return wrappedMethod(value);
   };
 
   data = FromVariant<DialogChoiceHubs>(value);
-  i = 0;
+  blackboard = GameInstance.GetBlackboardSystem(player.GetGame()).Get(defs);
+  if IsDefined(blackboard) {
+    activeHubId = blackboard.GetInt(defs.ActiveChoiceHubID);
+  };
+
   while i < ArraySize(data.choiceHubs) {
-    if Equals(data.choiceHubs[i].id, 77903) {
-      return wrappedMethod(value);
-    };
+    if Equals(data.choiceHubs[i].id, 77903) { hasNCTCHub = true; };
+    if Equals(data.choiceHubs[i].id, activeHubId) { activeHubStillExists = true; };
     i += 1;
   };
 
-  ArrayPush(data.choiceHubs, player.NCTCBuildStopRequestChoiceHub());
+  if !hasNCTCHub {
+    ArrayPush(data.choiceHubs, player.NCTCBuildStopRequestChoiceHub());
+  };
+
+  // Respect a real active interaction (notably the rear-seat hub). If its
+  // injected hub disappears, its ActiveChoiceHubID can remain stale; in that
+  // case hand the list to the NCTC stop-request hub instead of leaving the UI
+  // focused on a non-existent choice.
+  if IsDefined(blackboard)
+    && (Equals(activeHubId, 0) || Equals(activeHubId, -1) || (!activeHubStillExists && !Equals(activeHubId, 77903))) {
+    blackboard.SetInt(defs.ActiveChoiceHubID, 77903, true);
+  };
+
   return wrappedMethod(ToVariant(data));
 }
 
