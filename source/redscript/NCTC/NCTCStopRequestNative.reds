@@ -109,6 +109,7 @@ protected cb func OnDialogsData(value: Variant) -> Bool {
   let standaloneFound: Bool = false;
   let requestChoiceFound: Bool;
   let shouldShowRequest: Bool;
+  let activeHubId: Int32;
 
   if !IsDefined(player) || !player.NCTCIsAboardServiceBus() {
     return wrappedMethod(value);
@@ -150,7 +151,7 @@ protected cb func OnDialogsData(value: Variant) -> Bool {
     ArrayPush(data.choiceHubs, player.NCTCBuildStandaloneStopRequestHub());
     blackboard = GameInstance.GetBlackboardSystem(player.GetGame()).Get(defs);
     if IsDefined(blackboard) {
-      let activeHubId: Int32 = blackboard.GetInt(defs.ActiveChoiceHubID);
+      activeHubId = blackboard.GetInt(defs.ActiveChoiceHubID);
       if Equals(activeHubId, 0) || Equals(activeHubId, -1) {
         blackboard.SetInt(defs.ActiveChoiceHubID, 77903, true);
       };
