@@ -1,0 +1,58 @@
+name: Materialize r389f passenger interior UI
+
+on:
+  push:
+    branches:
+      - fix/native-stop-request-feature-v3
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/native-stop-request-feature-v3
+          fetch-depth: 0
+
+      - name: Patch passenger interior choice hub
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('source/cet/nctc_passenger/init.lua')
+          s = p.read_text(encoding='utf-8')
+          pairs = [
+            ('hub.title, hub.activityState, hub.hubPriority, hub.id = "Night City Bus Network", gameinteractionsvisEVisualizerActivityState.Active, 1, 77901',
+             'hub.title, hub.activityState, hub.hubPriority, hub.id = "NIGHT CITY TRANSIT CORPORATION", gameinteractionsvisEVisualizerActivityState.Active, 1, 77901'),
+            ('    setFact("nctc_stop_request_choice_selected", 0)\n    setFact("nctc_seat_choice_visible", 0)\n',
+             '    setFact("nctc_stop_request_choice_selected", 0)\n'),
+            ('''local function showChoice()\n    if not NCBN.interactionUI or #NCBN.offeredSeats == 0 then\n        if not NCBN.uiMissingLogged then print("[NCBN] Seat prompt waiting for InteractionUIBase."); NCBN.uiMissingLogged = true end\n        NCBN.choiceVisible = false\n        return\n    end\n    NCBN.uiMissingLogged = false\n    NCBN.choiceHub = makeChoiceHub()\n    setFact("nctc_seat_choice_visible", 1)\n''',
+             '''local function showChoice()\n    local requestChoiceAvailable = isStopRequestChoiceAvailable()\n    if not NCBN.interactionUI or (#NCBN.offeredSeats == 0 and not requestChoiceAvailable) then\n        if not NCBN.uiMissingLogged and not NCBN.interactionUI then print("[NCBN] Interior choice prompt waiting for InteractionUIBase."); NCBN.uiMissingLogged = true end\n        NCBN.choiceVisible = false\n        setFact("nctc_stop_request_choice_selected", 0)\n        return\n    end\n    NCBN.uiMissingLogged = false\n    NCBN.choiceVisible = true\n    NCBN.choiceHub = makeChoiceHub()\n'''),
+            ('NCBN.selectedSeat = (NCBN.selectedSeat + (name == "ChoiceScrollUp" and 1 or -1)) % choiceCount',
+             'NCBN.selectedSeat = (NCBN.selectedSeat + (name == "ChoiceScrollDown" and 1 or -1)) % choiceCount'),
+            ('''        hideChoice()\n        return\n    end\n    -- Mounting is asynchronous.''',
+             '''        local seatsCleared = #NCBN.offeredSeats > 0\n        if seatsCleared then\n            NCBN.offeredSeats = {}\n            NCBN.selectedSeat = 0\n        end\n        local requestChoiceAvailable = isStopRequestChoiceAvailable()\n        local requestChanged = requestChoiceAvailable ~= NCBN.stopRequestChoiceAvailable\n        NCBN.stopRequestChoiceAvailable = requestChoiceAvailable\n        if aboard and requestChoiceAvailable then\n            if seatsCleared or requestChanged or not NCBN.choiceVisible then\n                showChoice()\n                print("[NCBN UI] seated request-only choice visible")\n            else\n                publishStopRequestChoiceSelection()\n            end\n        else\n            hideChoice()\n        end\n        return\n    end\n    -- Mounting is asynchronous.'''),
+            ('''    local seats = offeredSeats(bus, player)\n    local requestChoiceAvailable = isStopRequestChoiceAvailable()\n    if requestChoiceAvailable ~= NCBN.stopRequestChoiceAvailable then\n        NCBN.stopRequestChoiceAvailable = requestChoiceAvailable\n        local choiceCount = #seats + (requestChoiceAvailable and 1 or 0)\n        if choiceCount > 0 and NCBN.selectedSeat >= choiceCount then\n            NCBN.selectedSeat = choiceCount - 1\n        end\n        if NCBN.choiceVisible then showChoice() end\n    end\n    if not sameSeats(NCBN.offeredSeats, seats) then\n        hideChoice()\n        NCBN.offeredSeats, NCBN.selectedSeat = seats, 0\n        local names = {}\n        for _, seat in ipairs(seats) do table.insert(names, seat.id) end\n        print("[NCBN] Seat choices: " .. (#names > 0 and table.concat(names, ", ") or "none"))\n    end\n    if #seats > 0 and not NCBN.choiceVisible then\n        NCBN.choiceVisible = true\n        showChoice()\n    elseif #seats == 0 then hideChoice() end\nend)''',
+             '''    local seats = offeredSeats(bus, player)\n    local seatsChanged = not sameSeats(NCBN.offeredSeats, seats)\n    local requestChoiceAvailable = isStopRequestChoiceAvailable()\n    local requestChanged = requestChoiceAvailable ~= NCBN.stopRequestChoiceAvailable\n\n    if seatsChanged then\n        NCBN.offeredSeats = seats\n        NCBN.selectedSeat = 0\n        local names = {}\n        for _, seat in ipairs(seats) do table.insert(names, seat.id) end\n        print("[NCBN UI] seat choices=" .. (#names > 0 and table.concat(names, ",") or "none"))\n    end\n\n    NCBN.stopRequestChoiceAvailable = requestChoiceAvailable\n    local choiceCount = #NCBN.offeredSeats + (requestChoiceAvailable and 1 or 0)\n    if choiceCount <= 0 then\n        hideChoice()\n        return\n    end\n\n    if NCBN.selectedSeat >= choiceCount then NCBN.selectedSeat = choiceCount - 1 end\n    if NCBN.selectedSeat < 0 then NCBN.selectedSeat = 0 end\n\n    if seatsChanged or requestChanged or not NCBN.choiceVisible then\n        showChoice()\n        print("[NCBN UI] choices=" .. tostring(choiceCount)\n            .. " seats=" .. tostring(#NCBN.offeredSeats)\n            .. " request=" .. tostring(requestChoiceAvailable)\n            .. " selected=" .. tostring(NCBN.selectedSeat))\n    else\n        publishStopRequestChoiceSelection()\n    end\nend)''')
+          ]
+          for old, new in pairs:
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one match, got {count}: {old[:100]!r}')
+              s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+
+      - name: Verify and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'NIGHT CITY TRANSIT CORPORATION' source/cet/nctc_passenger/init.lua
+          grep -q 'seated request-only choice visible' source/cet/nctc_passenger/init.lua
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add source/cet/nctc_passenger/init.lua
+          git commit -m 'fix: keep one stable interior choice hub'
+          git push origin HEAD:fix/native-stop-request-feature-v3
