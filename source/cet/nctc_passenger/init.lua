@@ -9,7 +9,7 @@ local NCBN = { tag = "NightCityBusNetwork.PrototypeBus", interactionUI = nil, ch
     uiMissingLogged = false, wasInside = false, lastMountedSlot = nil,
     passengerMountRequested = false, mountRequestDeadline = 0, wasMounted = false,
     hubChoiceVisible = false, hubChoiceHub = nil, hubChoices = {}, selectedHubLine = 0,
-    hubChoiceRevision = -1, lastInsideLocal = nil }
+    hubChoiceRevision = -1, lastInsideLocal = nil, stopRequestChoiceAvailable = false }
 
 -- Local-space zone in the aisle beside the two validated rear passenger seats.
 local seatAreas = {
@@ -39,6 +39,15 @@ local function getFact(name)
     ok, value = pcall(function() return quests:GetFactStr(name) end)
     value = tonumber(value)
     return ok and value ~= nil and math.floor(value) or 0
+end
+
+local function isStopRequestChoiceAvailable()
+    return getFact("nctc_player_in_service_bus") == 1 and getFact("nctc_display_stop_requested") ~= 1
+end
+
+local function publishStopRequestChoiceSelection()
+    local selected = NCBN.choiceVisible and isStopRequestChoiceAvailable() and NCBN.selectedSeat == #NCBN.offeredSeats
+    setFact("nctc_stop_request_choice_selected", selected and 1 or 0)
 end
 
 local function signalTransitSystem(value)
@@ -157,7 +166,7 @@ end
 
 local function makeChoiceHub()
     local hub = gameinteractionsvisListChoiceHubData.new()
-    hub.title, hub.activityState, hub.hubPriority, hub.id = "Night City Bus Network", gameinteractionsvisEVisualizerActivityState.Active, 1, 77901
+    hub.title, hub.activityState, hub.hubPriority, hub.id = "NIGHT CITY TRANSIT CORPORATION", gameinteractionsvisEVisualizerActivityState.Active, 1, 77901
     local choices = {}
     for _, seat in ipairs(NCBN.offeredSeats) do
         local caption, choiceType = gameinteractionsChoiceCaption.new(), gameinteractionsChoiceTypeWrapper.new()
@@ -187,6 +196,7 @@ local function makeHubChoiceHub()
 end
 
 local function hideChoice()
+    setFact("nctc_stop_request_choice_selected", 0)
     if not NCBN.choiceVisible then return end
     NCBN.choiceVisible, NCBN.choiceHub = false, nil
     if NCBN.interactionUI then
@@ -213,17 +223,21 @@ local function hideHubChoice()
 end
 
 local function showChoice()
-    if not NCBN.interactionUI or #NCBN.offeredSeats == 0 then
-        if not NCBN.uiMissingLogged then print("[NCBN] Seat prompt waiting for InteractionUIBase."); NCBN.uiMissingLogged = true end
+    local requestChoiceAvailable = isStopRequestChoiceAvailable()
+    if not NCBN.interactionUI or (#NCBN.offeredSeats == 0 and not requestChoiceAvailable) then
+        if not NCBN.uiMissingLogged and not NCBN.interactionUI then print("[NCBN] Interior choice prompt waiting for InteractionUIBase."); NCBN.uiMissingLogged = true end
         NCBN.choiceVisible = false
+        setFact("nctc_stop_request_choice_selected", 0)
         return
     end
     NCBN.uiMissingLogged = false
+    NCBN.choiceVisible = true
     NCBN.choiceHub = makeChoiceHub()
     local defs = GetAllBlackboardDefs().UIInteractions
     local blackboard = Game.GetBlackboardSystem():Get(defs)
     blackboard:SetInt(defs.ActiveChoiceHubID, NCBN.choiceHub.id)
     local data = blackboard:GetVariant(defs.DialogChoiceHubs)
+    publishStopRequestChoiceSelection()
     NCBN.interactionUI:OnDialogsSelectIndex(NCBN.selectedSeat)
     NCBN.interactionUI:OnDialogsData(data)
     NCBN.interactionUI:OnInteractionsChanged()
@@ -372,10 +386,23 @@ registerForEvent("onInit", function()
             NCBN.selectedHubLine = (NCBN.selectedHubLine + (name == "ChoiceScrollUp" and 1 or -1)) % #NCBN.hubChoices
             showHubChoice()
         elseif NCBN.choiceVisible and name == "ChoiceApply" then
+            -- The REDscript layer appends the stop-request choice after the
+            -- seat choices. Leave ChoiceApply unconsumed on that final index
+            -- so native NCTC input handles the request; seat indices retain
+            -- the exact validated mounting path.
+            if isStopRequestChoiceAvailable() and NCBN.selectedSeat == #NCBN.offeredSeats then
+                setFact("nctc_stop_request_choice_selected", 1)
+                return
+            end
             NCBN.inputLocked = true; consumer:Consume(); mountPassenger(NCBN.offeredSeats[NCBN.selectedSeat + 1])
         elseif NCBN.choiceVisible and (name == "ChoiceScrollUp" or name == "ChoiceScrollDown") then
             NCBN.inputLocked = true; consumer:Consume()
-            NCBN.selectedSeat = (NCBN.selectedSeat + (name == "ChoiceScrollUp" and 1 or -1)) % #NCBN.offeredSeats
+            local choiceCount = #NCBN.offeredSeats + (isStopRequestChoiceAvailable() and 1 or 0)
+            if choiceCount > 0 then
+                NCBN.selectedSeat = (NCBN.selectedSeat + (name == "ChoiceScrollDown" and 1 or -1)) % choiceCount
+            end
+            publishStopRequestChoiceSelection()
+            showChoice()
         elseif name == "ChoiceApply" then
             -- The cabin is entered simply by walking through its open door.
             -- Consume the normal vehicle-enter choice when the service bus is
@@ -433,7 +460,24 @@ registerForEvent("onUpdate", function()
                 .. " speed=" .. string.format("%.2f", bus:GetCurrentSpeed())
                 .. " departureRequest=" .. tostring(getFact("nctc_passenger_departure_requested")))
         end
-        hideChoice()
+        local seatsCleared = #NCBN.offeredSeats > 0
+        if seatsCleared then
+            NCBN.offeredSeats = {}
+            NCBN.selectedSeat = 0
+        end
+        local requestChoiceAvailable = isStopRequestChoiceAvailable()
+        local requestChanged = requestChoiceAvailable ~= NCBN.stopRequestChoiceAvailable
+        NCBN.stopRequestChoiceAvailable = requestChoiceAvailable
+        if aboard and requestChoiceAvailable then
+            if seatsCleared or requestChanged or not NCBN.choiceVisible then
+                showChoice()
+                print("[NCBN UI] seated request-only choice visible")
+            else
+                publishStopRequestChoiceSelection()
+            end
+        else
+            hideChoice()
+        end
         return
     end
     -- Mounting is asynchronous. Do not clear the provenance on the frame
@@ -473,15 +517,35 @@ registerForEvent("onUpdate", function()
     end
     if inside then NCBN.lastInsideLocal = localNow end
     local seats = offeredSeats(bus, player)
-    if not sameSeats(NCBN.offeredSeats, seats) then
-        hideChoice()
-        NCBN.offeredSeats, NCBN.selectedSeat = seats, 0
+    local seatsChanged = not sameSeats(NCBN.offeredSeats, seats)
+    local requestChoiceAvailable = isStopRequestChoiceAvailable()
+    local requestChanged = requestChoiceAvailable ~= NCBN.stopRequestChoiceAvailable
+
+    if seatsChanged then
+        NCBN.offeredSeats = seats
+        NCBN.selectedSeat = 0
         local names = {}
         for _, seat in ipairs(seats) do table.insert(names, seat.id) end
-        print("[NCBN] Seat choices: " .. (#names > 0 and table.concat(names, ", ") or "none"))
+        print("[NCBN UI] seat choices=" .. (#names > 0 and table.concat(names, ",") or "none"))
     end
-    if #seats > 0 and not NCBN.choiceVisible then
-        NCBN.choiceVisible = true
+
+    NCBN.stopRequestChoiceAvailable = requestChoiceAvailable
+    local choiceCount = #NCBN.offeredSeats + (requestChoiceAvailable and 1 or 0)
+    if choiceCount <= 0 then
+        hideChoice()
+        return
+    end
+
+    if NCBN.selectedSeat >= choiceCount then NCBN.selectedSeat = choiceCount - 1 end
+    if NCBN.selectedSeat < 0 then NCBN.selectedSeat = 0 end
+
+    if seatsChanged or requestChanged or not NCBN.choiceVisible then
         showChoice()
-    elseif #seats == 0 then hideChoice() end
+        print("[NCBN UI] choices=" .. tostring(choiceCount)
+            .. " seats=" .. tostring(#NCBN.offeredSeats)
+            .. " request=" .. tostring(requestChoiceAvailable)
+            .. " selected=" .. tostring(NCBN.selectedSeat))
+    else
+        publishStopRequestChoiceSelection()
+    end
 end)
