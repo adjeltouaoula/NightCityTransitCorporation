@@ -197,6 +197,7 @@ end
 
 local function hideChoice()
     setFact("nctc_stop_request_choice_selected", 0)
+    setFact("nctc_seat_choice_visible", 0)
     if not NCBN.choiceVisible then return end
     NCBN.choiceVisible, NCBN.choiceHub = false, nil
     if NCBN.interactionUI then
@@ -230,6 +231,7 @@ local function showChoice()
     end
     NCBN.uiMissingLogged = false
     NCBN.choiceHub = makeChoiceHub()
+    setFact("nctc_seat_choice_visible", 1)
     local defs = GetAllBlackboardDefs().UIInteractions
     local blackboard = Game.GetBlackboardSystem():Get(defs)
     blackboard:SetInt(defs.ActiveChoiceHubID, NCBN.choiceHub.id)
