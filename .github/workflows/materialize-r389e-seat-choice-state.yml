@@ -1,0 +1,58 @@
+name: r389e publish seat choice visibility
+
+on:
+  push:
+    branches:
+      - fix/native-stop-request-feature-v3
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Publish seat choice UI state for native stop request hub
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('source/cet/nctc_passenger/init.lua')
+          s = p.read_text(encoding='utf-8')
+
+          old = '''local function hideChoice()\n    setFact("nctc_stop_request_choice_selected", 0)\n    if not NCBN.choiceVisible then return end'''
+          new = '''local function hideChoice()\n    setFact("nctc_stop_request_choice_selected", 0)\n    setFact("nctc_seat_choice_visible", 0)\n    if not NCBN.choiceVisible then return end'''
+          if old in s:
+              s = s.replace(old, new, 1)
+          else:
+              assert new in s
+
+          old = '''    NCBN.uiMissingLogged = false\n    NCBN.choiceHub = makeChoiceHub()\n    local defs = GetAllBlackboardDefs().UIInteractions'''
+          new = '''    NCBN.uiMissingLogged = false\n    NCBN.choiceHub = makeChoiceHub()\n    setFact("nctc_seat_choice_visible", 1)\n    local defs = GetAllBlackboardDefs().UIInteractions'''
+          if old in s:
+              s = s.replace(old, new, 1)
+          else:
+              assert new in s
+
+          assert 'setFact("nctc_seat_choice_visible", 0)' in s
+          assert 'setFact("nctc_seat_choice_visible", 1)' in s
+          assert s.count('nctc_seat_choice_visible') == 2
+          p.write_text(s, encoding='utf-8')
+          PY
+
+          if git diff --quiet -- source/cet/nctc_passenger/init.lua; then
+            echo 'Seat choice visibility already materialized.'
+            exit 0
+          fi
+
+          test "$(git diff --name-only)" = 'source/cet/nctc_passenger/init.lua'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add source/cet/nctc_passenger/init.lua
+          git commit -m 'fix: publish seat choice visibility to native UI'
+          git push origin HEAD:fix/native-stop-request-feature-v3
