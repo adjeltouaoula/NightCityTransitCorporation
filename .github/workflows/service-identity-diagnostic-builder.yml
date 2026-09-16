@@ -1,0 +1,46 @@
+name: service identity diagnostic builder
+
+on:
+  push:
+    branches:
+      - diagnostic/service-vehicle-identity-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate diagnostic scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f source/cet/nctc_service_identity_diag/init.lua
+          grep -q '\[NCTC SERVICE ID DIAG\]' source/cet/nctc_service_identity_diag/init.lua
+          grep -q 'Vehicle.v_standard2_villefort_cortes_delamain' source/cet/nctc_service_identity_diag/init.lua
+          grep -q 'Vehicle.nctc_service_mahir_mt28_coach' source/cet/nctc_service_identity_diag/init.lua
+
+      - name: Assemble diagnostic overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/service-identity-diag"
+          PKG="$WORK/package"
+          mkdir -p "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_service_identity_diag"
+          cp source/cet/nctc_service_identity_diag/init.lua "$PKG/bin/x64/plugins/cyber_engine_tweaks/mods/nctc_service_identity_diag/init.lua"
+          (cd "$PKG" && zip -qr "$WORK/NCTC-service-identity-diagnostic-v1.zip" .)
+          unzip -t "$WORK/NCTC-service-identity-diagnostic-v1.zip"
+          sha256sum "$WORK/NCTC-service-identity-diagnostic-v1.zip" | tee "$WORK/PACKAGE_SHA256.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nctc-service-identity-diagnostic-v1
+          path: |
+            ${{ runner.temp }}/service-identity-diag/NCTC-service-identity-diagnostic-v1.zip
+            ${{ runner.temp }}/service-identity-diag/PACKAGE_SHA256.txt
+          compression-level: 0
